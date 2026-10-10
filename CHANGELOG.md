@@ -9,6 +9,53 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.2.0 (build 3) - 2026-10-10
+
+Published as a normal release at the owner's request. It passes the automated
+checks and was reviewed as rendered screens; it has not yet been run on a
+phone.
+
+### Changed
+
+- Navigation: the bottom bar is now a floating glass bar with Home, Library
+  and Search. Its selection pill can be dragged between tabs, and while a
+  page is scrolled down it folds into two round buttons either side of the
+  mini-player. Settings opens as a page from the home screen instead of
+  being a tab. A navigation rail replaces the bar only on desktop-width
+  windows.
+- Home: under the hero, a listening feed with the estimated listening time,
+  a statistics card whose numbers count up, and a list that switches between
+  Recent (grouped by day, with repeat counts), Most Played, Last 7 Days,
+  Last 30 Days, Top Artists and Top Albums.
+- Lyrics: a full view of its own, always dark. The line being sung is large,
+  bright and sharp while the others recede; the view has a wave-shaped seek
+  bar, previous / play / next, a text-size slider and a fullscreen mode.
+- Settings: redesigned as grouped sections (appearance, lyrics, audio,
+  notification, library, privacy, about).
+
+### Added
+
+- Play history: every play is logged, which is what the home lists are built
+  from. Existing play counts are kept; the last play of each track is carried
+  into the new log.
+- Lyrics sync offset, saved per track, for files whose timestamps run early
+  or late.
+- Settings: lyrics text size, a switch for folding the navigation bar,
+  "Check for updates", "Clear listening history" (asks first), the playback
+  notification's permission, the version with its build number, and the
+  open-source licences.
+- The glass effect of the navigation bar adapts to the device: full on phones
+  with 6 GB of memory or more, lighter on others.
+
+### Notes
+
+- Database schema 3 adds the play log. The upgrade is automatic and keeps
+  everything.
+- The navigation bar is open-source code used under the MIT licence; see
+  THIRD_PARTY_NOTICES.md.
+- Not included: lyrics downloaded from the internet, word-by-word lyric
+  timing, an equalizer screen and a sleep timer.
+
 ## 1.1.0 (build 2) - 2026-10-10 - pre-release
 
 ### Added
