@@ -3,11 +3,12 @@
 // Changes for NocTune: imports, app-specific hooks, and the height of the
 // mini-player row (58 instead of 48, so the cover has room around it), and
 // the folded bar's right-hand button is named after the last destination
-// rather than always "Search". Folding no longer wipes the tabs away from the
-// top: they fade out where they are while the two icons travel to the sides,
-// and the fold takes a little longer.
+// rather than always "Search". The fold is NocTune's own: the bar parts in
+// the middle and each half draws back into the round button at its side,
+// and unfolding fills it back in from the sides.
 
 import 'dart:math' as math;
+import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -99,14 +100,19 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
     with SingleTickerProviderStateMixin {
   late final _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 460),
+    duration: const Duration(milliseconds: 520),
     value: widget.collapsed ? 1 : 0,
   );
   late final _collapse = CurvedAnimation(
     parent: _controller,
     curve: Curves.easeInOutCubic,
   );
-  late final _tabOpacity = ReverseAnimation(_collapse);
+  // NocTune: labels are gone before the bar has parted far, and return once
+  // it has closed again.
+  late final _tabOpacity = CurvedAnimation(
+    parent: ReverseAnimation(_controller),
+    curve: const Interval(0.6, 1, curve: Curves.easeOut),
+  );
 
   void _updateCollapse() {
     final target = widget.collapsed ? 1.0 : 0.0;
@@ -132,6 +138,7 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
   @override
   void dispose() {
     _collapse.dispose();
+    _tabOpacity.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -159,16 +166,15 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
     // These contents do not depend on animation progress. Retain their widget
     // instances so folding only updates geometry and foreground opacity. A
     // backdrop inside a fading layer loses access to the page behind the bar.
-    Widget sideSurface() => ScaleTransition(
-      scale: _collapse,
-      child: RepaintBoundary(
-        child: MornyeGlass.navigation(
-          blurEnabled: blurEnabled,
-          strongTint: true,
-          tintOpacity: MornyeTheme.navigationOpacity(context),
-          radius: 26,
-          child: const SizedBox.expand(),
-        ),
+    // NocTune: these take over from the two halves of the bar once it has
+    // fully folded, so they are shown at full size and only then.
+    Widget sideSurface() => RepaintBoundary(
+      child: MornyeGlass.navigation(
+        blurEnabled: blurEnabled,
+        strongTint: true,
+        tintOpacity: MornyeTheme.navigationOpacity(context),
+        radius: 26,
+        child: const SizedBox.expand(),
       ),
     );
     final leadingSurface = sideSurface();
@@ -253,10 +259,7 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
                       alignment: Alignment.center,
                       children: [
                         Positioned.fill(
-                          child: Offstage(
-                            offstage: amount == 0,
-                            child: surface,
-                          ),
+                          child: Offstage(offstage: amount < 1, child: surface),
                         ),
                         Material(
                           color: Colors.transparent,
@@ -298,14 +301,45 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
             return Stack(
               clipBehavior: Clip.none,
               children: [
-                // Only the non-overlapping player and tab surfaces share a
-                // backdrop. Moving side capsules stay outside this group: they
-                // cross the tab bar while folding and need separate samples.
+                // The player and tab surfaces share a backdrop. The side
+                // capsules stay outside this group.
                 LiquidGlassBatch(
                   child: BackdropGroup(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
+                      // NocTune: laid out bottom-up, so the mini-player is
+                      // painted over the tabs it comes down onto.
+                      verticalDirection: VerticalDirection.up,
                       children: [
+                        Offstage(
+                          // Retain tab state, but drop its backdrop layers only
+                          // after the last visible frame of the fold.
+                          offstage: amount == 1,
+                          // NocTune: the row gives up its height so the
+                          // mini-player can come down, and the bar parts in
+                          // the middle: each half draws back to its side
+                          // until it is the round button left there.
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            heightFactor: 1 - amount,
+                            child: IgnorePointer(
+                              ignoring: amount > 0.5,
+                              child: ExcludeSemantics(
+                                excluding: amount > 0.5,
+                                child: ClipPath(
+                                  clipBehavior: amount == 0
+                                      ? Clip.none
+                                      : Clip.antiAlias,
+                                  clipper: _FoldClipper(
+                                    progress: (amount / 0.6).clamp(0.0, 1.0),
+                                    inset: glassTabs ? 8 : 0,
+                                  ),
+                                  child: amount == 0 ? fullTabs : foldingTabs,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
                         if (hasPlayer || amount > 0)
                           Align(
                             alignment: Alignment.bottomCenter,
@@ -337,34 +371,6 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
                               ),
                             ),
                           ),
-                        Offstage(
-                          // Retain tab state, but drop its backdrop layers only
-                          // after the last visible frame of the fold.
-                          offstage: amount == 1,
-                          // NocTune: the row gives up its height so the
-                          // mini-player can come down, but the tabs are not
-                          // cut off as it does. They stay where they are and
-                          // fade, gone a little past the half-way point.
-                          child: Align(
-                            alignment: Alignment.bottomCenter,
-                            heightFactor: 1 - amount,
-                            child: IgnorePointer(
-                              ignoring: amount > 0.5,
-                              child: ExcludeSemantics(
-                                excluding: amount > 0.5,
-                                child: amount == 0
-                                    ? fullTabs
-                                    : Opacity(
-                                        opacity: (1 - amount / 0.6).clamp(
-                                          0.0,
-                                          1.0,
-                                        ),
-                                        child: foldingTabs,
-                                      ),
-                              ),
-                            ),
-                          ),
-                        ),
                       ],
                     ),
                   ),
@@ -378,4 +384,55 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
       },
     );
   }
+}
+
+/// NocTune: the shape the tab bar is cut to while it folds. At 0 it is the
+/// whole bar, as two halves meeting squarely in the middle; at 1 each half
+/// has drawn back into the round button that stays at its side.
+class _FoldClipper extends CustomClipper<Path> {
+  const _FoldClipper({required this.progress, required this.inset});
+
+  final double progress;
+
+  /// The gap above and below the bar's capsule inside its row.
+  final double inset;
+
+  @override
+  Path getClip(Size size) {
+    final top = lerpDouble(inset, size.height - 60, progress)!;
+    final bottom = lerpDouble(size.height - inset, size.height - 8, progress)!;
+    final width = lerpDouble(size.width / 2, 52, progress)!;
+    final outer = Radius.circular(lerpDouble(32, 26, progress)!);
+    // Square where the halves still touch, round as soon as they part.
+    final inner = Radius.circular(26 * (progress * 4).clamp(0.0, 1.0));
+    return Path()
+      ..addRRect(
+        RRect.fromLTRBAndCorners(
+          0,
+          top,
+          width,
+          bottom,
+          topLeft: outer,
+          bottomLeft: outer,
+          topRight: inner,
+          bottomRight: inner,
+        ),
+      )
+      ..addRRect(
+        RRect.fromLTRBAndCorners(
+          size.width - width,
+          top,
+          size.width,
+          bottom,
+          topLeft: inner,
+          bottomLeft: inner,
+          topRight: outer,
+          bottomRight: outer,
+        ),
+      );
+  }
+
+  @override
+  bool shouldReclip(_FoldClipper old) =>
+      old.progress != progress || old.inset != inset;
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/theme/flex_type.dart';
 import '../core/theme/noc_palette.dart';
 import '../core/widgets/noc_backdrop.dart';
 import '../features/home/home_screen.dart';
@@ -49,6 +50,7 @@ class AppShell extends ConsumerStatefulWidget {
 class _AppShellState extends ConsumerState<AppShell> {
   int _currentIndex = _homeIndex;
   final _libraryNavigator = GlobalKey<NavigatorState>();
+  final _homeKey = GlobalKey<HomeScreenState>();
   final _mornyeChrome = MornyeChromeController();
   DateTime? _lastBackPress;
 
@@ -97,6 +99,12 @@ class _AppShellState extends ConsumerState<AppShell> {
   /// System back: leave an opened album or playlist, dismiss the keyboard on
   /// Search, return to Home, then ask for a second press before leaving.
   Future<void> _handleBackPress() async {
+    // A search open on Home closes first.
+    if (_currentIndex == _homeIndex &&
+        (_homeKey.currentState?.closeSearch() ?? false)) {
+      _lastBackPress = null;
+      return;
+    }
     if (_currentIndex == _libraryIndex &&
         await (_libraryNavigator.currentState?.maybePop() ??
             Future.value(false))) {
@@ -158,6 +166,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     });
 
     final palette = context.noc;
+    final dark = Theme.of(context).brightness == Brightness.dark;
     // The bar keeps its own theme: it is drawn exactly as in its source app,
     // whatever accent the rest of NocTune is using. NocTune's palette rides
     // along for the cover placeholder in the mini-player.
@@ -168,6 +177,8 @@ class _AppShellState extends ConsumerState<AppShell> {
       ),
     );
     final barTheme = barBase.copyWith(
+      // Set in the app's own typeface, like every other screen.
+      textTheme: barBase.textTheme.apply(fontFamily: FlexType.family),
       extensions: [...barBase.extensions.values, palette],
     );
     final destinations = <NavigationDestination>[
@@ -220,6 +231,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       (
         'home',
         HomeScreen(
+          key: _homeKey,
           onOpenSearch: () => _onNavTap(_searchIndex),
           onOpenLibrary: () => _onNavTap(_libraryIndex),
         ),
@@ -329,7 +341,22 @@ class _AppShellState extends ConsumerState<AppShell> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _handleBackPress();
       },
-      child: scaffold,
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        // Status and navigation bar icons that can be read on the page: dark
+        // ones in the light theme. The dark hero and the player ask for
+        // light ones where they are on screen.
+        value: SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: dark ? Brightness.light : Brightness.dark,
+          statusBarBrightness: dark ? Brightness.dark : Brightness.light,
+          systemNavigationBarColor: Colors.transparent,
+          systemNavigationBarIconBrightness: dark
+              ? Brightness.light
+              : Brightness.dark,
+          systemNavigationBarContrastEnforced: false,
+        ),
+        child: scaffold,
+      ),
     );
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
@@ -24,7 +25,7 @@ class HomeHero extends StatelessWidget {
     required this.track,
     required this.eyebrow,
     required this.isCurrent,
-    required this.onOpenSearch,
+    required this.search,
     required this.onPlay,
   });
 
@@ -33,7 +34,9 @@ class HomeHero extends StatelessWidget {
 
   /// Whether [track] is the one loaded in the player.
   final bool isCurrent;
-  final VoidCallback onOpenSearch;
+
+  /// The search field shown at the top; typing in it searches from here.
+  final Widget search;
   final VoidCallback onPlay;
 
   static const _ink = Color(0xFF07080C);
@@ -64,189 +67,177 @@ class HomeHero extends StatelessWidget {
       );
     }
 
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
-      child: ColoredBox(
-        color: _ink,
-        child: Stack(
-          fit: StackFit.passthrough,
-          children: [
-            if (art != null && wide)
-              Positioned(
-                top: 0,
-                bottom: 0,
-                right: 0,
-                width: size.width * 0.62,
-                // The artwork dissolves into the dark on its left edge.
-                child: ShaderMask(
-                  blendMode: BlendMode.dstIn,
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Colors.transparent, Colors.white],
-                    stops: [0, 0.5],
-                  ).createShader(bounds),
-                  child: art,
-                ),
-              )
-            else if (art != null)
-              Positioned.fill(child: art),
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0x99000000),
-                      Color(0x26000000),
-                      Color(0xB807080C),
-                      Color(0xF207080C),
-                    ],
-                    stops: [0, 0.3, 0.64, 1],
+    // The hero is dark in both themes, so the glass on it is the dark
+    // theme's glass, in the accent of the moment.
+    final theme = Theme.of(context);
+    final palette = context.noc;
+    final heroTheme = theme.brightness == Brightness.dark
+        ? theme
+        : theme.copyWith(
+            extensions: [
+              for (final extension in theme.extensions.values)
+                if (extension is! NocPalette) extension,
+              NocPalette.dark(NocAccent.red)
+                  .copyWith(accent: palette.accent, onAccent: palette.onAccent),
+            ],
+          );
+
+    // For the same reason the status bar icons over it are light, for as
+    // long as it is under them.
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+      ),
+      child: Theme(
+        data: heroTheme,
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(
+            bottom: Radius.circular(28),
+          ),
+          child: ColoredBox(
+            color: _ink,
+            child: Stack(
+              fit: StackFit.passthrough,
+              children: [
+                if (art != null && wide)
+                  Positioned(
+                    top: 0,
+                    bottom: 0,
+                    right: 0,
+                    width: size.width * 0.62,
+                    // The artwork dissolves into the dark on its left edge.
+                    child: ShaderMask(
+                      blendMode: BlendMode.dstIn,
+                      shaderCallback: (bounds) => const LinearGradient(
+                        colors: [Colors.transparent, Colors.white],
+                        stops: [0, 0.5],
+                      ).createShader(bounds),
+                      child: art,
+                    ),
+                  )
+                else if (art != null)
+                  Positioned.fill(child: art),
+                const Positioned.fill(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0x99000000),
+                          Color(0x26000000),
+                          Color(0xB807080C),
+                          Color(0xF207080C),
+                        ],
+                        stops: [0, 0.3, 0.64, 1],
+                      ),
+                    ),
                   ),
                 ),
-              ),
-            ),
-            // A minimum rather than a fixed height: with large accessibility
-            // text the hero grows instead of clipping the title.
-            ConstrainedBox(
-              constraints: BoxConstraints(minHeight: minHeight),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 26),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
+                // A minimum rather than a fixed height: with large accessibility
+                // text the hero grows instead of clipping the title.
+                ConstrainedBox(
+                  constraints: BoxConstraints(minHeight: minHeight),
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 24),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Expanded(
-                            flex: 3,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: _SearchPill(onTap: onOpenSearch),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          // Flush against the right margin. It shrinks rather
-                          // than crowding out the search field when the text
-                          // size is very large.
-                          Expanded(
-                            flex: 2,
-                            child: Align(
-                              alignment: Alignment.centerRight,
-                              child: FittedBox(
-                                fit: BoxFit.scaleDown,
-                                alignment: Alignment.centerRight,
-                                child: Text(
-                                  'NOCTUNE',
-                                  style: text.labelLarge?.copyWith(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                    letterSpacing: 3,
+                          Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxWidth: 320,
+                                    ),
+                                    child: search,
                                   ),
                                 ),
                               ),
+                              const SizedBox(width: 16),
+                              // Flush against the right margin. It shrinks rather
+                              // than crowding out the search field when the text
+                              // size is very large.
+                              Expanded(
+                                flex: 2,
+                                child: Align(
+                                  alignment: Alignment.centerRight,
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    alignment: Alignment.centerRight,
+                                    child: Text(
+                                      'NOCTUNE',
+                                      style: text.labelLarge?.copyWith(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 3,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 560),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 40),
+                                Text(
+                                  eyebrow,
+                                  style: text.labelSmall?.copyWith(
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  track.title.toUpperCase(),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: text.displaySmall?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w900,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  track.displayArtist,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: text.titleMedium?.copyWith(
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '${track.displayAlbum}\n${qualityLabel(track)}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: text.bodyMedium?.copyWith(
+                                    color: Colors.white60,
+                                  ),
+                                ),
+                                const SizedBox(height: 18),
+                                if (isCurrent)
+                                  const _NowPlayingPill()
+                                else
+                                  _PlayPill(
+                                    semanticLabel: 'Play ${track.title}',
+                                    onTap: onPlay,
+                                  ),
+                              ],
                             ),
                           ),
                         ],
                       ),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 40),
-                            Text(
-                              eyebrow,
-                              style: text.labelSmall?.copyWith(
-                                color: Colors.white70,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              track.title.toUpperCase(),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.displaySmall?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              track.displayArtist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.titleMedium?.copyWith(
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${track.displayAlbum}\n${qualityLabel(track)}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.bodyMedium?.copyWith(
-                                color: Colors.white60,
-                              ),
-                            ),
-                            const SizedBox(height: 18),
-                            if (isCurrent)
-                              const _NowPlayingPill()
-                            else
-                              _PlayPill(
-                                semanticLabel: 'Play ${track.title}',
-                                onTap: onPlay,
-                              ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The frosted search field at the top of the hero. It is a shortcut: tapping
-/// it opens the Search destination.
-class _SearchPill extends StatelessWidget {
-  const _SearchPill({required this.onTap});
-
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Pressable(
-      semanticLabel: 'Search your library',
-      onTap: onTap,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 320),
-        child: Frosted(
-          blurBackdrop: true,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.search_rounded,
-                  size: 20,
-                  color: Colors.white70,
-                ),
-                const SizedBox(width: 10),
-                Flexible(
-                  child: Text(
-                    'Search tracks, artists, albums…',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyMedium
-                        ?.copyWith(color: Colors.white70),
+                    ),
                   ),
                 ),
               ],
@@ -275,7 +266,7 @@ class _PlayPill extends StatelessWidget {
         tint: palette.accent,
         blurBackdrop: true,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
+          padding: const EdgeInsets.fromLTRB(16, 9, 14, 9),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -320,7 +311,7 @@ class _NowPlayingPill extends ConsumerWidget {
       child: Frosted(
         blurBackdrop: true,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 20, 12),
+          padding: const EdgeInsets.fromLTRB(14, 9, 16, 9),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [

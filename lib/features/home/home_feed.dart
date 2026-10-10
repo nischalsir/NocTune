@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/theme/flex_type.dart';
+import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/wave_bars.dart';
 import '../../data/models/playlist.dart';
@@ -46,20 +47,20 @@ class HomeHeaderRow extends StatelessWidget {
               label: 'Shuffle all tracks',
               excludeSemantics: true,
               child: Material(
-                color: scheme.surfaceContainerHigh,
-                borderRadius: _pillRadius,
+                color: context.feedPanel,
+                shape: StadiumBorder(side: context.feedRim),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: onShuffleAll,
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                      horizontal: 14,
-                      vertical: 6,
+                      horizontal: 12,
+                      vertical: 5,
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.shuffle, size: 15, color: scheme.onSurface),
+                        Icon(Icons.shuffle, size: 14, color: scheme.onSurface),
                         const SizedBox(width: 6),
                         Flexible(
                           child: Text(
@@ -67,6 +68,7 @@ class HomeHeaderRow extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: FlexType.labelLarge.copyWith(
+                              fontSize: 13,
                               color: scheme.onSurface,
                             ),
                           ),
@@ -124,16 +126,16 @@ class ListenTimerPill extends ConsumerWidget {
       child: Tooltip(
         message: 'Estimated listening time',
         child: Material(
-          color: scheme.surfaceContainerHigh,
-          borderRadius: _pillRadius,
+          color: context.feedPanel,
+          shape: StadiumBorder(side: context.feedRim),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   Icons.headset,
-                  size: 18,
+                  size: 16,
                   color: isPlaying ? scheme.primary : scheme.onSurfaceVariant,
                 ),
                 const SizedBox(width: 6),
@@ -143,6 +145,7 @@ class ListenTimerPill extends ConsumerWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: FlexType.labelLarge.copyWith(
+                      fontSize: 13,
                       color: color,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
@@ -209,9 +212,12 @@ class _HomeStatsCardState extends State<HomeStatsCard>
     // The panels inside sit 12 in from the card's edge, so their radius is
     // the card's less 12 and the corners stay concentric.
     final card = Material(
-      color: scheme.surfaceContainerHigh,
+      color: context.feedPanel,
       surfaceTintColor: Colors.transparent,
-      borderRadius: BorderRadius.circular(28),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(28),
+        side: context.feedRim,
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -258,10 +264,12 @@ class _HomeStatsCardState extends State<HomeStatsCard>
                     Align(
                       alignment: Alignment.centerRight,
                       child: SizedBox.square(
-                        dimension: 46,
+                        dimension: 40,
                         child: IconButton(
                           tooltip: 'Open library',
                           onPressed: widget.onOpenLibrary,
+                          padding: EdgeInsets.zero,
+                          iconSize: 22,
                           style: IconButton.styleFrom(
                             backgroundColor: scheme.primary,
                             foregroundColor: scheme.onPrimary,
@@ -319,7 +327,7 @@ class _StatPill extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
           decoration: BoxDecoration(
-            color: scheme.surface.withValues(alpha: 0.55),
+            color: context.feedInset,
             borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
@@ -462,7 +470,7 @@ class _HomeListHeaderState extends State<HomeListHeader> {
           PopupMenuButton<HomeSort>(
             tooltip: 'Choose what the list shows',
             position: PopupMenuPosition.under,
-            color: scheme.surfaceContainerHigh,
+            color: context.feedMenu,
             surfaceTintColor: Colors.transparent,
             elevation: 3,
             shape: RoundedRectangleBorder(
@@ -497,7 +505,7 @@ class _HomeListHeaderState extends State<HomeListHeader> {
                     vertical: 6,
                   ),
                   decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
+                    color: context.feedChip,
                     borderRadius: _pillRadius,
                   ),
                   child: Row(
@@ -724,7 +732,7 @@ class HomeTrackRow extends StatelessWidget {
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHigh,
+                      color: context.feedChip,
                       borderRadius: _pillRadius,
                     ),
                     child: Text(
@@ -755,7 +763,7 @@ class HomeTrackRow extends StatelessWidget {
             gradient: LinearGradient(
               colors: [
                 scheme.primaryContainer.withValues(alpha: 0.70),
-                scheme.surfaceContainerHigh.withValues(alpha: 0.85),
+                context.feedPanel.withValues(alpha: 0.85),
               ],
             ),
           ),
@@ -896,7 +904,7 @@ class _OverflowButton extends StatelessWidget {
                 height: 32,
                 decoration: BoxDecoration(
                   color: Color.lerp(
-                    scheme.surfaceContainerHigh,
+                    context.feedPanel,
                     scheme.primaryContainer,
                     0.55,
                   ),
@@ -985,4 +993,149 @@ class HomeGroupRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// One thing on a shelf: a cover with a title and a line under it.
+typedef ShelfItem = ({
+  String? artPath,
+  String title,
+  String? subtitle,
+  VoidCallback onTap,
+});
+
+/// A titled row of covers that scrolls sideways, such as the newest albums
+/// or the favourite tracks.
+class HomeShelf extends StatelessWidget {
+  const HomeShelf({
+    super.key,
+    required this.title,
+    required this.items,
+    required this.onSeeAll,
+  });
+
+  final String title;
+  final List<ShelfItem> items;
+  final VoidCallback onSeeAll;
+
+  static const _cover = 116.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final scaler = MediaQuery.textScalerOf(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 4, 2),
+          child: Row(
+            children: [
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: FlexType.titleLarge.copyWith(
+                      color: scheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: onSeeAll,
+                child: Text('See all', style: FlexType.labelLarge),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          // The cover, then two lines of text at the size the user reads.
+          height: _cover + 8 + scaler.scale(20) + scaler.scale(18) + 6,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final item = items[index];
+              final subtitle = item.subtitle;
+              return Semantics(
+                button: true,
+                label: [item.title, ?subtitle].join(', '),
+                excludeSemantics: true,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: item.onTap,
+                  child: SizedBox(
+                    width: _cover,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Artwork(path: item.artPath, size: _cover, radius: 16),
+                        const SizedBox(height: 8),
+                        Text(
+                          item.title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: FlexType.titleSmall.copyWith(
+                            color: scheme.onSurface,
+                          ),
+                        ),
+                        if (subtitle != null && subtitle.isNotEmpty)
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: FlexType.bodySmall.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// The feed's surfaces. In the dark theme they are tonal fills taken from
+/// the accent. In the light theme they are white glass with a hairline rim,
+/// so the page's backdrop shows softly through them.
+extension FeedSurfaces on BuildContext {
+  bool get _lightFeed => Theme.of(this).brightness == Brightness.light;
+  ColorScheme get _feedScheme => Theme.of(this).colorScheme;
+
+  /// A large container, such as the list.
+  Color get feedCard => _lightFeed
+      ? Colors.white.withValues(alpha: 0.62)
+      : _feedScheme.surfaceContainer;
+
+  /// A card or pill standing on the page.
+  Color get feedPanel => _lightFeed
+      ? Colors.white.withValues(alpha: 0.72)
+      : _feedScheme.surfaceContainerHigh;
+
+  /// A small control on a card.
+  Color get feedChip => _lightFeed
+      ? Colors.white.withValues(alpha: 0.9)
+      : _feedScheme.surfaceContainerHighest;
+
+  /// A tile set into a card.
+  Color get feedInset => _lightFeed
+      ? Colors.white.withValues(alpha: 0.7)
+      : _feedScheme.surface.withValues(alpha: 0.55);
+
+  /// A menu, which has to be solid to be read.
+  Color get feedMenu =>
+      _lightFeed ? Colors.white : _feedScheme.surfaceContainerHigh;
+
+  BorderSide get feedRim =>
+      _lightFeed ? BorderSide(color: noc.glassBorder) : BorderSide.none;
 }

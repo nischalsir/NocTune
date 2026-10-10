@@ -4,6 +4,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
@@ -98,119 +99,126 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
         settings.accent,
         coverAccent: cover.dark,
       ),
-      child: Material(
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            // The backdrop cross-fades as the cover changes between tracks.
-            AnimatedSwitcher(
-              duration: reduceMotion
-                  ? Duration.zero
-                  : const Duration(milliseconds: 500),
-              child: _Backdrop(
-                key: ValueKey(item?.artUri),
-                path: item?.artUri?.toFilePath(),
-              ),
-            ),
-            if (item != null && !sideways)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: _coverBottom ?? screen.height * 0.54,
-                child: _ArtworkHero(
-                  path: item.artUri?.toFilePath(),
-                  visible: !lyricsOpen,
-                ),
-              ),
-            // A veil that deepens the backdrop under the lyrics.
-            IgnorePointer(
-              child: AnimatedOpacity(
-                opacity: lyricsOpen ? 1 : 0,
+      child: AnnotatedRegion<SystemUiOverlayStyle>(
+        // Always dark, so always light status bar icons.
+        value: SystemUiOverlayStyle.light.copyWith(
+          statusBarColor: Colors.transparent,
+          systemNavigationBarColor: Colors.transparent,
+        ),
+        child: Material(
+          color: Colors.black,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              // The backdrop cross-fades as the cover changes between tracks.
+              AnimatedSwitcher(
                 duration: reduceMotion
                     ? Duration.zero
-                    : const Duration(milliseconds: 320),
-                child: const DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Color(0x9E000000),
-                        Color(0x85000000),
-                        Color(0x94000000),
-                        Color(0xB8000000),
-                      ],
-                      stops: [0, 0.35, 0.70, 1],
+                    : const Duration(milliseconds: 500),
+                child: _Backdrop(
+                  key: ValueKey(item?.artUri),
+                  path: item?.artUri?.toFilePath(),
+                ),
+              ),
+              if (item != null && !sideways)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: _coverBottom ?? screen.height * 0.54,
+                  child: _ArtworkHero(
+                    path: item.artUri?.toFilePath(),
+                    visible: !lyricsOpen,
+                  ),
+                ),
+              // A veil that deepens the backdrop under the lyrics.
+              IgnorePointer(
+                child: AnimatedOpacity(
+                  opacity: lyricsOpen ? 1 : 0,
+                  duration: reduceMotion
+                      ? Duration.zero
+                      : const Duration(milliseconds: 320),
+                  child: const DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [
+                          Color(0x9E000000),
+                          Color(0x85000000),
+                          Color(0x94000000),
+                          Color(0xB8000000),
+                        ],
+                        stops: [0, 0.35, 0.70, 1],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            SafeArea(
-              child: Column(
-                children: [
-                  if (!(lyricsOpen && _lyricsFullscreen))
-                    _TopBar(
-                      item: item,
-                      track: track,
-                      lyricsOpen: lyricsOpen,
-                      onLeaveLyrics: () => _setLyrics(false),
-                    ),
-                  Expanded(
-                    child: item == null
-                        ? const _NothingPlaying()
-                        : AnimatedSwitcher(
-                            duration: reduceMotion
-                                ? Duration.zero
-                                : const Duration(milliseconds: 320),
-                            switchInCurve: Curves.easeOutCubic,
-                            switchOutCurve: Curves.easeInCubic,
-                            transitionBuilder: (child, animation) =>
-                                FadeTransition(
-                                  opacity: animation,
-                                  child: ScaleTransition(
-                                    scale: Tween<double>(
-                                      begin: 0.96,
-                                      end: 1,
-                                    ).animate(animation),
-                                    child: child,
+              SafeArea(
+                child: Column(
+                  children: [
+                    if (!(lyricsOpen && _lyricsFullscreen))
+                      _TopBar(
+                        item: item,
+                        track: track,
+                        lyricsOpen: lyricsOpen,
+                        onLeaveLyrics: () => _setLyrics(false),
+                      ),
+                    Expanded(
+                      child: item == null
+                          ? const _NothingPlaying()
+                          : AnimatedSwitcher(
+                              duration: reduceMotion
+                                  ? Duration.zero
+                                  : const Duration(milliseconds: 320),
+                              switchInCurve: Curves.easeOutCubic,
+                              switchOutCurve: Curves.easeInCubic,
+                              transitionBuilder: (child, animation) =>
+                                  FadeTransition(
+                                    opacity: animation,
+                                    child: ScaleTransition(
+                                      scale: Tween<double>(
+                                        begin: 0.96,
+                                        end: 1,
+                                      ).animate(animation),
+                                      child: child,
+                                    ),
                                   ),
-                                ),
-                            child: lyricsOpen
-                                ? Center(
-                                    key: const ValueKey('lyrics'),
-                                    child: ConstrainedBox(
-                                      constraints: const BoxConstraints(
-                                        maxWidth: 720,
-                                      ),
-                                      child: LyricsPanel(
-                                        track: track,
-                                        duration:
-                                            item.duration ?? track.duration,
-                                        isFullscreen: _lyricsFullscreen,
-                                        onToggleFullscreen: () => setState(
-                                          () => _lyricsFullscreen =
-                                              !_lyricsFullscreen,
+                              child: lyricsOpen
+                                  ? Center(
+                                      key: const ValueKey('lyrics'),
+                                      child: ConstrainedBox(
+                                        constraints: const BoxConstraints(
+                                          maxWidth: 720,
+                                        ),
+                                        child: LyricsPanel(
+                                          track: track,
+                                          duration:
+                                              item.duration ?? track.duration,
+                                          isFullscreen: _lyricsFullscreen,
+                                          onToggleFullscreen: () => setState(
+                                            () => _lyricsFullscreen =
+                                                !_lyricsFullscreen,
+                                          ),
                                         ),
                                       ),
+                                    )
+                                  : _NowPlaying(
+                                      key: const ValueKey('player'),
+                                      item: item,
+                                      track: track,
+                                      onShowLyrics: () => _setLyrics(true),
+                                      detailsKey: _detailsKey,
+                                      sideways: sideways,
                                     ),
-                                  )
-                                : _NowPlaying(
-                                    key: const ValueKey('player'),
-                                    item: item,
-                                    track: track,
-                                    onShowLyrics: () => _setLyrics(true),
-                                    detailsKey: _detailsKey,
-                                    sideways: sideways,
-                                  ),
-                          ),
-                  ),
-                ],
+                            ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

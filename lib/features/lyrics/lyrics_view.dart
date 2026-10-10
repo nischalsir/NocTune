@@ -1,5 +1,4 @@
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -356,6 +355,10 @@ const _maxSystemTextScale = 1.3;
 const _activeScale = 1.085;
 
 /// Timestamped lyrics that follow playback.
+///
+/// The list is built once. Each line watches which line is being sung and
+/// redraws itself only when its own look changes, so a line change touches
+/// a handful of rows instead of rebuilding the whole song.
 class _SyncedLyrics extends ConsumerStatefulWidget {
   const _SyncedLyrics({
     super.key,
@@ -383,7 +386,9 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
 
   late List<GlobalKey> _keys = _makeKeys();
   DateTime _userScrolledAt = DateTime.fromMillisecondsSinceEpoch(0);
-  bool _dragging = false;
+
+  /// The line being sung, or -1 before the first.
+  final _active = ValueNotifier(-1);
 
   // The playback position for the word fill, on every frame. The player
   // reports it twenty times a second; between reports this runs on from the
@@ -411,17 +416,12 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
   void initState() {
     super.initState();
     _reported = ref.read(lyricsPositionProvider).value ?? Duration.zero;
+    _offsetMs = ref.read(lyricsOffsetOfProvider(widget.trackId));
     _sinceReport.start();
+    _active.value = _indexAt(ref.read(lyricsPositionProvider), _offsetMs);
     // Opens on the line being sung rather than at the top.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      _follow(
-        _indexAt(
-          ref.read(lyricsPositionProvider),
-          ref.read(lyricsOffsetOfProvider(widget.trackId)),
-        ),
-        animate: false,
-      );
+      if (mounted) _follow(_active.value, animate: false);
     });
   }
 
@@ -437,6 +437,7 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
   void dispose() {
     _frames.dispose();
     _clock.dispose();
+    _active.dispose();
     super.dispose();
   }
 
@@ -446,6 +447,12 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
       widget.lyrics.indexAt(
         (position.value ?? Duration.zero) + Duration(milliseconds: offsetMs),
       );
+
+  void _setActive(int index) {
+    if (index == _active.value) return;
+    _active.value = index;
+    _follow(index);
+  }
 
   /// Glides the active line to a third of the way down, unless the user has
   /// just been scrolling.
@@ -460,9 +467,9 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
         alignment: 1 / 3,
         duration: !animate || MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
-            : const Duration(milliseconds: 760),
-        // Leaves quickly and takes its time arriving, with no bounce.
-        curve: const Cubic(0.22, 1, 0.36, 1),
+            : const Duration(milliseconds: 900),
+        // Leaves gently and takes its time arriving, with no bounce.
+        curve: Curves.easeInOutCubic,
       );
     });
   }
@@ -473,57 +480,44 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
       ScrollUpdateNotification(:final dragDetails) => dragDetails != null,
       _ => false,
     };
-    if (byHand) {
-      _userScrolledAt = DateTime.now();
-      if (!_dragging) setState(() => _dragging = true);
-    } else if (notification is ScrollEndNotification && _dragging) {
-      setState(() => _dragging = false);
-    }
+    if (byHand) _userScrolledAt = DateTime.now();
     return false;
   }
 
   @override
   Widget build(BuildContext context) {
     final lines = widget.lyrics.lines;
-    final offset = ref.watch(lyricsOffsetOfProvider(widget.trackId));
-    // The position ticks twenty times a second, but this only rebuilds when
-    // the line changes.
-    final active = ref.watch(
-      lyricsPositionProvider.select((p) => _indexAt(p, offset)),
-    );
     final playing = ref.watch(
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
     ref
-      ..listen(
-        lyricsPositionProvider.select((p) => _indexAt(p, offset)),
-        (_, index) => _follow(index),
-      )
       ..listen(lyricsPositionProvider, (_, position) {
         _reported = position.value ?? _reported;
         _sinceReport
           ..reset()
           ..start();
         _tick();
+        _setActive(_indexAt(position, _offsetMs));
+      })
+      ..listen(lyricsOffsetOfProvider(widget.trackId), (_, offset) {
+        _offsetMs = offset;
+        _tick();
+        _setActive(_indexAt(ref.read(lyricsPositionProvider), offset));
       });
 
     // With reduced motion the line lights up at once instead of filling.
     final sweep = !MediaQuery.disableAnimationsOf(context);
-    _offsetMs = offset;
     _playing = playing;
     if (sweep && playing) {
       if (!_frames.isActive) _frames.start();
     } else if (_frames.isActive) {
       _frames.stop();
     }
-    _tick();
 
     final style = FlexType.custom(
       size: 30 * widget.scale,
       lineHeight: 30 * widget.scale * 1.38,
       weight: 700,
-      width: 102,
-      round: 18,
     );
 
     return Padding(
@@ -577,29 +571,17 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
                                 top: index == 0 ? 0 : 26,
                               ),
                               child: _LyricRow(
-                                text: line.text,
+                                index: index,
+                                line: line,
+                                nextLineAt: index + 1 < lines.length
+                                    ? lines[index + 1].time
+                                    : null,
                                 style: style,
                                 textWidth: textWidth,
-                                relative: active < 0 ? null : index - active,
-                                playing: playing,
-                                browsing: _dragging,
-                                // The line being sung fills as it goes; the
-                                // one just sung keeps its fill while it
-                                // fades back.
-                                fill:
-                                    sweep &&
-                                        active >= 0 &&
-                                        (index == active || index == active - 1)
-                                    ? (
-                                        units: lyricUnits(
-                                          line,
-                                          nextLineAt: index + 1 < lines.length
-                                              ? lines[index + 1].time
-                                              : null,
-                                        ),
-                                        position: _clock,
-                                      )
-                                    : null,
+                                active: _active,
+                                clock: _clock,
+                                sweep: sweep,
+                                isPlaying: () => _playing,
                                 onTap: line.time == null
                                     ? null
                                     : () => ref
@@ -621,78 +603,103 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
   }
 }
 
-/// What a row needs to fill word by word.
-typedef _Fill = ({List<LyricUnit> units, ValueListenable<Duration> position});
-
 /// One lyric line. How it looks depends on where it is relative to the line
-/// being sung: that one is enlarged and sharp and lights up word by word;
-/// the further away a line is, the dimmer and softer it gets.
+/// being sung: that one is enlarged and lights up word by word; the further
+/// away a line is, the dimmer it gets.
 ///
 /// Its size on the page never changes, so the lines around it don't move
-/// when it becomes active: the enlargement, the lift and the blur are all
-/// painted effects, and they ease in and out rather than snapping.
+/// when it becomes active. Everything that changes is a transform or a
+/// colour, eased in and out, which the screen can redraw on every frame.
 class _LyricRow extends StatefulWidget {
   const _LyricRow({
-    required this.text,
+    required this.index,
+    required this.line,
+    required this.nextLineAt,
     required this.style,
     required this.textWidth,
-    required this.relative,
-    required this.playing,
-    required this.browsing,
-    required this.fill,
+    required this.active,
+    required this.clock,
+    required this.sweep,
+    required this.isPlaying,
     required this.onTap,
   });
 
-  final String text;
+  final int index;
+  final LyricLine line;
+  final Duration? nextLineAt;
   final TextStyle style;
   final double textWidth;
 
-  /// Lines from the active one: negative above, positive below, zero for
-  /// the active line itself. Null before the first line is reached.
-  final int? relative;
-  final bool playing;
+  /// The index of the line being sung.
+  final ValueListenable<int> active;
 
-  /// Whether the user is scrolling the list, which brings every line back
-  /// into focus.
-  final bool browsing;
+  /// The playback position, frame by frame, for the word fill.
+  final ValueListenable<Duration> clock;
 
-  /// Set for the active line and the one before it; null lights the active
-  /// line all at once.
-  final _Fill? fill;
+  /// Whether the active line fills word by word, or lights up at once.
+  final bool sweep;
+  final ValueGetter<bool> isPlaying;
   final VoidCallback? onTap;
 
   @override
   State<_LyricRow> createState() => _LyricRowState();
 }
 
-class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
-  // Lines further than this from the active one are off screen while the
-  // list is following, so they are not given a blur layer.
-  static const _blurReach = 8;
+class _LyricRowState extends State<_LyricRow>
+    with SingleTickerProviderStateMixin {
+  // Beyond this many lines from the active one, every line looks the same.
+  static const _reach = 7;
   // An unhurried ease with no overshoot, shared by the row's changes.
-  static const _ease = Cubic(0.22, 1, 0.36, 1);
+  static const _ease = Cubic(0.25, 0.9, 0.3, 1);
 
-  // Made only for lines that actually animate.
+  /// Lines from the active one, limited to [_reach] either way: negative
+  /// above, positive below. Null before the first line is reached.
+  int? _relative;
+
+  // Made only for lines that actually trail.
   AnimationController? _trail;
   double _trailFrom = 0;
   Curve _trailCurve = Curves.linear;
 
+  int? _relativeNow() {
+    final active = widget.active.value;
+    return active < 0
+        ? null
+        : (widget.index - active).clamp(-_reach, _reach).toInt();
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _relative = _relativeNow();
+    widget.active.addListener(_onActiveChanged);
+  }
+
   @override
   void didUpdateWidget(_LyricRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final relative = widget.relative;
-    if (relative == oldWidget.relative) return;
-    final animate = widget.playing && !MediaQuery.disableAnimationsOf(context);
+    if (oldWidget.active != widget.active) {
+      oldWidget.active.removeListener(_onActiveChanged);
+      widget.active.addListener(_onActiveChanged);
+    }
+  }
+
+  void _onActiveChanged() {
+    final relative = _relativeNow();
+    if (relative == _relative) return;
+    final before = _relative;
+    setState(() => _relative = relative);
 
     // Lines at and below the new active one lag, then settle in turn.
+    final animate =
+        widget.isPlaying() && !MediaQuery.disableAnimationsOf(context);
     if (animate &&
-        !widget.browsing &&
+        before != null &&
         relative != null &&
         relative >= 0 &&
-        relative <= 6 &&
-        oldWidget.relative != null) {
+        relative < _reach) {
       _trailFrom = 8.0 + relative * 3;
-      const settle = 820;
+      const settle = 900;
       final wait = relative * 45;
       _trailCurve = Interval(wait / (wait + settle), 1, curve: _ease);
       (_trail ??= AnimationController(vsync: this))
@@ -705,15 +712,16 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
 
   @override
   void dispose() {
+    widget.active.removeListener(_onActiveChanged);
     _trail?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final relative = widget.relative;
+    final relative = _relative;
     final isActive = relative == 0;
-    final distance = relative?.abs() ?? 99;
+    final distance = relative?.abs() ?? _reach;
     final isPast = relative != null && relative < 0;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     Duration timed(int ms) =>
@@ -721,44 +729,43 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
     final start = AlignmentDirectional.centerStart.resolve(
       Directionality.of(context),
     );
-    final fill = widget.fill;
-    final shown = widget.text.trim().isEmpty ? '♪' : widget.text;
+    final text = widget.line.text;
+    final shown = text.trim().isEmpty ? '♪' : text;
+    // The line being sung fills as it goes; the one just sung keeps its
+    // fill while it fades back.
+    final filling = widget.sweep && (relative == 0 || relative == -1);
 
     final scale = isActive ? _activeScale : (distance == 1 ? 0.99 : 0.965);
     // Dimming is done in the text colour, not with a layer per line. While
     // it fills, the active line's unsung words wait at a readable grey.
     final opacity = isActive
-        ? (fill == null ? 1.0 : 0.42)
+        ? (widget.sweep ? 0.42 : 1.0)
         : 0.44 * (distance == 1 ? 0.58 : (isPast ? 0.38 : 0.30));
-    final blur =
-        isActive || widget.browsing || relative == null || distance > _blurReach
-        ? 0.0
-        : math.min(distance, 4) * 1.6;
     final shift = isActive ? -3.5 : (isPast ? -1.5 : 3.5);
     final trail = _trail;
     final glow = [
       Shadow(color: Colors.white.withValues(alpha: 0.50), blurRadius: 8),
     ];
 
-    final text = Stack(
+    final words = Stack(
       children: [
         AnimatedDefaultTextStyle(
-          duration: timed(620),
+          duration: timed(700),
           curve: _ease,
           style: widget.style.copyWith(
             color: Colors.white.withValues(alpha: opacity),
-            shadows: fill == null && isActive ? glow : const [],
+            shadows: !widget.sweep && isActive ? glow : const [],
           ),
           child: Text(shown),
         ),
-        if (fill != null)
+        if (filling)
           // The lit words, fading away once the line has been sung.
           Positioned.fill(
             child: IgnorePointer(
               child: ExcludeSemantics(
                 child: AnimatedOpacity(
                   opacity: isActive ? 1 : 0,
-                  duration: timed(620),
+                  duration: timed(700),
                   curve: _ease,
                   child: Align(
                     alignment: AlignmentDirectional.topStart,
@@ -768,8 +775,11 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
                         color: Colors.white,
                         shadows: glow,
                       ),
-                      units: fill.units,
-                      position: fill.position,
+                      units: lyricUnits(
+                        widget.line,
+                        nextLineAt: widget.nextLineAt,
+                      ),
+                      position: widget.clock,
                     ),
                   ),
                 ),
@@ -780,49 +790,34 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
     );
 
     final row = TweenAnimationBuilder<double>(
-      tween: Tween(end: blur),
-      duration: timed(620),
+      tween: Tween(end: shift),
+      duration: timed(900),
       curve: _ease,
-      builder: (context, radius, child) => ImageFiltered(
-        enabled: radius > 0.2,
-        // A blur radius, expressed as the sigma the filter wants.
-        imageFilter: ImageFilter.blur(
-          sigmaX: radius * 0.58,
-          sigmaY: radius * 0.58,
-          tileMode: TileMode.decal,
-        ),
-        child: child,
-      ),
-      child: TweenAnimationBuilder<double>(
-        tween: Tween(end: shift),
-        duration: timed(760),
-        curve: _ease,
-        builder: (context, dy, child) => trail == null
-            ? Transform.translate(offset: Offset(0, dy), child: child)
-            : AnimatedBuilder(
-                animation: trail,
-                builder: (context, child) => Transform.translate(
-                  offset: Offset(
-                    0,
-                    dy + _trailFrom * (1 - _trailCurve.transform(trail.value)),
-                  ),
-                  child: child,
+      builder: (context, dy, child) => trail == null
+          ? Transform.translate(offset: Offset(0, dy), child: child)
+          : AnimatedBuilder(
+              animation: trail,
+              builder: (context, child) => Transform.translate(
+                offset: Offset(
+                  0,
+                  dy + _trailFrom * (1 - _trailCurve.transform(trail.value)),
                 ),
                 child: child,
               ),
-        child: AnimatedScale(
-          scale: scale,
-          alignment: start,
-          duration: timed(760),
-          curve: _ease,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            child: Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: widget.textWidth),
-                child: text,
-              ),
+              child: child,
+            ),
+      child: AnimatedScale(
+        scale: scale,
+        alignment: start,
+        duration: timed(900),
+        curve: _ease,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: widget.textWidth),
+              child: words,
             ),
           ),
         ),

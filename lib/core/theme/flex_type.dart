@@ -1,7 +1,8 @@
 import 'package:flutter/painting.dart';
 
-/// The type scale of the home feed and the lyrics view: Google Sans Flex,
-/// with its weight, width, roundness and optical-size axes set per role.
+/// The app's type scale in Google Sans Flex, at its regular width and with no
+/// rounding, so every screen is set in the same letterforms. The theme uses
+/// the same family for everything that doesn't name a role here.
 ///
 /// Tracking is set per size: the large display roles are tightened, body
 /// and label roles are left as drawn.
@@ -37,80 +38,27 @@ abstract final class FlexType {
   static final displaySmall = custom(
     size: 36,
     lineHeight: 44,
-    weight: 720,
-    width: 118,
-    round: 38,
+    weight: 700,
     letterSpacing: -0.6,
   );
   static final headlineSmall = custom(
     size: 24,
     lineHeight: 32,
-    weight: 760,
-    width: 116,
-    round: 36,
+    weight: 700,
     letterSpacing: -0.3,
   );
   static final titleLarge = custom(
     size: 22,
     lineHeight: 28,
-    weight: 640,
-    width: 110,
-    round: 30,
+    weight: 650,
     letterSpacing: -0.2,
   );
-  static final titleMedium = custom(
-    size: 16,
-    lineHeight: 24,
-    weight: 600,
-    width: 106,
-    round: 28,
-  );
-  static final titleSmall = custom(
-    size: 14,
-    lineHeight: 20,
-    weight: 580,
-    width: 105,
-    round: 26,
-  );
-  static final bodyLarge = custom(
-    size: 16,
-    lineHeight: 24,
-    weight: 440,
-    width: 102,
-    round: 18,
-  );
-  static final bodyMedium = custom(
-    size: 15,
-    lineHeight: 22,
-    weight: 430,
-    width: 102,
-    round: 18,
-  );
-  static final bodySmall = custom(
-    size: 13,
-    lineHeight: 18,
-    weight: 420,
-    round: 16,
-  );
-  static final labelLarge = custom(
-    size: 14,
-    lineHeight: 20,
-    weight: 680,
-    width: 108,
-    round: 46,
-  );
-  static final labelMedium = custom(
-    size: 12,
-    lineHeight: 16,
-    weight: 660,
-    width: 108,
-    round: 44,
-  );
-  static final labelSmall = custom(
-    size: 11,
-    lineHeight: 16,
-    weight: 660,
-    width: 108,
-    round: 44,
-  );
+  static final titleMedium = custom(size: 16, lineHeight: 24, weight: 600);
+  static final titleSmall = custom(size: 14, lineHeight: 20, weight: 560);
+  static final bodyLarge = custom(size: 16, lineHeight: 24, weight: 430);
+  static final bodyMedium = custom(size: 15, lineHeight: 22, weight: 420);
+  static final bodySmall = custom(size: 13, lineHeight: 18, weight: 420);
+  static final labelLarge = custom(size: 14, lineHeight: 20, weight: 620);
+  static final labelMedium = custom(size: 12, lineHeight: 16, weight: 600);
+  static final labelSmall = custom(size: 11, lineHeight: 16, weight: 600);
 }

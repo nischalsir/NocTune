@@ -153,7 +153,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
             ),
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
+                padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
                 child: Semantics(
                   header: true,
                   child: Text('Settings', style: text.headlineSmall),

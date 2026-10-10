@@ -56,7 +56,7 @@ class ScanBanner extends ConsumerWidget {
     if (state is ScanIdle) return const SizedBox.shrink();
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       child: GlassPanel(
         blur: 0,
         padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'cover_accent.dart';
+import 'flex_type.dart';
 import 'noc_palette.dart';
 
 /// Builds the Material theme for one brightness and accent. A [coverAccent],
@@ -36,6 +37,8 @@ ThemeData buildNocTheme(
     colorScheme: scheme,
     scaffoldBackgroundColor: palette.background,
     extensions: [palette],
+    // One typeface across the whole app.
+    fontFamily: FlexType.family,
     textTheme: _textTheme(palette),
     splashFactory: InkSparkle.splashFactory,
     iconTheme: IconThemeData(color: palette.textPrimary),

@@ -6,12 +6,14 @@ import '../../app/providers.dart';
 import '../../core/theme/flex_type.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/frosted.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/models/track.dart';
 import '../../data/repositories/library_repository.dart';
 import '../library/collection_screen.dart';
 import '../library/scan/add_music_actions.dart';
 import '../library/scan/scan_banner.dart';
+import '../library/track_list_view.dart';
 import '../library/track_menu.dart';
 import '../playback/now_playing_screen.dart';
 import 'home_feed.dart';
@@ -19,10 +21,13 @@ import 'home_hero.dart';
 import 'home_rows.dart';
 
 /// The home screen: a hero featuring one track, then the listening feed: a
-/// pill row with the listening time, a statistics card, and a list that can
-/// show recent plays by day, the most played tracks overall or lately, and
-/// the top artists and albums. Every number and row comes from what has been
-/// played on this device.
+/// pill row with the listening time, the newest albums, a statistics card,
+/// and a list that can show recent plays by day, the most played tracks
+/// overall or lately, and the top artists and albums. Every number and row
+/// comes from what is on, and has been played on, this device.
+///
+/// Typing in the search field at the top searches the library right here:
+/// the results take the place of the feed until the search is closed.
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({
     super.key,
@@ -34,11 +39,84 @@ class HomeScreen extends ConsumerStatefulWidget {
   final VoidCallback onOpenLibrary;
 
   @override
-  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => HomeScreenState();
 }
 
-class _HomeScreenState extends ConsumerState<HomeScreen> {
+class HomeScreenState extends ConsumerState<HomeScreen> {
   HomeSort _sort = HomeSort.recent;
+
+  // The search field keeps its text, cursor and keyboard as it moves between
+  // the hero and the top of the results.
+  final _searchFieldKey = GlobalKey();
+  final _search = TextEditingController();
+  final _searchFocus = FocusNode();
+  String _query = '';
+
+  bool get _searching => _query.trim().isNotEmpty;
+
+  /// Leaves the search, if one is open. Returns whether there was one, so
+  /// the back button can close a search before it does anything else.
+  bool closeSearch() {
+    if (!_searching && !_searchFocus.hasFocus) return false;
+    _search.clear();
+    _searchFocus.unfocus();
+    setState(() => _query = '');
+    return true;
+  }
+
+  @override
+  void dispose() {
+    _search.dispose();
+    _searchFocus.dispose();
+    super.dispose();
+  }
+
+  /// The search field, drawn for the dark hero or for the page it sits on.
+  Widget _searchField({required bool onHero}) {
+    final palette = context.noc;
+    final color = onHero ? Colors.white : palette.textPrimary;
+    final faint = onHero ? Colors.white70 : palette.textSecondary;
+    final field = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+      child: Row(
+        children: [
+          Icon(Icons.search_rounded, size: 20, color: faint),
+          const SizedBox(width: 10),
+          Expanded(
+            child: TextField(
+              key: _searchFieldKey,
+              controller: _search,
+              focusNode: _searchFocus,
+              onChanged: (value) => setState(() => _query = value),
+              textInputAction: TextInputAction.search,
+              cursorColor: color,
+              style: Theme.of(context).textTheme.bodyMedium
+                  ?.copyWith(color: color),
+              decoration: InputDecoration.collapsed(
+                hintText: 'Search tracks, artists, albums…',
+                hintStyle: Theme.of(context).textTheme.bodyMedium
+                    ?.copyWith(color: faint),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return Semantics(
+      label: 'Search your library',
+      child: onHero
+          ? Frosted(blurBackdrop: true, child: field)
+          : DecoratedBox(
+              decoration: ShapeDecoration(
+                color: palette.glass,
+                shape: StadiumBorder(
+                  side: BorderSide(color: palette.glassBorder),
+                ),
+              ),
+              child: field,
+            ),
+    );
+  }
 
   /// The rows of the list in its current mode, and whether they are still
   /// being read.
@@ -98,7 +176,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   Widget build(BuildContext context) {
     final stats = ref.watch(libraryStatsProvider);
     final currentId = ref.watch(currentTrackIdProvider);
-    final scheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
     Future<void> shuffleAll() async {
@@ -142,6 +219,39 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       );
     }
 
+    if (_searching) {
+      final query = _query.trim();
+      return SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 4, 6),
+              child: Row(
+                children: [
+                  Expanded(child: _searchField(onHero: false)),
+                  TextButton(
+                    onPressed: closeSearch,
+                    child: const Text('Cancel'),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: TrackListView(
+                tracks: ref.watch(searchResultsProvider(query)),
+                empty: EmptyState(
+                  icon: Icons.music_off_outlined,
+                  title: 'No matches',
+                  message: 'Nothing in your library matches "$query".',
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     // The hero features what is in the player; failing that, the last thing
     // played; failing that, the newest arrival.
     final playing = ref.watch(currentTrackProvider).value;
@@ -154,6 +264,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final isPlaying = ref.watch(
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
+    final albums = ref.watch(recentAlbumsProvider).value ?? const [];
+    final favourites = (ref.watch(favoritesProvider).value ?? const <Track>[])
+        .take(30)
+        .toList();
 
     final (rows, loading) = _rows(current);
     // Tapping a track plays the list from there, in the order shown.
@@ -217,15 +331,50 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                           : (lastPlayed != null
                                 ? 'JUMP BACK IN'
                                 : 'RECENTLY ADDED'),
-                      onOpenSearch: widget.onOpenSearch,
+                      search: _searchField(onHero: true),
                       onPlay: () =>
                           ref.read(audioHandlerProvider).playTracks([featured]),
                     ),
             ),
             const SliverToBoxAdapter(child: SizedBox(height: 10)),
             SliverToBoxAdapter(child: HomeHeaderRow(onShuffleAll: shuffleAll)),
-            const SliverToBoxAdapter(child: SizedBox(height: 2)),
             const SliverToBoxAdapter(child: ScanBanner()),
+            if (albums.isNotEmpty)
+              SliverToBoxAdapter(
+                child: HomeShelf(
+                  title: 'Albums',
+                  items: [
+                    for (final album in albums)
+                      (
+                        artPath: album.artPath,
+                        title: album.name,
+                        subtitle: album.artist,
+                        onTap: () => _openGroup(TrackGroup.album, album.name),
+                      ),
+                  ],
+                  onSeeAll: widget.onOpenLibrary,
+                ),
+              ),
+            if (favourites.isNotEmpty)
+              SliverToBoxAdapter(
+                child: HomeShelf(
+                  title: 'Favourites',
+                  items: [
+                    // Tapping one plays the favourites from there.
+                    for (final (index, track) in favourites.indexed)
+                      (
+                        artPath: track.artPath,
+                        title: track.title,
+                        subtitle: track.displayArtist,
+                        onTap: () => ref
+                            .read(audioHandlerProvider)
+                            .playTracks(favourites, initialIndex: index),
+                      ),
+                  ],
+                  onSeeAll: widget.onOpenLibrary,
+                ),
+              ),
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
             SliverToBoxAdapter(
               child: HomeStatsCard(
                 stats: summary,
@@ -238,9 +387,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: DecoratedSliver(
-                decoration: BoxDecoration(
-                  color: scheme.surfaceContainer,
-                  borderRadius: BorderRadius.circular(28),
+                decoration: ShapeDecoration(
+                  color: context.feedCard,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(28),
+                    side: context.feedRim,
+                  ),
                 ),
                 sliver: SliverMainAxisGroup(
                   slivers: [
@@ -261,7 +413,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                             loading ? 'Loading…' : 'No tracks yet',
                             textAlign: TextAlign.center,
                             style: FlexType.bodyLarge.copyWith(
-                              color: scheme.onSurfaceVariant,
+                              color: Theme.of(context)
+                                  .colorScheme
+                                  .onSurfaceVariant,
                             ),
                           ),
                         ),
@@ -298,7 +452,7 @@ class _Header extends StatelessWidget {
     final palette = context.noc;
     return DecoratedBox(
       decoration: BoxDecoration(
-        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(34)),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -308,7 +462,7 @@ class _Header extends StatelessWidget {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 14, 16, 22),
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 22),
           child: Row(
             children: [
               Expanded(
@@ -356,8 +510,8 @@ class _RoundAction extends StatelessWidget {
         semanticLabel: label,
         onTap: onTap,
         child: Container(
-          width: 48,
-          height: 48,
+          width: 44,
+          height: 44,
           decoration: BoxDecoration(
             color: palette.background.withValues(alpha: 0.7),
             shape: BoxShape.circle,

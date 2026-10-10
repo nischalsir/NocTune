@@ -131,7 +131,11 @@ void main() {
     ];
 
     // ignore: invalid_use_of_visible_for_testing_member
-    SharedPreferences.setMockInitialValues({'welcome_seen': true});
+    SharedPreferences.setMockInitialValues({
+      'welcome_seen': true,
+      // --dart-define=THEME=light renders the light theme instead.
+      'theme_mode': const String.fromEnvironment('THEME', defaultValue: 'dark'),
+    });
     final preferences = await SharedPreferences.getInstance();
     const installed = AppVersion(1, 0, 0, 1);
 
@@ -141,6 +145,9 @@ void main() {
       required Track playing,
       bool atmos = false,
       Future<void> Function()? act,
+      // False to capture the frame [act] leaves, e.g. part-way through an
+      // animation, instead of letting things come to rest first.
+      bool settleAfterAct = true,
     }) async {
       tester.view.physicalSize = const Size(780, 1688);
       tester.view.devicePixelRatio = 2;
@@ -176,7 +183,25 @@ void main() {
               ],
             ),
             topGroupsProvider.overrideWith((ref, group) => const []),
-            favoritesProvider.overrideWith((ref) => const []),
+            favoritesProvider.overrideWith(
+              (ref) => [tracks[2], tracks[0], tracks[4], tracks[5]],
+            ),
+            recentAlbumsProvider.overrideWith(
+              (ref) => [
+                for (final (index, name) in const [
+                  'Midnight Sessions',
+                  'Tidewater',
+                  'Paper Lanterns',
+                  'Glasshouse',
+                ].indexed)
+                  TrackGroupSummary(
+                    name: name,
+                    trackCount: 9,
+                    artPath: covers[index % covers.length],
+                    artist: tracks[index].artist,
+                  ),
+              ],
+            ),
             libraryStatsProvider.overrideWith(
               (ref) => const LibraryStats(
                 trackCount: 319,
@@ -240,7 +265,7 @@ void main() {
       }
       if (act != null) {
         await act();
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; settleAfterAct && i < 4; i++) {
           await tester.runAsync(
             () => Future<void>.delayed(const Duration(milliseconds: 40)),
           );
@@ -270,6 +295,23 @@ void main() {
       playing: tracks[0],
       act: () => tester.dragFrom(const Offset(195, 560), const Offset(0, -470)),
     );
+    // The bar part-way through folding, to check the shape it takes.
+    for (final (name, elapsed) in const [
+      ('8_fold_early', 170),
+      ('9_fold_late', 330),
+    ]) {
+      await shoot(
+        name,
+        child: const NocTuneApp(),
+        playing: tracks[0],
+        settleAfterAct: false,
+        act: () async {
+          await tester.dragFrom(const Offset(195, 560), const Offset(0, -470));
+          await tester.pump();
+          await tester.pump(Duration(milliseconds: elapsed));
+        },
+      );
+    }
     await shoot('3_player_lossless', child: player(), playing: tracks[0]);
     await shoot(
       '4_player_atmos',

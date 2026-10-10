@@ -16,6 +16,29 @@ class SearchScreen extends ConsumerStatefulWidget {
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   String _query = '';
+  final _focus = FocusNode();
+  bool _wasShowing = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The page stays alive while another tab is showing, with its tickers
+    // paused. When it comes to the front, put the cursor in the field so the
+    // keyboard opens straight away.
+    final showing = TickerMode.valuesOf(context).enabled;
+    if (showing && !_wasShowing) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focus.requestFocus();
+      });
+    }
+    _wasShowing = showing;
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,8 +50,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: TextField(
+              focusNode: _focus,
               onChanged: (value) => setState(() => _query = value),
               textInputAction: TextInputAction.search,
               decoration: InputDecoration(

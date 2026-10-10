@@ -53,7 +53,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 16, 8, 4),
+            padding: const EdgeInsets.fromLTRB(16, 16, 8, 4),
             child: Row(
               children: [
                 Expanded(child: Text('Library', style: text.headlineSmall)),
@@ -92,7 +92,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             height: 48,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               itemCount: LibrarySection.values.length,
               separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (context, index) {

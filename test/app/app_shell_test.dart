@@ -58,6 +58,8 @@ Future<void> _pumpApp(
   required Size size,
   List<Track> tracks = const [],
   List<PlayedTrack> playLog = const [],
+  List<TrackGroupSummary> albums = const [],
+  List<Track> favourites = const [],
   MediaItem? nowPlaying,
   ScanState scan = const ScanIdle(),
   bool firstLaunch = false,
@@ -88,7 +90,7 @@ Future<void> _pumpApp(
         allTracksProvider.overrideWith((ref) => tracks),
         recentlyAddedProvider.overrideWith((ref) => tracks),
         recentlyPlayedProvider.overrideWith((ref) => const []),
-        favoritesProvider.overrideWith((ref) => const []),
+        favoritesProvider.overrideWith((ref) => favourites),
         libraryStatsProvider.overrideWith(
           (ref) => LibraryStats(
             trackCount: tracks.length,
@@ -117,6 +119,14 @@ Future<void> _pumpApp(
         playLogProvider.overrideWith((ref) => playLog),
         topTracksInDaysProvider.overrideWith((ref, days) => const []),
         topGroupsProvider.overrideWith((ref, group) => const []),
+        recentAlbumsProvider.overrideWith((ref) => albums),
+        searchResultsProvider.overrideWith(
+          (ref, query) => [
+            for (final track in tracks)
+              if (track.title.toLowerCase().contains(query.toLowerCase()))
+                track,
+          ],
+        ),
         installedVersionProvider.overrideWith((ref) => installed),
         updateServiceProvider.overrideWith(
           (ref) => UpdateService(
@@ -645,5 +655,97 @@ void main() {
     );
 
     expect(tester.takeException(), isNull);
+  });
+
+  group('home', () {
+    final songs = [_track('Aashish'), _track('Balenci'), _track('Sustari')];
+
+    testWidgets('typing in the search field shows results on Home itself', (
+      tester,
+    ) async {
+      await _pumpApp(tester, size: phone, tracks: songs);
+
+      await tester.enterText(find.byType(TextField).first, 'bal');
+      await tester.pumpAndSettle();
+
+      // Still on Home: the results take the place of the feed.
+      expect(find.text('Balenci'), findsOneWidget);
+      expect(find.text('Aashish'), findsNothing);
+      expect(find.text('NOCTUNE'), findsNothing);
+      expect(find.text('Cancel'), findsOneWidget);
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(find.text('NOCTUNE'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(find.byType(TextField).first).controller!.text,
+        '',
+      );
+    });
+
+    testWidgets('back closes a search before anything else', (tester) async {
+      await _pumpApp(tester, size: phone, tracks: songs);
+      await tester.enterText(find.byType(TextField).first, 'sus');
+      await tester.pumpAndSettle();
+      expect(find.text('Cancel'), findsOneWidget);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+
+      expect(find.text('Cancel'), findsNothing);
+      expect(find.text('NOCTUNE'), findsOneWidget);
+      expect(find.text('Press back again to exit'), findsNothing);
+    });
+
+    testWidgets('says so when the search matches nothing', (tester) async {
+      await _pumpApp(tester, size: phone, tracks: songs);
+
+      await tester.enterText(find.byType(TextField).first, 'zzz');
+      await tester.pumpAndSettle();
+
+      expect(find.text('No matches'), findsOneWidget);
+    });
+
+    testWidgets('shows shelves of the newest albums and the favourites', (
+      tester,
+    ) async {
+      await _pumpApp(
+        tester,
+        size: const Size(390, 1700),
+        tracks: songs,
+        albums: const [
+          TrackGroupSummary(name: 'P-POP CULTURE', trackCount: 9, artist: 'KA'),
+        ],
+        favourites: [songs[1]],
+      );
+
+      expect(find.text('Albums'), findsWidgets);
+      expect(find.text('P-POP CULTURE'), findsOneWidget);
+      expect(find.text('Favourites'), findsOneWidget);
+      // The shelves come before the play statistics.
+      expect(
+        tester.getTopLeft(find.text('Favourites')).dy,
+        lessThan(tester.getTopLeft(find.text('Plays')).dy),
+      );
+    });
+
+    testWidgets('has no shelves when there is nothing to put on them', (
+      tester,
+    ) async {
+      await _pumpApp(tester, size: const Size(390, 1700), tracks: songs);
+
+      expect(find.text('Favourites'), findsNothing);
+      expect(find.text('See all'), findsNothing);
+    });
+  });
+
+  testWidgets('the Search page opens with the keyboard up', (tester) async {
+    await _pumpApp(tester, size: phone);
+    expect(tester.testTextInput.isVisible, isFalse);
+
+    await tester.tap(find.text('Search').last);
+    await tester.pumpAndSettle();
+
+    expect(tester.testTextInput.isVisible, isTrue);
   });
 }

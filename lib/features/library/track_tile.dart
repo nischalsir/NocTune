@@ -31,7 +31,7 @@ class TrackTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(20, 8, onMenu == null ? 20 : 4, 8),
+        padding: EdgeInsets.fromLTRB(16, 8, onMenu == null ? 16 : 4, 8),
         child: Row(
           children: [
             Artwork(path: track.artPath, size: 48),

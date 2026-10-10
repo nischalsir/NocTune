@@ -1,6 +1,7 @@
 // Copied from SpotiFLAC-Mobile (https://github.com/zarzet/SpotiFLAC-Mobile),
 // Copyright (c) 2026 zarzet, MIT licence. See LICENSE in this folder.
-// Changes for NocTune are limited to imports and app-specific hooks.
+// Changes for NocTune: imports, app-specific hooks, and the flat pill behind
+// the selected item, which is not drawn when the glass lens is.
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -222,7 +223,9 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
               fit: StackFit.passthrough,
               clipBehavior: Clip.none,
               children: [
-                if (selected >= 0 && selected < count)
+                // NocTune: the glass lens marks the selection on its own.
+                // The flat pill is only for devices that draw no lens.
+                if (!lensEnabled && selected >= 0 && selected < count)
                   Positioned.fill(
                     child: IgnorePointer(
                       child: AnimatedAlign(

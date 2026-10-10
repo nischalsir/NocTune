@@ -95,6 +95,11 @@ final topTracksInDaysProvider = FutureProvider.family<List<TrackPlays>, int>(
           .topTracksSince(DateTime.now().subtract(Duration(days: days))),
 );
 
+/// The albums added most recently.
+final recentAlbumsProvider = FutureProvider<List<TrackGroupSummary>>(
+  (ref) => _liveRepository(ref).recentAlbums(),
+);
+
 /// The most played albums or artists.
 final topGroupsProvider =
     FutureProvider.family<List<TrackGroupSummary>, TrackGroup>(

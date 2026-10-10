@@ -242,6 +242,20 @@ class LibraryRepository {
     ];
   }
 
+  /// The albums most recently added to the library, newest first.
+  Future<List<TrackGroupSummary>> recentAlbums({int limit = 20}) async {
+    final rows = await _db.rawQuery(
+      'SELECT album AS name, COUNT(*) AS track_count, '
+      'MAX(art_path) AS art_path, '
+      'MIN(COALESCE(album_artist, artist)) AS artist, '
+      'MAX(date_added) AS added '
+      'FROM tracks WHERE album IS NOT NULL '
+      'GROUP BY album ORDER BY added DESC, album COLLATE NOCASE LIMIT ?',
+      [limit],
+    );
+    return rows.map(TrackGroupSummary.fromRow).toList();
+  }
+
   /// The albums or artists that have been played, most played first.
   Future<List<TrackGroupSummary>> topGroups(
     TrackGroup group, {
