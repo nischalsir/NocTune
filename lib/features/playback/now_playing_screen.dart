@@ -265,15 +265,40 @@ class _NothingPlaying extends StatelessWidget {
 /// The cover, blurred past recognition, under a dark wash, three soft pools
 /// of the cover's colours, a top-to-bottom scrim that keeps text legible,
 /// and a faint vignette.
-class _Backdrop extends StatelessWidget {
+///
+/// None of it moves, so it is drawn once and kept as a picture. Otherwise
+/// the blur and every wash would be worked out again on each frame that the
+/// lyrics or the seek bar repaint, which is every frame while music plays.
+class _Backdrop extends StatefulWidget {
   const _Backdrop({super.key, required this.path});
 
   final String? path;
 
   @override
+  State<_Backdrop> createState() => _BackdropState();
+}
+
+class _BackdropState extends State<_Backdrop> {
+  final _picture = SnapshotController(allowSnapshotting: true);
+  bool _coverDrawn = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The pools take the theme's colours: draw again when those change.
+    _picture.clear();
+  }
+
+  @override
+  void dispose() {
+    _picture.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final path = this.path;
+    final path = widget.path;
 
     Widget pool(Color color, Alignment center, double radius, List<double> a) =>
         DecoratedBox(
@@ -291,68 +316,85 @@ class _Backdrop extends StatelessWidget {
           ),
         );
 
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        if (path != null)
-          Opacity(
-            opacity: 0.9,
-            child: ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: 36, sigmaY: 36),
-              child: Image.file(
-                File(path),
-                fit: BoxFit.cover,
-                // Blurred beyond recognition, so a tiny decode is plenty.
-                cacheWidth: 64,
-                gaplessPlayback: true,
-                excludeFromSemantics: true,
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+    return SnapshotWidget(
+      controller: _picture,
+      // Drawn again at the new size when the window changes.
+      autoresize: true,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (path != null)
+            Opacity(
+              opacity: 0.9,
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 36, sigmaY: 36),
+                child: Image.file(
+                  File(path),
+                  fit: BoxFit.cover,
+                  // Blurred beyond recognition, so a tiny decode is plenty.
+                  cacheWidth: 64,
+                  gaplessPlayback: true,
+                  excludeFromSemantics: true,
+                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                  frameBuilder: (context, child, frame, _) {
+                    // The picture was taken before the cover had loaded.
+                    if (frame != null && !_coverDrawn) {
+                      _coverDrawn = true;
+                      _picture.clear();
+                    }
+                    return child;
+                  },
+                ),
+              ),
+            ),
+          const ColoredBox(color: Color(0x85000000)),
+          pool(scheme.primary, const Alignment(-0.5, -0.6), 0.85, [
+            0.58,
+            0.22,
+            0.45,
+          ]),
+          pool(scheme.secondary, const Alignment(0.76, 0.3), 0.78, [
+            0.52,
+            0.20,
+            0.50,
+          ]),
+          pool(
+            Color.lerp(scheme.tertiary, Colors.black, 0.35)!,
+            const Alignment(-0.7, 0.64),
+            0.70,
+            [0.42, 0.14, 0.55],
+          ),
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x59000000),
+                  Color(0x26000000),
+                  Color(0x66000000),
+                  Color(0xB8000000),
+                ],
+                stops: [0, 0.28, 0.65, 1],
               ),
             ),
           ),
-        const ColoredBox(color: Color(0x85000000)),
-        pool(scheme.primary, const Alignment(-0.5, -0.6), 0.85, [
-          0.58,
-          0.22,
-          0.45,
-        ]),
-        pool(scheme.secondary, const Alignment(0.76, 0.3), 0.78, [
-          0.52,
-          0.20,
-          0.50,
-        ]),
-        pool(
-          Color.lerp(scheme.tertiary, Colors.black, 0.35)!,
-          const Alignment(-0.7, 0.64),
-          0.70,
-          [0.42, 0.14, 0.55],
-        ),
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Color(0x59000000),
-                Color(0x26000000),
-                Color(0x66000000),
-                Color(0xB8000000),
-              ],
-              stops: [0, 0.28, 0.65, 1],
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: RadialGradient(
+                center: Alignment(0, -0.2),
+                radius: 0.8,
+                colors: [
+                  Color(0x00000000),
+                  Color(0x00000000),
+                  Color(0x4D000000),
+                ],
+                stops: [0, 0.65, 1],
+              ),
             ),
           ),
-        ),
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment(0, -0.2),
-              radius: 0.8,
-              colors: [Color(0x00000000), Color(0x00000000), Color(0x4D000000)],
-              stops: [0, 0.65, 1],
-            ),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -391,7 +433,6 @@ class _TopBar extends ConsumerWidget {
         actions.add(
           PlayerGlassButton(
             icon: Icons.timer,
-            frosted: true,
             fill: 0.16,
             iconSize: 22,
             label: 'Lyrics sync offset',
@@ -465,82 +506,89 @@ class _TopBar extends ConsumerWidget {
         );
     }
 
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 640),
+    // The frosted buttons share one reading of what is behind them.
+    return BackdropGroup(
+      child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 52),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: lyricsOpen
-                      ? PlayerGlassButton(
-                          icon: Icons.arrow_back,
-                          frosted: true,
-                          fill: 0.16,
-                          iconSize: 26,
-                          label: 'Back to the player',
-                          onTap: onLeaveLyrics,
-                        )
-                      : PlayerGlassButton(
-                          icon: Icons.expand_more,
-                          frosted: true,
-                          fill: 0.16,
-                          iconSize: 26,
-                          label: 'Close player',
-                          onTap: () => Navigator.of(context).pop(),
-                        ),
-                ),
-                Padding(
-                  // Clear of the buttons on either side.
-                  padding: const EdgeInsets.symmetric(horizontal: 104),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        lyricsOpen ? 'LYRICS' : 'NOW PLAYING',
-                        maxLines: 1,
-                        style: FlexType.custom(
-                          size: 12,
-                          lineHeight: 16,
-                          weight: 540,
-                          letterSpacing: 0.4,
-                        ).copyWith(color: Colors.white.withValues(alpha: 0.95)),
-                      ),
-                      if (subtitle != null && subtitle.isNotEmpty)
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 52),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    // Over the lyrics there is only the blurred backdrop behind
+                    // the buttons, so blurring it again would show nothing.
+                    child: lyricsOpen
+                        ? PlayerGlassButton(
+                            icon: Icons.arrow_back,
+                            fill: 0.16,
+                            iconSize: 26,
+                            label: 'Back to the player',
+                            onTap: onLeaveLyrics,
+                          )
+                        : PlayerGlassButton(
+                            icon: Icons.expand_more,
+                            frosted: true,
+                            fill: 0.16,
+                            iconSize: 26,
+                            label: 'Close player',
+                            onTap: () => Navigator.of(context).pop(),
+                          ),
+                  ),
+                  Padding(
+                    // Clear of the buttons on either side.
+                    padding: const EdgeInsets.symmetric(horizontal: 104),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
                         Text(
-                          subtitle,
+                          lyricsOpen ? 'LYRICS' : 'NOW PLAYING',
                           maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                           style:
                               FlexType.custom(
-                                size: 13,
-                                lineHeight: 18,
-                                weight: 420,
+                                size: 12,
+                                lineHeight: 16,
+                                weight: 540,
+                                letterSpacing: 0.4,
                               ).copyWith(
-                                color: Colors.white.withValues(alpha: 0.70),
+                                color: Colors.white.withValues(alpha: 0.95),
                               ),
                         ),
-                    ],
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      for (final (index, action) in actions.indexed) ...[
-                        if (index > 0) const SizedBox(width: 8),
-                        action,
+                        if (subtitle != null && subtitle.isNotEmpty)
+                          Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                FlexType.custom(
+                                  size: 13,
+                                  lineHeight: 18,
+                                  weight: 420,
+                                ).copyWith(
+                                  color: Colors.white.withValues(alpha: 0.70),
+                                ),
+                          ),
                       ],
-                    ],
+                    ),
                   ),
-                ),
-              ],
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        for (final (index, action) in actions.indexed) ...[
+                          if (index > 0) const SizedBox(width: 8),
+                          action,
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

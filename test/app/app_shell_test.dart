@@ -223,6 +223,72 @@ void main() {
       expect(foldedSearch, findsNothing);
     });
 
+    testWidgets('parts and closes in step with the mini-player above it', (
+      tester,
+    ) async {
+      await _pumpApp(tester, size: phone, tracks: many);
+      await tester.tap(find.text('Library').last);
+      await tester.pumpAndSettle();
+
+      // The cut that parts the tab row in the middle, and the box that
+      // gives up the row's height so the mini-player can come down.
+      final cut = find.descendant(
+        of: find.byType(MornyeBottomBar),
+        matching: find.byWidgetPredicate(
+          (widget) =>
+              widget is ClipPath &&
+              widget.clipper.runtimeType.toString() == '_FoldClipper',
+          skipOffstage: false,
+        ),
+        skipOffstage: false,
+      );
+      final row = find.ancestor(
+        of: cut,
+        matching: find.byWidgetPredicate(
+          (widget) => widget is Align && widget.heightFactor != null,
+          skipOffstage: false,
+        ),
+      );
+      // How far the mini-player has come down, from 0 to 1.
+      double lowered() => 1 - tester.widget<Align>(row.first).heightFactor!;
+      // How far the halves have drawn back to the sides, from 0 to 1, read
+      // from where the left half ends.
+      double parted() {
+        final size = tester.getSize(cut);
+        final shape = tester.widget<ClipPath>(cut).clipper!.getClip(size);
+        var edge = size.width / 2;
+        while (edge > 0 &&
+            !shape.contains(Offset(edge - 0.25, size.height - 30))) {
+          edge -= 0.25;
+        }
+        return (size.width / 2 - edge) / (size.width / 2 - 52);
+      }
+
+      Future<int> watch() async {
+        var midway = 0;
+        for (var i = 0; i < 60; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+          final down = lowered();
+          if (down < 0.03 || down > 0.97) continue;
+          midway++;
+          expect(parted(), closeTo(down, 0.02));
+        }
+        return midway;
+      }
+
+      // Scrolling down: the bar parts as the mini-player comes down.
+      await tester.drag(find.text('Track 3'), const Offset(0, -300));
+      expect(await watch(), greaterThan(8));
+      await tester.pumpAndSettle();
+      expect(lowered(), 1);
+
+      // And back: it fills in from the sides as the mini-player rises.
+      await tester.tap(foldedLeading);
+      expect(await watch(), greaterThan(8));
+      await tester.pumpAndSettle();
+      expect(lowered(), 0);
+    });
+
     testWidgets('stays put when folding is switched off in Settings', (
       tester,
     ) async {
@@ -400,7 +466,10 @@ void main() {
     tester,
   ) async {
     final song = _track('Aashish');
-    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    // Noon, so that five minutes earlier is the same day whatever the time
+    // the test runs at.
+    final now = DateTime.now();
+    final yesterday = DateTime(now.year, now.month, now.day - 1, 12);
     await _pumpApp(
       tester,
       size: const Size(390, 1700),

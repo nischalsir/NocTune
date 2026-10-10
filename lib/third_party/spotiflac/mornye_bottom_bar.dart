@@ -330,8 +330,12 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
                                   clipBehavior: amount == 0
                                       ? Clip.none
                                       : Clip.antiAlias,
+                                  // On the same clock as the mini-player
+                                  // above: the halves have parted exactly
+                                  // when it lands, and have met again
+                                  // exactly when it is back up.
                                   clipper: _FoldClipper(
-                                    progress: (amount / 0.6).clamp(0.0, 1.0),
+                                    progress: amount,
                                     inset: glassTabs ? 8 : 0,
                                   ),
                                   child: amount == 0 ? fullTabs : foldingTabs,

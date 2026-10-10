@@ -23,8 +23,13 @@ flutter pub get
 flutter run                 # debug, on a connected device
 flutter build apk --profile # for measuring real performance
 flutter test
+flutter test --enable-impeller # the same, on the renderer phones use
 flutter analyze
 ```
+
+The bottom bar's glass selector is only drawn by a renderer with shader
+filters, so its tests are skipped by plain `flutter test` and run with
+`--enable-impeller`.
 
 Android compiles against SDK 37. Kotlin incremental compilation is turned off
 in `android/gradle.properties` because the project and the pub cache may sit
@@ -125,6 +130,9 @@ sample data:
 ```powershell
 flutter test tool/preview_screens.dart --dart-define=OUT=C:\some\folder
 ```
+
+Add `--enable-impeller` to have the bar's glass drawn as a phone draws it,
+and `--dart-define=THEME=light` for the light theme.
 
 ## Format labels and lyrics
 

@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderAbstractViewport;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
@@ -354,11 +355,33 @@ const _maxSystemTextScale = 1.3;
 /// How much the line being sung is enlarged.
 const _activeScale = 1.085;
 
+/// An ease for the list's glide to a new line: it sets off at [slope] times
+/// its average speed and comes to rest at the end. With no slope that is a
+/// plain ease in and out. With one, it carries on at the speed the list was
+/// already moving, so a line that arrives mid-glide doesn't stop the list
+/// and start it again.
+class _Glide extends Curve {
+  const _Glide(this.slope);
+
+  /// From 0 to 3; beyond that the curve would overshoot.
+  final double slope;
+
+  @override
+  double transformInternal(double t) =>
+      ((slope - 2) * t + (3 - 2 * slope)) * t * t + slope * t;
+
+  /// How fast the curve is rising at [t], as a multiple of its average.
+  double speedAt(double t) =>
+      (3 * (slope - 2) * t + 2 * (3 - 2 * slope)) * t + slope;
+}
+
 /// Timestamped lyrics that follow playback.
 ///
 /// The list is built once. Each line watches which line is being sung and
 /// redraws itself only when its own look changes, so a line change touches
-/// a handful of rows instead of rebuilding the whole song.
+/// a handful of rows instead of rebuilding the whole song. Every line is its
+/// own layer, so the word fill, which repaints on every frame, redraws
+/// nothing but itself.
 class _SyncedLyrics extends ConsumerStatefulWidget {
   const _SyncedLyrics({
     super.key,
@@ -383,6 +406,13 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
   static const _handsOff = Duration(milliseconds: 2200);
   // The furthest the clock runs ahead of the last position it was told.
   static const _maxCoast = Duration(milliseconds: 300);
+  // How long the list takes to bring a new line into place.
+  static const _glideTime = Duration(milliseconds: 900);
+
+  // The glide under way, kept so the next one can set off at its speed.
+  ({Duration at, double distance, _Glide curve})? _glide;
+  // The frame callback that will start the next glide, if one is waiting.
+  int? _followFrame;
 
   late List<GlobalKey> _keys = _makeKeys();
   DateTime _userScrolledAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -420,9 +450,7 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
     _sinceReport.start();
     _active.value = _indexAt(ref.read(lyricsPositionProvider), _offsetMs);
     // Opens on the line being sung rather than at the top.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _follow(_active.value, animate: false);
-    });
+    _follow(_active.value, animate: false);
   }
 
   @override
@@ -435,6 +463,7 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
 
   @override
   void dispose() {
+    _cancelFollow();
     _frames.dispose();
     _clock.dispose();
     _active.dispose();
@@ -454,23 +483,62 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
     _follow(index);
   }
 
+  /// How fast the list is still gliding at [now], in pixels a second.
+  double _glideSpeed(Duration now) {
+    final glide = _glide;
+    if (glide == null) return 0;
+    final t = (now - glide.at).inMicroseconds / _glideTime.inMicroseconds;
+    if (t < 0 || t >= 1) return 0;
+    return glide.distance *
+        glide.curve.speedAt(t) *
+        Duration.microsecondsPerSecond /
+        _glideTime.inMicroseconds;
+  }
+
+  void _cancelFollow() {
+    final frame = _followFrame;
+    if (frame != null) {
+      WidgetsBinding.instance.cancelFrameCallbackWithId(frame);
+    }
+    _followFrame = null;
+  }
+
   /// Glides the active line to a third of the way down, unless the user has
   /// just been scrolling.
   void _follow(int index, {bool animate = true}) {
     if (index < 0 || index >= _keys.length) return;
     if (DateTime.now().difference(_userScrolledAt) < _handsOff) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _cancelFollow();
+    // Started at the top of the next frame, where an animation gets under
+    // way in that same frame. Started after a frame, a glide that replaces
+    // one still running would stand still for a frame first.
+    _followFrame = WidgetsBinding.instance.scheduleFrameCallback((now) {
+      _followFrame = null;
       final target = _keys[index].currentContext;
       if (!mounted || target == null) return;
-      Scrollable.ensureVisible(
-        target,
-        alignment: 1 / 3,
-        duration: !animate || MediaQuery.disableAnimationsOf(context)
-            ? Duration.zero
-            : const Duration(milliseconds: 900),
-        // Leaves gently and takes its time arriving, with no bounce.
-        curve: Curves.easeInOutCubic,
+      final line = target.findRenderObject()!;
+      final position = Scrollable.of(target).position;
+      final to = RenderAbstractViewport.of(line)
+          .getOffsetToReveal(line, 1 / 3)
+          .offset
+          .clamp(position.minScrollExtent, position.maxScrollExtent)
+          .toDouble();
+      if (!animate || MediaQuery.disableAnimationsOf(context)) {
+        _glide = null;
+        position.jumpTo(to);
+        return;
+      }
+      final distance = to - position.pixels;
+      if (distance.abs() < 0.5) return;
+      // Leaves gently and takes its time arriving, with no bounce. If the
+      // list is still on its way to the line before, it keeps its speed.
+      final seconds =
+          _glideTime.inMicroseconds / Duration.microsecondsPerSecond;
+      final curve = _Glide(
+        (_glideSpeed(now) * seconds / distance).clamp(0.0, 3.0),
       );
+      _glide = (at: now, distance: distance, curve: curve);
+      position.animateTo(to, duration: _glideTime, curve: curve);
     });
   }
 
@@ -480,7 +548,10 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
       ScrollUpdateNotification(:final dragDetails) => dragDetails != null,
       _ => false,
     };
-    if (byHand) _userScrolledAt = DateTime.now();
+    if (byHand) {
+      _userScrolledAt = DateTime.now();
+      _glide = null;
+    }
     return false;
   }
 
@@ -561,35 +632,38 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
                     onNotification: _onScroll,
                     child: SingleChildScrollView(
                       padding: const EdgeInsets.fromLTRB(16, 40, 16, 130),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (final (index, line) in lines.indexed)
-                            Padding(
-                              key: _keys[index],
-                              padding: EdgeInsets.only(
-                                top: index == 0 ? 0 : 26,
+                      // Its own layer: scrolling moves it, and redraws none
+                      // of the lines.
+                      child: RepaintBoundary(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            for (final (index, line) in lines.indexed)
+                              Padding(
+                                key: _keys[index],
+                                padding: EdgeInsets.only(
+                                  top: index == 0 ? 0 : 26,
+                                ),
+                                child: _LyricRow(
+                                  index: index,
+                                  line: line,
+                                  nextLineAt: index + 1 < lines.length
+                                      ? lines[index + 1].time
+                                      : null,
+                                  style: style,
+                                  textWidth: textWidth,
+                                  active: _active,
+                                  clock: _clock,
+                                  sweep: sweep,
+                                  onTap: line.time == null
+                                      ? null
+                                      : () => ref
+                                            .read(audioHandlerProvider)
+                                            .seek(line.time!),
+                                ),
                               ),
-                              child: _LyricRow(
-                                index: index,
-                                line: line,
-                                nextLineAt: index + 1 < lines.length
-                                    ? lines[index + 1].time
-                                    : null,
-                                style: style,
-                                textWidth: textWidth,
-                                active: _active,
-                                clock: _clock,
-                                sweep: sweep,
-                                isPlaying: () => _playing,
-                                onTap: line.time == null
-                                    ? null
-                                    : () => ref
-                                          .read(audioHandlerProvider)
-                                          .seek(line.time!),
-                              ),
-                            ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -609,7 +683,8 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
 ///
 /// Its size on the page never changes, so the lines around it don't move
 /// when it becomes active. Everything that changes is a transform or a
-/// colour, eased in and out, which the screen can redraw on every frame.
+/// colour, eased from where it is, which the screen can redraw on every
+/// frame. Nothing changes in a single step.
 class _LyricRow extends StatefulWidget {
   const _LyricRow({
     required this.index,
@@ -620,7 +695,6 @@ class _LyricRow extends StatefulWidget {
     required this.active,
     required this.clock,
     required this.sweep,
-    required this.isPlaying,
     required this.onTap,
   });
 
@@ -638,15 +712,13 @@ class _LyricRow extends StatefulWidget {
 
   /// Whether the active line fills word by word, or lights up at once.
   final bool sweep;
-  final ValueGetter<bool> isPlaying;
   final VoidCallback? onTap;
 
   @override
   State<_LyricRow> createState() => _LyricRowState();
 }
 
-class _LyricRowState extends State<_LyricRow>
-    with SingleTickerProviderStateMixin {
+class _LyricRowState extends State<_LyricRow> {
   // Beyond this many lines from the active one, every line looks the same.
   static const _reach = 7;
   // An unhurried ease with no overshoot, shared by the row's changes.
@@ -656,10 +728,14 @@ class _LyricRowState extends State<_LyricRow>
   /// above, positive below. Null before the first line is reached.
   int? _relative;
 
-  // Made only for lines that actually trail.
-  AnimationController? _trail;
-  double _trailFrom = 0;
-  Curve _trailCurve = Curves.linear;
+  /// Whether the line is changing size at the moment.
+  bool _scaling = false;
+
+  static double _scaleAt(int? relative) => switch (relative?.abs()) {
+    0 => _activeScale,
+    1 => 0.99,
+    _ => 0.965,
+  };
 
   int? _relativeNow() {
     final active = widget.active.value;
@@ -687,33 +763,18 @@ class _LyricRowState extends State<_LyricRow>
   void _onActiveChanged() {
     final relative = _relativeNow();
     if (relative == _relative) return;
-    final before = _relative;
-    setState(() => _relative = relative);
-
-    // Lines at and below the new active one lag, then settle in turn.
-    final animate =
-        widget.isPlaying() && !MediaQuery.disableAnimationsOf(context);
-    if (animate &&
-        before != null &&
-        relative != null &&
-        relative >= 0 &&
-        relative < _reach) {
-      _trailFrom = 8.0 + relative * 3;
-      const settle = 900;
-      final wait = relative * 45;
-      _trailCurve = Interval(wait / (wait + settle), 1, curve: _ease);
-      (_trail ??= AnimationController(vsync: this))
-        ..duration = Duration(milliseconds: wait + settle)
-        ..forward(from: 0);
-    } else {
-      _trail?.value = 1;
-    }
+    setState(() {
+      if (_scaleAt(relative) != _scaleAt(_relative) &&
+          !MediaQuery.disableAnimationsOf(context)) {
+        _scaling = true;
+      }
+      _relative = relative;
+    });
   }
 
   @override
   void dispose() {
     widget.active.removeListener(_onActiveChanged);
-    _trail?.dispose();
     super.dispose();
   }
 
@@ -735,14 +796,13 @@ class _LyricRowState extends State<_LyricRow>
     // fill while it fades back.
     final filling = widget.sweep && (relative == 0 || relative == -1);
 
-    final scale = isActive ? _activeScale : (distance == 1 ? 0.99 : 0.965);
+    final scale = _scaleAt(relative);
     // Dimming is done in the text colour, not with a layer per line. While
     // it fills, the active line's unsung words wait at a readable grey.
     final opacity = isActive
         ? (widget.sweep ? 0.42 : 1.0)
         : 0.44 * (distance == 1 ? 0.58 : (isPast ? 0.38 : 0.30));
     final shift = isActive ? -3.5 : (isPast ? -1.5 : 3.5);
-    final trail = _trail;
     final glow = [
       Shadow(color: Colors.white.withValues(alpha: 0.50), blurRadius: 8),
     ];
@@ -769,17 +829,20 @@ class _LyricRowState extends State<_LyricRow>
                   curve: _ease,
                   child: Align(
                     alignment: AlignmentDirectional.topStart,
-                    child: LyricFill(
-                      text: shown,
-                      style: widget.style.copyWith(
-                        color: Colors.white,
-                        shadows: glow,
+                    // Repaints on every frame, and only itself.
+                    child: RepaintBoundary(
+                      child: LyricFill(
+                        text: shown,
+                        style: widget.style.copyWith(
+                          color: Colors.white,
+                          shadows: glow,
+                        ),
+                        units: lyricUnits(
+                          widget.line,
+                          nextLineAt: widget.nextLineAt,
+                        ),
+                        position: widget.clock,
                       ),
-                      units: lyricUnits(
-                        widget.line,
-                        nextLineAt: widget.nextLineAt,
-                      ),
-                      position: widget.clock,
                     ),
                   ),
                 ),
@@ -793,31 +856,31 @@ class _LyricRowState extends State<_LyricRow>
       tween: Tween(end: shift),
       duration: timed(900),
       curve: _ease,
-      builder: (context, dy, child) => trail == null
-          ? Transform.translate(offset: Offset(0, dy), child: child)
-          : AnimatedBuilder(
-              animation: trail,
-              builder: (context, child) => Transform.translate(
-                offset: Offset(
-                  0,
-                  dy + _trailFrom * (1 - _trailCurve.transform(trail.value)),
-                ),
-                child: child,
-              ),
-              child: child,
-            ),
+      builder: (context, dy, child) =>
+          Transform.translate(offset: Offset(0, dy), child: child),
       child: AnimatedScale(
         scale: scale,
         alignment: start,
         duration: timed(900),
         curve: _ease,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-          child: Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: ConstrainedBox(
-              constraints: BoxConstraints(maxWidth: widget.textWidth),
-              child: words,
+        // While it changes size the line is scaled as a picture. Drawing the
+        // text itself at a new size on every frame makes the letters jitter
+        // and has every glyph drawn afresh each time. At rest it is text
+        // again, and sharp.
+        filterQuality: _scaling ? FilterQuality.low : null,
+        onEnd: () {
+          if (_scaling) setState(() => _scaling = false);
+        },
+        // Its own layer, so moving or resizing the line redraws nothing.
+        child: RepaintBoundary(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: widget.textWidth),
+                child: words,
+              ),
             ),
           ),
         ),

@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:math' as math;
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +12,7 @@ import 'package:noctune/data/models/track.dart';
 import 'package:noctune/features/lyrics/lyric_fill.dart';
 import 'package:noctune/features/lyrics/lyrics.dart';
 import 'package:noctune/features/lyrics/lyrics_source.dart';
+import 'package:noctune/features/lyrics/lyrics_view.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
 import 'package:noctune/features/playback/now_playing_screen.dart';
@@ -88,6 +92,7 @@ Future<_FakeHandler> _pump(
   bool nothingLoaded = false,
   bool atmosDecoder = false,
   LoadedLyrics? lyrics,
+  Stream<Duration>? lyricsPosition,
   List<MediaItem>? queue,
   Map<String, Object> preferences = const {},
 }) async {
@@ -120,7 +125,7 @@ Future<_FakeHandler> _pump(
           (ref) => Stream.value(const Duration(seconds: 61)),
         ),
         lyricsPositionProvider.overrideWith(
-          (ref) => Stream.value(const Duration(seconds: 61)),
+          (ref) => lyricsPosition ?? Stream.value(const Duration(seconds: 61)),
         ),
         queueProvider.overrideWith((ref) => Stream.value(queue ?? [item])),
       ],
@@ -482,6 +487,144 @@ void main() {
       expect(alpha(tester, 'Second line'), 1);
       expect(find.byType(LyricFill), findsNothing);
     });
+    group('moving to the next line', () {
+      // Fourteen lines ten seconds apart: enough to scroll.
+      final long = LoadedLyrics(
+        parseLyrics(
+          [for (var i = 0; i < 14; i++) '[0${i ~/ 6}:${i % 6}0.00]Line $i']
+              .join('\n'),
+        )!,
+        LyricsOrigin.embedded,
+      );
+
+      // Music is playing, so nothing ever settles: frames are pumped by hand.
+      Future<StreamController<Duration>> play(WidgetTester tester) async {
+        final position = StreamController<Duration>.broadcast();
+        addTearDown(position.close);
+        await _pump(
+          tester,
+          lyrics: long,
+          state: PlaybackState(playing: true),
+          lyricsPosition: position.stream,
+        );
+        await tester.tap(find.byTooltip('Show lyrics'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
+        position.add(const Duration(seconds: 61));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(seconds: 2));
+        return position;
+      }
+
+      ScrollPosition list(WidgetTester tester) => tester
+          .state<ScrollableState>(
+            find
+                .descendant(
+                  of: find.byType(LyricsPanel),
+                  matching: find.byType(Scrollable),
+                )
+                .first,
+          )
+          .position;
+
+      const frame = Duration(milliseconds: 16);
+
+      testWidgets('no line moves in a single step', (tester) async {
+        final position = await play(tester);
+        List<double> tops() => [
+          for (var line = 4; line <= 11; line++)
+            tester.getTopLeft(find.text('Line $line')).dy,
+        ];
+
+        final start = tops();
+        var before = start;
+        var largest = 0.0;
+        position.add(const Duration(seconds: 71));
+        for (var i = 0; i < 90; i++) {
+          await tester.pump(frame);
+          final now = tops();
+          for (var line = 0; line < now.length; line++) {
+            largest = math.max(largest, (now[line] - before[line]).abs());
+          }
+          before = now;
+        }
+
+        // The list has glided up a row, and nothing jumped on the way.
+        expect(start[3] - before[3], greaterThan(40));
+        expect(largest, lessThan(5));
+      });
+
+      testWidgets('a line that arrives mid-glide does not stop the list', (
+        tester,
+      ) async {
+        final position = await play(tester);
+        final scroll = list(tester);
+
+        position.add(const Duration(seconds: 71));
+        await tester.pump(frame);
+        await tester.pump(const Duration(milliseconds: 400));
+        var at = scroll.pixels;
+        await tester.pump(frame);
+        final before = scroll.pixels - at;
+
+        position.add(const Duration(seconds: 81));
+        await tester.pump(frame);
+        final steps = <double>[];
+        for (var i = 0; i < 4; i++) {
+          at = scroll.pixels;
+          await tester.pump(frame);
+          steps.add(scroll.pixels - at);
+        }
+
+        expect(before, greaterThan(1));
+        // It carries on at much the same speed instead of starting again
+        // from rest.
+        for (final step in steps) {
+          expect(step, greaterThan(before * 0.6));
+          expect(step, lessThan(before * 1.6));
+        }
+      });
+
+      testWidgets('a line changes size as a picture, and is text at rest', (
+        tester,
+      ) async {
+        final position = await play(tester);
+        FilterQuality? resizing(int line) => tester
+            .widget<AnimatedScale>(
+              find.ancestor(
+                of: find.text('Line $line'),
+                matching: find.byType(AnimatedScale),
+              ),
+            )
+            .filterQuality;
+        expect(resizing(6), isNull);
+
+        position.add(const Duration(seconds: 71));
+        await tester.pump(frame);
+        await tester.pump(frame);
+
+        // The line coming in and the one going out are resizing.
+        expect(resizing(7), isNotNull);
+        expect(resizing(6), isNotNull);
+        // A line far away keeps its size.
+        expect(resizing(12), isNull);
+
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(frame);
+        expect(resizing(7), isNull);
+        expect(resizing(6), isNull);
+      });
+    });
+
+    testWidgets('blurs nothing over its backdrop', (tester) async {
+      await open(tester, _syncedLyrics);
+
+      // The backdrop is already blurred; a blur per button on every frame
+      // would add nothing but work.
+      expect(find.byType(BackdropFilter), findsNothing);
+    });
+
     testWidgets('tapping a line seeks to it', (tester) async {
       final handler = await open(tester, _syncedLyrics);
 

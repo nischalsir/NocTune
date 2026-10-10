@@ -124,32 +124,35 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
                 : null,
             onHorizontalDragEnd: enabled ? (_) => _commit() : null,
             onHorizontalDragCancel: () => setState(() => _drag = null),
-            child: widget.wave
-                ? TweenAnimationBuilder<double>(
-                    // Waves sink to a ripple while the thumb is held.
-                    tween: Tween(end: dragging ? 0.0 : 1.0),
-                    duration: const Duration(milliseconds: 180),
-                    builder: (context, calm, _) => CustomPaint(
-                      size: Size(width, 50),
-                      painter: _WavePainter(
-                        drift: _drift,
+            // The wave moves on every frame; nothing else is redrawn for it.
+            child: RepaintBoundary(
+              child: widget.wave
+                  ? TweenAnimationBuilder<double>(
+                      // Waves sink to a ripple while the thumb is held.
+                      tween: Tween(end: dragging ? 0.0 : 1.0),
+                      duration: const Duration(milliseconds: 180),
+                      builder: (context, calm, _) => CustomPaint(
+                        size: Size(width, 50),
+                        painter: _WavePainter(
+                          drift: _drift,
+                          fraction: fraction,
+                          calm: calm,
+                          primary: primary,
+                          secondary: _luminous(scheme.secondary, 0.52),
+                          tertiary: _luminous(scheme.tertiary, 0.48),
+                        ),
+                      ),
+                    )
+                  : CustomPaint(
+                      size: Size(width, 44),
+                      painter: _BarPainter(
                         fraction: fraction,
-                        calm: calm,
-                        primary: primary,
-                        secondary: _luminous(scheme.secondary, 0.52),
-                        tertiary: _luminous(scheme.tertiary, 0.48),
+                        color: enabled
+                            ? primary
+                            : Colors.white.withValues(alpha: 0.34),
                       ),
                     ),
-                  )
-                : CustomPaint(
-                    size: Size(width, 44),
-                    painter: _BarPainter(
-                      fraction: fraction,
-                      color: enabled
-                          ? primary
-                          : Colors.white.withValues(alpha: 0.34),
-                    ),
-                  ),
+            ),
           );
         },
       ),

@@ -1,7 +1,8 @@
 // Copied from SpotiFLAC-Mobile (https://github.com/zarzet/SpotiFLAC-Mobile),
 // Copyright (c) 2026 zarzet, MIT licence. See LICENSE in this folder.
-// Changes for NocTune: imports, app-specific hooks, and the flat pill behind
-// the selected item, which is not drawn when the glass lens is.
+// Changes for NocTune: imports, app-specific hooks, and the hand-over between
+// the flat pill and the glass lens: the pill marks the selection at rest, the
+// lens carries it while it moves, and the two are never shown together.
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -17,6 +18,8 @@ Future<ui.FragmentProgram>? _selectionMaskProgram;
 const _heldWidthGrowth = 0.28;
 const _heldHeightGrowth = 0.24;
 const _pillRadius = 32.0;
+// NocTune: how long the selection takes to move to a tab.
+const _travelTime = Duration(milliseconds: 220);
 
 /// Selection with a transient lens over the fixed-size foreground while held.
 /// It refracts both the bar's backdrop and its icons, rendered only once.
@@ -66,6 +69,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
   double? _dragAlignment;
   int? _activePointer;
   final _foregroundKey = GlobalKey();
+  Timer? _settleTimer;
   late final AnimationController _pressController;
   late final CurvedAnimation _pressAnimation;
   ui.FragmentProgram? _maskProgram;
@@ -77,6 +81,13 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
       vsync: this,
       duration: const Duration(milliseconds: 240),
     );
+    // NocTune: the glass stays up until it has arrived, even after a quick
+    // tap, and only then gives way to the flat pill.
+    _pressController.addStatusListener((status) {
+      if (status == AnimationStatus.completed && !_pressed) {
+        _pressController.reverse();
+      }
+    });
     _pressAnimation = CurvedAnimation(
       parent: _pressController,
       curve: Curves.easeOutCubic,
@@ -99,6 +110,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
 
   @override
   void dispose() {
+    _settleTimer?.cancel();
     _pressAnimation.dispose();
     _pressController.dispose();
     super.dispose();
@@ -116,6 +128,36 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
       _dragAlignment = null;
       _pressedIndex = null;
     }
+    // NocTune: a page changed from elsewhere (the back button, a shortcut)
+    // moves the selection in glass too. Not while the bar is folded away.
+    if (oldWidget.selectedIndex != widget.selectedIndex &&
+        !_pressed &&
+        _lensEnabled &&
+        TickerMode.valuesOf(context).enabled) {
+      _pressController.forward();
+    }
+  }
+
+  bool get _lensEnabled =>
+      widget.liquidInteraction &&
+      ui.ImageFilter.isShaderFilterSupported &&
+      !MediaQuery.disableAnimationsOf(context) &&
+      !MediaQuery.highContrastOf(context);
+
+  // NocTune: the finger has left. Glass that is still coming up finishes
+  // first (see the status listener). Glass that is fully up goes once the
+  // selection has stopped: at once after a press, and after a slide when the
+  // selection has settled onto its tab.
+  void _releaseGlass() {
+    if (!_pressController.isCompleted) return;
+    _settleTimer?.cancel();
+    if (_dragAlignment == null) {
+      _pressController.reverse();
+      return;
+    }
+    _settleTimer = Timer(_travelTime, () {
+      if (mounted && !_pressed) _pressController.reverse();
+    });
   }
 
   void _preview(double x, double width) {
@@ -148,12 +190,10 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
     if (count == 0) return const SizedBox.shrink();
     final selected = _dragIndex ?? _pressedIndex ?? widget.selectedIndex;
     final scheme = Theme.of(context).colorScheme;
-    final lensEnabled =
-        widget.liquidInteraction &&
-        ui.ImageFilter.isShaderFilterSupported &&
-        !MediaQuery.disableAnimationsOf(context) &&
-        !MediaQuery.highContrastOf(context);
+    final lensEnabled = _lensEnabled;
     final pressProgress = lensEnabled ? _pressAnimation.value : 0.0;
+    // NocTune: how much of the flat pill shows. None while the glass is up.
+    final rest = 1 - pressProgress;
     final content = Listener(
       // An accepted drag can end with a PointerCancelEvent. Do not navigate
       // when the OS interrupts the gesture (e.g. opening system controls).
@@ -180,7 +220,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
       onPointerUp: (event) {
         if (event.pointer != _activePointer) return;
         _activePointer = null;
-        _pressController.reverse();
+        _releaseGlass();
         setState(() {
           _pressed = false;
           _pressedIndex = null;
@@ -190,7 +230,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
       onPointerCancel: (event) {
         if (event.pointer != _activePointer) return;
         _activePointer = null;
-        _pressController.reverse();
+        _releaseGlass();
         setState(() {
           _dragCancelled = true;
           _pressed = false;
@@ -223,9 +263,10 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
               fit: StackFit.passthrough,
               clipBehavior: Clip.none,
               children: [
-                // NocTune: the glass lens marks the selection on its own.
-                // The flat pill is only for devices that draw no lens.
-                if (!lensEnabled && selected >= 0 && selected < count)
+                // NocTune: the flat pill marks the selection at rest. It
+                // fades out as the glass lens comes up and returns once the
+                // lens has gone, so the two are never seen together.
+                if (selected >= 0 && selected < count)
                   Positioned.fill(
                     child: IgnorePointer(
                       child: AnimatedAlign(
@@ -248,20 +289,24 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
                           child: DecoratedBox(
                             decoration: BoxDecoration(
                               color: scheme.onSurface.withValues(
-                                alpha: lensEnabled && _pressed
-                                    ? 0.025
-                                    : scheme.brightness == Brightness.dark
-                                    ? 0.12
-                                    : 0.08,
+                                alpha:
+                                    rest *
+                                    (scheme.brightness == Brightness.dark
+                                        ? 0.12
+                                        : 0.08),
                               ),
                               borderRadius: BorderRadius.circular(_pillRadius),
                               border: Border.all(
-                                color: scheme.onSurface.withValues(alpha: 0.05),
+                                color: scheme.onSurface.withValues(
+                                  alpha: 0.05 * rest,
+                                ),
                                 width: 0.5,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.08),
+                                  color: Colors.black.withValues(
+                                    alpha: 0.08 * rest,
+                                  ),
                                   blurRadius: 1,
                                   offset: const Offset(0, 0.5),
                                 ),

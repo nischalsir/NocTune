@@ -8,7 +8,8 @@ const kPlayerGlassRim = BorderSide(color: Color(0x3DFFFFFF));
 
 /// A round glass button for the dark player, with a thin light rim. It dips
 /// while pressed. With [frosted] it also blurs what is behind it, for the
-/// buttons that sit on the cover.
+/// buttons that sit on the cover. Frosted buttons under one [BackdropGroup]
+/// share a single reading of what is behind them.
 class PlayerGlassButton extends StatefulWidget {
   const PlayerGlassButton({
     super.key,
@@ -52,7 +53,7 @@ class _PlayerGlassButtonState extends State<PlayerGlassButton> {
 
   Widget _frost(Widget glass) => widget.frosted
       ? ClipOval(
-          child: BackdropFilter(
+          child: BackdropFilter.grouped(
             filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
             child: glass,
           ),

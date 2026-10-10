@@ -2,6 +2,7 @@
 // without a device. Uses fixed sample data, never the real library.
 //
 //     flutter test tool/preview_screens.dart --dart-define=OUT=<folder>
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -144,6 +145,8 @@ void main() {
       required Widget child,
       required Track playing,
       bool atmos = false,
+      // The lyrics' clock, for a shot that moves it by hand.
+      Stream<Duration>? lyricsPosition,
       Future<void> Function()? act,
       // False to capture the frame [act] leaves, e.g. part-way through an
       // animation, instead of letting things come to rest first.
@@ -238,7 +241,8 @@ void main() {
               (ref) => Stream.value(const Duration(seconds: 63)),
             ),
             lyricsPositionProvider.overrideWith(
-              (ref) => Stream.value(const Duration(seconds: 63)),
+              (ref) =>
+                  lyricsPosition ?? Stream.value(const Duration(seconds: 63)),
             ),
             playbackErrorProvider.overrideWith((ref) => const Stream.empty()),
             queueProvider.overrideWith((ref) => Stream.value(const [])),
@@ -312,6 +316,25 @@ void main() {
         },
       );
     }
+    // The bar with a finger held on a tab: the glass selector is up and the
+    // flat pill has made way for it. Only a renderer with shader filters
+    // draws the glass, so run with --enable-impeller to see it.
+    TestGesture? finger;
+    await shoot(
+      '10_bar_pressed',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      settleAfterAct: false,
+      act: () async {
+        finger = await tester.startGesture(
+          tester.getCenter(find.text('Library').last),
+        );
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 260));
+      },
+    );
+    await finger?.up();
+    await tester.pump();
     await shoot('3_player_lossless', child: player(), playing: tracks[0]);
     await shoot(
       '4_player_atmos',
@@ -325,6 +348,29 @@ void main() {
       playing: tracks[0],
       act: () => tester.tap(find.byTooltip('Show lyrics')),
     );
+    // The lyrics a moment into a line change, to check that the lines
+    // changing size are drawn right while they are scaled as pictures.
+    final clock = StreamController<Duration>.broadcast();
+    await shoot(
+      '11_lyrics_changing',
+      child: player(),
+      playing: tracks[0],
+      lyricsPosition: clock.stream,
+      settleAfterAct: false,
+      act: () async {
+        await tester.tap(find.byTooltip('Show lyrics'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
+        clock.add(const Duration(seconds: 41));
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 2));
+        clock.add(const Duration(seconds: 61));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 16));
+        await tester.pump(const Duration(milliseconds: 150));
+      },
+    );
+    await clock.close();
     await shoot(
       '6_settings',
       child: const NocTuneApp(),
