@@ -9,6 +9,17 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.3.1 (build 5) - 2026-10-10
+
+Published as a normal release at the owner's request; not yet run on a
+phone.
+
+### Changed
+
+- The bottom bar now reads Home, Library, Search, Settings: Search and
+  Settings swapped places. Settings, being last, is also the button the bar
+  keeps on its right when it folds.
+
 ## 1.3.0 (build 4) - 2026-10-10
 
 Published as a normal release at the owner's request. It passes the automated
