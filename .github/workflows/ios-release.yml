@@ -1,0 +1,50 @@
+name: iOS build
+
+# Builds an unsigned IPA on a macOS runner and attaches it to a release.
+# It is unsigned: there is no Apple developer certificate in this repository,
+# so it must be re-signed by a sideloading tool to install.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to attach the IPA to
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  ipa:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name || inputs.tag }}
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.47.5
+          cache: true
+
+      - run: flutter pub get
+
+      - name: Build without code signing
+        run: >
+          flutter build ios --release --no-codesign
+          --dart-define=NOCTUNE_UPDATE_MANIFEST=https://api.github.com/repos/${{ github.repository }}/releases/latest
+
+      - name: Package as IPA
+        run: |
+          mkdir Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry NocTune-unsigned.ipa Payload
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release upload "${{ github.event.release.tag_name || inputs.tag }}"
+          NocTune-unsigned.ipa --clobber
