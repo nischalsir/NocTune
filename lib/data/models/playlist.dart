@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
 
+import 'track.dart';
+
 /// A user-created playlist.
 @immutable
 class Playlist {
@@ -31,6 +33,7 @@ class TrackGroupSummary {
     required this.trackCount,
     this.artPath,
     this.artist,
+    this.playCount = 0,
   });
 
   factory TrackGroupSummary.fromRow(Map<String, Object?> row) =>
@@ -39,6 +42,7 @@ class TrackGroupSummary {
         trackCount: row['track_count']! as int,
         artPath: row['art_path'] as String?,
         artist: row['artist'] as String?,
+        playCount: row['plays'] as int? ?? 0,
       );
 
   final String name;
@@ -49,6 +53,10 @@ class TrackGroupSummary {
 
   /// An artist credited in the group; meaningful for albums.
   final String? artist;
+
+  /// Plays of the group's tracks added together; only filled in by the
+  /// most-played queries.
+  final int playCount;
 }
 
 /// Headline numbers for the whole library.
@@ -60,6 +68,7 @@ class LibraryStats {
     required this.artistCount,
     required this.totalDuration,
     this.playCount = 0,
+    this.listenedDuration = Duration.zero,
   });
 
   final int trackCount;
@@ -69,4 +78,14 @@ class LibraryStats {
 
   /// How many times tracks have been played in this app, in total.
   final int playCount;
+
+  /// An estimate of the time spent listening: every play counted at the
+  /// track's full length.
+  final Duration listenedDuration;
 }
+
+/// One entry of the play log: a track and when it was played.
+typedef PlayedTrack = ({Track track, DateTime playedAt});
+
+/// A track and how many times it was played in some period.
+typedef TrackPlays = ({Track track, int plays});

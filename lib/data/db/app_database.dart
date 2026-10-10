@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 
 /// Opens NocTune's on-device SQLite database and owns its schema.
 abstract final class AppDatabase {
-  static const _version = 2;
+  static const _version = 3;
 
   /// Opens the database. Tests pass an in-memory [path] and an FFI [factory].
   static Future<Database> open({String? path, DatabaseFactory? factory}) async {
@@ -90,6 +90,25 @@ abstract final class AppDatabase {
           content TEXT NOT NULL
         )
       ''');
+    }
+    if (from < 3) {
+      // One row per time a track was played, which is what lets the home
+      // screen group listening by day and rank it by period.
+      await db.execute('''
+        CREATE TABLE plays(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+          played_at INTEGER NOT NULL
+        )
+      ''');
+      await db.execute('CREATE INDEX plays_played_at ON plays(played_at)');
+      // Earlier versions kept only each track's latest play; carry that one
+      // over so the history isn't empty after the upgrade.
+      await db.execute(
+        'INSERT INTO plays(track_id, played_at) '
+        'SELECT id, last_played_at FROM tracks '
+        'WHERE last_played_at IS NOT NULL',
+      );
     }
   }
 }

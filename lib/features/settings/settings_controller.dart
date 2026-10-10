@@ -11,6 +11,7 @@ class AppSettings {
     required this.accent,
     required this.accentFromCover,
     this.lyricsScale = 1,
+    this.foldNavigationOnScroll = true,
   });
 
   final ThemeMode themeMode;
@@ -24,16 +25,22 @@ class AppSettings {
   /// Multiplier applied to the lyrics text size.
   final double lyricsScale;
 
+  /// Whether the navigation bar folds away while a page is scrolled down.
+  final bool foldNavigationOnScroll;
+
   AppSettings copyWith({
     ThemeMode? themeMode,
     NocAccent? accent,
     bool? accentFromCover,
     double? lyricsScale,
+    bool? foldNavigationOnScroll,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     accent: accent ?? this.accent,
     accentFromCover: accentFromCover ?? this.accentFromCover,
     lyricsScale: lyricsScale ?? this.lyricsScale,
+    foldNavigationOnScroll:
+        foldNavigationOnScroll ?? this.foldNavigationOnScroll,
   );
 }
 
@@ -43,10 +50,11 @@ class SettingsController extends Notifier<AppSettings> {
   static const _accentKey = 'accent';
   static const _coverAccentKey = 'accent_from_cover';
   static const _lyricsScaleKey = 'lyrics_scale';
+  static const _foldNavigationKey = 'fold_navigation_on_scroll';
 
   /// Smallest and largest lyrics text multipliers offered.
   static const minLyricsScale = 0.7;
-  static const maxLyricsScale = 1.6;
+  static const maxLyricsScale = 1.5;
 
   @override
   AppSettings build() {
@@ -60,7 +68,10 @@ class SettingsController extends Notifier<AppSettings> {
           NocAccent.values.asNameMap()[prefs.getString(_accentKey)] ??
           NocAccent.red,
       accentFromCover: prefs.getBool(_coverAccentKey) ?? true,
-      lyricsScale: prefs.getDouble(_lyricsScaleKey) ?? 1,
+      lyricsScale: (prefs.getDouble(_lyricsScaleKey) ?? 1)
+          .clamp(minLyricsScale, maxLyricsScale)
+          .toDouble(),
+      foldNavigationOnScroll: prefs.getBool(_foldNavigationKey) ?? true,
     );
   }
 
@@ -74,13 +85,16 @@ class SettingsController extends Notifier<AppSettings> {
     state = state.copyWith(accent: accent);
   }
 
-  /// Makes the lyrics text one step larger or smaller, within limits.
-  void stepLyricsScale({required bool larger}) {
-    final scale = (state.lyricsScale + (larger ? 0.15 : -0.15))
-        .clamp(minLyricsScale, maxLyricsScale)
-        .toDouble();
+  /// Sets the lyrics text multiplier, kept within the limits.
+  void setLyricsScale(double value) {
+    final scale = value.clamp(minLyricsScale, maxLyricsScale).toDouble();
     ref.read(sharedPreferencesProvider).setDouble(_lyricsScaleKey, scale);
     state = state.copyWith(lyricsScale: scale);
+  }
+
+  void setFoldNavigationOnScroll(bool enabled) {
+    ref.read(sharedPreferencesProvider).setBool(_foldNavigationKey, enabled);
+    state = state.copyWith(foldNavigationOnScroll: enabled);
   }
 
   void setAccentFromCover(bool enabled) {

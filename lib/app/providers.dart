@@ -80,8 +80,26 @@ final recentlyPlayedProvider = FutureProvider<List<Track>>(
 );
 
 final mostPlayedProvider = FutureProvider<List<Track>>(
-  (ref) => _liveRepository(ref).mostPlayed(),
+  (ref) => _liveRepository(ref).mostPlayed(limit: 100),
 );
+
+/// The play log, newest first.
+final playLogProvider = FutureProvider<List<PlayedTrack>>(
+  (ref) => _liveRepository(ref).playLog(),
+);
+
+/// The most played tracks of the last so-many days.
+final topTracksInDaysProvider = FutureProvider.family<List<TrackPlays>, int>(
+  (ref, days) =>
+      _liveRepository(ref)
+          .topTracksSince(DateTime.now().subtract(Duration(days: days))),
+);
+
+/// The most played albums or artists.
+final topGroupsProvider =
+    FutureProvider.family<List<TrackGroupSummary>, TrackGroup>(
+      (ref, group) => _liveRepository(ref).topGroups(group),
+    );
 
 final recentlyAddedProvider = FutureProvider<List<Track>>(
   (ref) => _liveRepository(ref).recentlyAdded(),

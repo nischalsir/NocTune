@@ -49,6 +49,7 @@ dependencies:
   material_color_utilities: ^0.13.0
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
+  liquid_glass_easy: 4.3.4
 
 dev_dependencies:
   flutter_test:
@@ -72,6 +73,24 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  # Licence texts shown on the in-app open-source licences page.
+  assets:
+    - assets/licenses/
+
+  # Fragment shader used by the navigation bar's glass selection pill.
+  shaders:
+    - assets/shaders/mornye_selection_mask.frag
+
+  fonts:
+    # Navigation bar typeface.
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/InterVariable.ttf
+    # Home and lyrics typeface.
+    - family: Google Sans Flex
+      fonts:
+        - asset: assets/fonts/GoogleSansFlex.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

@@ -55,6 +55,18 @@ Future<void> _loadFonts() async {
           .then(ByteData.sublistView),
     );
   await icons.load();
+  // The app's own typefaces and the icon font of the navigation bar, read
+  // from the asset bundle the test runner builds.
+  for (final (family, asset) in const [
+    ('Google Sans Flex', 'assets/fonts/GoogleSansFlex.ttf'),
+    ('Inter', 'assets/fonts/InterVariable.ttf'),
+    (
+      'packages/cupertino_icons/CupertinoIcons',
+      'packages/cupertino_icons/assets/CupertinoIcons.ttf',
+    ),
+  ]) {
+    await (FontLoader(family)..addFont(rootBundle.load(asset))).load();
+  }
 }
 
 Future<String> _cover(String name, Color a, Color b) async {
@@ -142,6 +154,28 @@ void main() {
             recentlyAddedProvider.overrideWith((ref) => tracks),
             recentlyPlayedProvider.overrideWith((ref) => tracks),
             mostPlayedProvider.overrideWith((ref) => tracks),
+            playLogProvider.overrideWith((ref) {
+              final now = DateTime.now();
+              DateTime ago(int days, int minutes) =>
+                  now.subtract(Duration(days: days, minutes: minutes));
+              return [
+                (track: tracks[0], playedAt: ago(0, 1)),
+                (track: tracks[2], playedAt: ago(0, 20)),
+                (track: tracks[1], playedAt: ago(0, 45)),
+                (track: tracks[2], playedAt: ago(0, 70)),
+                (track: tracks[4], playedAt: ago(1, 10)),
+                (track: tracks[4], playedAt: ago(1, 30)),
+                (track: tracks[4], playedAt: ago(1, 50)),
+                (track: tracks[5], playedAt: ago(1, 90)),
+                (track: tracks[6], playedAt: ago(6, 0)),
+              ];
+            }),
+            topTracksInDaysProvider.overrideWith(
+              (ref, days) => [
+                for (final t in tracks) (track: t, plays: t.playCount),
+              ],
+            ),
+            topGroupsProvider.overrideWith((ref, group) => const []),
             favoritesProvider.overrideWith((ref) => const []),
             libraryStatsProvider.overrideWith(
               (ref) => const LibraryStats(
@@ -150,6 +184,7 @@ void main() {
                 artistCount: 142,
                 totalDuration: Duration(hours: 21, minutes: 14),
                 playCount: 1284,
+                listenedDuration: Duration(hours: 86, minutes: 21),
               ),
             ),
             currentTrackProvider.overrideWith((ref) => playing),
@@ -244,6 +279,23 @@ void main() {
       child: player(),
       playing: tracks[0],
       act: () => tester.tap(find.byTooltip('Show lyrics')),
+    );
+    await shoot(
+      '6_settings',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: () => tester.tap(find.byTooltip('Settings')),
+    );
+    await shoot(
+      '7_settings_about',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: () async {
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.drag(find.byType(Scrollable).last, const Offset(0, -2400));
+      },
     );
     tester.view.reset();
   });

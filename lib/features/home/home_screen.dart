@@ -3,65 +3,104 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../core/format.dart';
+import '../../core/theme/flex_type.dart';
 import '../../core/theme/noc_palette.dart';
-import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
-import '../../core/widgets/frosted.dart';
 import '../../core/widgets/pressable.dart';
-import '../../data/models/playlist.dart';
 import '../../data/models/track.dart';
+import '../../data/repositories/library_repository.dart';
+import '../library/collection_screen.dart';
 import '../library/scan/add_music_actions.dart';
 import '../library/scan/scan_banner.dart';
 import '../library/track_menu.dart';
+import '../playback/now_playing_screen.dart';
+import 'home_feed.dart';
 import 'home_hero.dart';
+import 'home_rows.dart';
 
-/// Which tracks the home list shows.
-enum FeedList {
-  recent('Recent', Icons.schedule_rounded, 'Nothing played yet'),
-  mostPlayed('Most played', Icons.trending_up_rounded, 'Nothing played yet'),
-  added('Recently added', Icons.fiber_new_rounded, 'No tracks yet'),
-  favourites('Favourites', Icons.favorite_rounded, 'No favourites yet');
-
-  const FeedList(this.label, this.icon, this.emptyText);
-
-  final String label;
-  final IconData icon;
-  final String emptyText;
-}
-
-/// The home feed: a hero featuring one track, a row of summary pills, a
-/// statistics card with one headline number over three tiles, and a
-/// switchable track list. Every number and row comes from the library on
-/// this device.
+/// The home screen: a hero featuring one track, then the listening feed: a
+/// pill row with the listening time, a statistics card, and a list that can
+/// show recent plays by day, the most played tracks overall or lately, and
+/// the top artists and albums. Every number and row comes from what has been
+/// played on this device.
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({
     super.key,
     required this.onOpenSearch,
     required this.onOpenLibrary,
+    required this.onOpenSettings,
   });
 
   final VoidCallback onOpenSearch;
   final VoidCallback onOpenLibrary;
+  final VoidCallback onOpenSettings;
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  FeedList _list = FeedList.recent;
+  HomeSort _sort = HomeSort.recent;
+
+  /// The rows of the list in its current mode, and whether they are still
+  /// being read.
+  (List<HomeRow>, bool) _rows(Track? nowPlaying) {
+    switch (_sort) {
+      case HomeSort.recent:
+        final log = ref.watch(playLogProvider);
+        return (
+          recentRows(
+            log.value ?? const [],
+            now: DateTime.now(),
+            nowPlaying: nowPlaying,
+          ),
+          log.isLoading,
+        );
+      case HomeSort.mostPlayed:
+        final tracks = ref.watch(mostPlayedProvider);
+        return (
+          rankedRows([
+            for (final track in tracks.value ?? const <Track>[])
+              (track: track, plays: track.playCount),
+          ], nowPlaying: nowPlaying),
+          tracks.isLoading,
+        );
+      case HomeSort.last7Days || HomeSort.last30Days:
+        final ranked = ref.watch(
+          topTracksInDaysProvider(_sort == HomeSort.last7Days ? 7 : 30),
+        );
+        return (
+          rankedRows(ranked.value ?? const [], nowPlaying: nowPlaying),
+          ranked.isLoading,
+        );
+      case HomeSort.topArtists:
+        final artists = ref.watch(topGroupsProvider(TrackGroup.artist));
+        return (
+          [for (final artist in artists.value ?? const []) ArtistRow(artist)],
+          artists.isLoading,
+        );
+      case HomeSort.topAlbums:
+        final albums = ref.watch(topGroupsProvider(TrackGroup.album));
+        return (
+          [for (final album in albums.value ?? const []) AlbumRow(album)],
+          albums.isLoading,
+        );
+    }
+  }
+
+  void _openGroup(TrackGroup group, String name) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => GroupScreen(group: group, name: name),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final stats = ref.watch(libraryStatsProvider);
-    final tracks = ref.watch(switch (_list) {
-      FeedList.recent => recentlyPlayedProvider,
-      FeedList.mostPlayed => mostPlayedProvider,
-      FeedList.added => recentlyAddedProvider,
-      FeedList.favourites => favoritesProvider,
-    });
     final currentId = ref.watch(currentTrackIdProvider);
-    final palette = context.noc;
+    final scheme = Theme.of(context).colorScheme;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
     Future<void> shuffleAll() async {
@@ -73,7 +112,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     // Shown while there is no track to feature: an empty or loading library.
-    final header = _Header(onOpenSearch: widget.onOpenSearch);
+    final header = _Header(
+      onOpenSearch: widget.onOpenSearch,
+      onOpenSettings: widget.onOpenSettings,
+    );
 
     final summary = stats.value;
     if (stats.isLoading && summary == null) {
@@ -105,11 +147,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       );
     }
 
-    final rows = tracks.value ?? const <Track>[];
-    // Favourites can be long; the feed shows the first of them and the
-    // library holds the rest.
-    final shown = rows.take(30).toList();
-
     // The hero features what is in the player; failing that, the last thing
     // played; failing that, the newest arrival.
     final playing = ref.watch(currentTrackProvider).value;
@@ -123,9 +160,55 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
 
+    final (rows, loading) = _rows(current);
+    // Tapping a track plays the list from there, in the order shown.
+    final queue = [
+      for (final row in rows)
+        if (row is TrackRow) row.track,
+    ];
+    final queueIndex = <HomeRow, int>{};
+    for (final row in rows) {
+      if (row is TrackRow) queueIndex[row] = queueIndex.length;
+    }
+
+    Widget buildRow(BuildContext context, int index) {
+      final row = rows[index];
+      return KeyedSubtree(
+        key: ValueKey(row.key),
+        child: switch (row) {
+          DateHeaderRow(:final label) => HomeDateHeader(label: label),
+          TrackRow(:final track, :final badge, :final isNowPlaying) =>
+            HomeTrackRow(
+              track: track,
+              badge: badge,
+              isNowPlaying: isNowPlaying,
+              isPlaying: isPlaying,
+              // The track in the player opens the player rather than
+              // starting itself over.
+              onTap: isNowPlaying
+                  ? () => showNowPlaying(context)
+                  : () => ref
+                        .read(audioHandlerProvider)
+                        .playTracks(queue, initialIndex: queueIndex[row]!),
+              onMenu: () => showTrackMenu(context, ref, track),
+            ),
+          AlbumRow(:final album) => HomeGroupRow(
+            group: album,
+            isArtist: false,
+            onTap: () => _openGroup(TrackGroup.album, album.name),
+          ),
+          ArtistRow(:final artist) => HomeGroupRow(
+            group: artist,
+            isArtist: true,
+            onTap: () => _openGroup(TrackGroup.artist, artist.name),
+          ),
+        },
+      );
+    }
+
     return Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 760),
+        constraints: const BoxConstraints(maxWidth: 860),
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
@@ -140,74 +223,64 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 ? 'JUMP BACK IN'
                                 : 'RECENTLY ADDED'),
                       onOpenSearch: widget.onOpenSearch,
+                      onOpenSettings: widget.onOpenSettings,
                       onPlay: () =>
                           ref.read(audioHandlerProvider).playTracks([featured]),
                     ),
             ),
-            SliverToBoxAdapter(
-              child: _SummaryPills(stats: summary, onShuffleAll: shuffleAll),
-            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 10)),
+            SliverToBoxAdapter(child: HomeHeaderRow(onShuffleAll: shuffleAll)),
+            const SliverToBoxAdapter(child: SizedBox(height: 2)),
             const SliverToBoxAdapter(child: ScanBanner()),
             SliverToBoxAdapter(
-              child: _StatsCard(
+              child: HomeStatsCard(
                 stats: summary,
                 onOpenLibrary: widget.onOpenLibrary,
               ),
             ),
-            // One card holding the list heading and its rows. Rows are built
-            // lazily as they scroll into view.
+            const SliverToBoxAdapter(child: SizedBox(height: 12)),
+            // One rounded container holding the list heading and its rows.
+            // Rows are built lazily as they scroll into view.
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               sliver: DecoratedSliver(
                 decoration: BoxDecoration(
-                  color: palette.glass,
-                  borderRadius: BorderRadius.circular(30),
+                  color: scheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(28),
                 ),
-                sliver: SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(8, 14, 8, 10),
-                  sliver: SliverMainAxisGroup(
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: _ListHeading(
-                          selected: _list,
-                          onSelected: (list) => setState(() => _list = list),
+                sliver: SliverMainAxisGroup(
+                  slivers: [
+                    SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      sliver: SliverToBoxAdapter(
+                        child: HomeListHeader(
+                          sort: _sort,
+                          onSortChanged: (sort) => setState(() => _sort = sort),
                         ),
                       ),
-                      if (shown.isEmpty)
-                        SliverToBoxAdapter(
-                          child: Padding(
-                            padding: const EdgeInsets.all(28),
-                            child: Text(
-                              tracks.isLoading ? 'Loading…' : _list.emptyText,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    if (rows.isEmpty)
+                      SliverToBoxAdapter(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 48),
+                          child: Text(
+                            loading ? 'Loading…' : 'No tracks yet',
+                            textAlign: TextAlign.center,
+                            style: FlexType.bodyLarge.copyWith(
+                              color: scheme.onSurfaceVariant,
                             ),
                           ),
-                        )
-                      else
-                        SliverList.builder(
-                          itemCount: shown.length,
-                          itemBuilder: (context, index) {
-                            final track = shown[index];
-                            return _FeedRow(
-                              track: track,
-                              isCurrent: track.id == currentId,
-                              onTap: () => ref
-                                  .read(audioHandlerProvider)
-                                  .playTracks(shown, initialIndex: index),
-                              onMenu: () => showTrackMenu(context, ref, track),
-                            );
-                          },
                         ),
-                      if (rows.length > shown.length)
-                        SliverToBoxAdapter(
-                          child: TextButton(
-                            onPressed: widget.onOpenLibrary,
-                            child: Text('View all ${rows.length} in Library'),
-                          ),
+                      )
+                    else
+                      SliverPadding(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                        sliver: SliverList.builder(
+                          itemCount: rows.length,
+                          itemBuilder: buildRow,
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -219,11 +292,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// The rounded header panel: the app's name and a way into search.
+/// The rounded header panel shown before there is a track to feature: the
+/// app's name, and the ways into search and settings.
 class _Header extends StatelessWidget {
-  const _Header({required this.onOpenSearch});
+  const _Header({required this.onOpenSearch, required this.onOpenSettings});
 
   final VoidCallback onOpenSearch;
+  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -258,6 +333,12 @@ class _Header extends StatelessWidget {
                 icon: Icons.search_rounded,
                 label: 'Search',
                 onTap: onOpenSearch,
+              ),
+              const SizedBox(width: 8),
+              _RoundAction(
+                icon: Icons.settings_rounded,
+                label: 'Settings',
+                onTap: onOpenSettings,
               ),
             ],
           ),
@@ -295,342 +376,6 @@ class _RoundAction extends StatelessWidget {
             shape: BoxShape.circle,
           ),
           child: Icon(icon, color: palette.textPrimary),
-        ),
-      ),
-    );
-  }
-}
-
-/// Pills under the hero: how much music there is, and a button to shuffle
-/// all of it.
-class _SummaryPills extends StatelessWidget {
-  const _SummaryPills({required this.stats, required this.onShuffleAll});
-
-  final LibraryStats stats;
-  final VoidCallback onShuffleAll;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        runSpacing: 8,
-        spacing: 8,
-        children: [
-          _Pill(
-            icon: Icons.headphones_rounded,
-            text: '${formatLongDuration(stats.totalDuration)} on this device',
-          ),
-          Pressable(
-            semanticLabel: 'Shuffle all tracks',
-            onTap: onShuffleAll,
-            child: const _Pill(
-              icon: Icons.shuffle_rounded,
-              text: 'Shuffle all',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _Pill extends StatelessWidget {
-  const _Pill({required this.text, this.icon});
-
-  final String text;
-  final IconData? icon;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.noc;
-    return Frosted(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (icon != null) ...[
-              Icon(icon, size: 18, color: palette.textPrimary),
-              const SizedBox(width: 8),
-            ],
-            Flexible(
-              child: Text(
-                text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.titleSmall,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// The statistics card: plays as the headline number, then tracks, artists
-/// and albums as three tiles.
-class _StatsCard extends StatelessWidget {
-  const _StatsCard({required this.stats, required this.onOpenLibrary});
-
-  final LibraryStats stats;
-  final VoidCallback onOpenLibrary;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.noc;
-    final text = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: palette.glass,
-          borderRadius: BorderRadius.circular(34),
-        ),
-        child: Column(
-          children: [
-            Pressable(
-              semanticLabel: '${stats.playCount} plays. Open your library.',
-              onTap: onOpenLibrary,
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(24, 18, 16, 18),
-                decoration: BoxDecoration(
-                  color: palette.accent.withValues(alpha: 0.26),
-                  borderRadius: BorderRadius.circular(26),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        children: [
-                          FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              formatCount(stats.playCount),
-                              style: text.displaySmall?.copyWith(fontSize: 42),
-                            ),
-                          ),
-                          Text(
-                            stats.playCount == 1 ? 'Play' : 'Plays',
-                            style: text.titleSmall?.copyWith(
-                              color: palette.textSecondary,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Container(
-                      width: 46,
-                      height: 46,
-                      decoration: BoxDecoration(
-                        color: palette.accent,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.arrow_forward_rounded,
-                        color: palette.onAccent,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                _StatTile(value: stats.trackCount, label: 'Tracks'),
-                const SizedBox(width: 10),
-                _StatTile(value: stats.artistCount, label: 'Artists'),
-                const SizedBox(width: 10),
-                _StatTile(value: stats.albumCount, label: 'Albums'),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _StatTile extends StatelessWidget {
-  const _StatTile({required this.value, required this.label});
-
-  final int value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.noc;
-    final text = Theme.of(context).textTheme;
-    return Expanded(
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
-        decoration: BoxDecoration(
-          color: palette.background.withValues(alpha: 0.55),
-          borderRadius: BorderRadius.circular(22),
-        ),
-        child: Column(
-          children: [
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Text(formatCount(value), style: text.titleLarge),
-            ),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: text.bodySmall,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// "List" with a pill that switches what the list shows.
-class _ListHeading extends StatelessWidget {
-  const _ListHeading({required this.selected, required this.onSelected});
-
-  final FeedList selected;
-  final ValueChanged<FeedList> onSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.noc;
-    final text = Theme.of(context).textTheme;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(14, 4, 6, 10),
-      child: Row(
-        children: [
-          Expanded(child: Text('List', style: text.headlineSmall)),
-          PopupMenuButton<FeedList>(
-            tooltip: 'Choose what the list shows',
-            onSelected: onSelected,
-            itemBuilder: (context) => [
-              for (final list in FeedList.values)
-                CheckedPopupMenuItem(
-                  value: list,
-                  checked: list == selected,
-                  child: Text(list.label),
-                ),
-            ],
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(14, 9, 10, 9),
-              decoration: BoxDecoration(
-                color: palette.background.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(22),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(selected.icon, size: 18, color: palette.textSecondary),
-                  const SizedBox(width: 8),
-                  Text(selected.label, style: text.titleSmall),
-                  Icon(
-                    Icons.keyboard_arrow_down_rounded,
-                    color: palette.textSecondary,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// A feed row: cover, title and artist, a "Now Playing" pill on the current
-/// track, and the track's menu.
-class _FeedRow extends StatelessWidget {
-  const _FeedRow({
-    required this.track,
-    required this.isCurrent,
-    required this.onTap,
-    required this.onMenu,
-  });
-
-  final Track track;
-  final bool isCurrent;
-  final VoidCallback onTap;
-  final VoidCallback onMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.noc;
-    final text = Theme.of(context).textTheme;
-    return Material(
-      color: isCurrent
-          ? palette.accent.withValues(alpha: 0.24)
-          : Colors.transparent,
-      borderRadius: BorderRadius.circular(22),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 7, 6, 7),
-          child: Row(
-            children: [
-              Artwork(path: track.artPath, size: 54, radius: 14),
-              const SizedBox(width: 14),
-              Expanded(
-                flex: 4,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      track.title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.titleMedium,
-                    ),
-                    Text(
-                      track.displayArtist,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.bodyMedium,
-                    ),
-                  ],
-                ),
-              ),
-              if (isCurrent) ...[
-                const SizedBox(width: 8),
-                // Gives way to the title rather than overflowing when text
-                // is very large.
-                Flexible(
-                  flex: 3,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 9,
-                      vertical: 5,
-                    ),
-                    decoration: BoxDecoration(
-                      color: palette.accent,
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Text(
-                      'Now Playing',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.labelMedium?.copyWith(
-                        color: palette.onAccent,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-              IconButton(
-                tooltip: 'More for ${track.title}',
-                onPressed: onMenu,
-                icon: const Icon(Icons.more_vert_rounded),
-              ),
-            ],
-          ),
         ),
       ),
     );

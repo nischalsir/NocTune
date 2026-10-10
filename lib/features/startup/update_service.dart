@@ -289,6 +289,35 @@ class UpdateService {
     );
   }
 
+  /// A check the user asked for. It always asks the server and ignores
+  /// "Later" and "Don't remind me". [checked] is false when the server
+  /// couldn't be reached or its answer couldn't be read, so "up to date" is
+  /// only ever said when it is known.
+  Future<({UpdatePrompt? update, bool checked})> checkNow() async {
+    if (!isConfigured) return (update: null, checked: false);
+    final ReleaseInfo release;
+    try {
+      final fresh = await fetch(Uri.parse(manifestUrl));
+      release = ReleaseInfo.fromManifest(fresh, isIos: isIos);
+      await _prefs.setString(_manifestKey, fresh);
+      await _prefs.setInt(_checkedAtKey, _now().millisecondsSinceEpoch);
+    } on Exception {
+      return (update: null, checked: false);
+    }
+    if (!(installed < release.version)) return (update: null, checked: true);
+    final minSupported = release.minSupported;
+    return (
+      update: UpdatePrompt(
+        release: release,
+        installed: installed,
+        required:
+            release.mandatory ||
+            (minSupported != null && installed < minSupported),
+      ),
+      checked: true,
+    );
+  }
+
   /// The newest release known: freshly downloaded when the cached copy is
   /// stale, otherwise (or if the download fails) the cached copy.
   Future<ReleaseInfo?> _latestRelease() async {

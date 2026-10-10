@@ -315,4 +315,100 @@ void main() {
       expect(await repository.playlistTracks(playlist), isEmpty);
     });
   });
+
+  group('listening history', () {
+    late Map<String, int> ids;
+
+    setUp(() async {
+      await repository.upsertTracks([
+        _track('A', artist: 'Ann', album: 'First', durationSeconds: 100),
+        _track('B', artist: 'Ann', album: 'First', durationSeconds: 200),
+        _track('C', artist: 'Cy', album: 'Second', durationSeconds: 300),
+        _track('Unplayed', artist: 'Dee', album: 'Third'),
+      ]);
+      ids = {for (final t in await repository.tracks()) t.title: t.id};
+      await repository.recordPlay(ids['A']!, at: DateTime(2026, 10, 1, 9));
+      await repository.recordPlay(ids['C']!, at: DateTime(2026, 10, 8, 9));
+      await repository.recordPlay(ids['C']!, at: DateTime(2026, 10, 9, 9));
+      await repository.recordPlay(ids['B']!, at: DateTime(2026, 10, 9, 10));
+    });
+
+    test('every play is logged, newest first', () async {
+      final log = await repository.playLog();
+
+      expect(log.map((p) => p.track.title), ['B', 'C', 'C', 'A']);
+      expect(log.first.playedAt, DateTime(2026, 10, 9, 10));
+      expect((await repository.playLog(limit: 2)), hasLength(2));
+    });
+
+    test(
+      'ranks the tracks played in a period by plays in that period',
+      () async {
+        final week = await repository.topTracksSince(DateTime(2026, 10, 5));
+        final all = await repository.topTracksSince(DateTime(2026));
+
+        expect(week.map((e) => (e.track.title, e.plays)), [('C', 2), ('B', 1)]);
+        expect(all.map((e) => e.track.title), ['C', 'B', 'A']);
+      },
+    );
+
+    test(
+      'ranks albums and artists by plays, leaving out unplayed ones',
+      () async {
+        final albums = await repository.topGroups(TrackGroup.album);
+        final artists = await repository.topGroups(TrackGroup.artist);
+
+        expect(albums.map((g) => (g.name, g.playCount)), [
+          ('First', 2),
+          ('Second', 2),
+        ]);
+        expect(artists.map((g) => (g.name, g.playCount)), [
+          ('Ann', 2),
+          ('Cy', 2),
+        ]);
+      },
+    );
+
+    test(
+      'listening time counts each play at the length of its track',
+      () async {
+        final stats = await repository.stats();
+
+        expect(stats.playCount, 4);
+        // A once (100 s), B once (200 s), C twice (300 s each).
+        expect(stats.listenedDuration, const Duration(seconds: 900));
+      },
+    );
+
+    test('a play of a track that no longer exists is not logged', () async {
+      await repository.recordPlay(987654);
+
+      expect(await repository.playLog(), hasLength(4));
+    });
+
+    test('removing a track removes its plays', () async {
+      await repository.removeTracks(['/music/C.flac']);
+
+      expect((await repository.playLog()).map((p) => p.track.title), [
+        'B',
+        'A',
+      ]);
+    });
+
+    test('clearing the history resets plays and nothing else', () async {
+      await repository.setFavorite(ids['A']!, favorite: true);
+
+      await repository.clearListeningHistory();
+
+      expect(await repository.playLog(), isEmpty);
+      expect(await repository.mostPlayed(), isEmpty);
+      expect(await repository.recentlyPlayed(), isEmpty);
+      expect(await repository.topGroups(TrackGroup.album), isEmpty);
+      final stats = await repository.stats();
+      expect(stats.playCount, 0);
+      expect(stats.listenedDuration, Duration.zero);
+      expect(stats.trackCount, 4);
+      expect((await repository.favorites()).single.title, 'A');
+    });
+  });
 }

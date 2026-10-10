@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/theme/cover_accent.dart';
 import '../../core/theme/noc_palette.dart';
+import '../../core/theme/noc_theme.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/frosted.dart';
@@ -15,6 +17,7 @@ import '../../core/widgets/pressable.dart';
 import '../../data/models/track.dart';
 import '../library/track_menu.dart';
 import '../lyrics/lyrics_view.dart';
+import '../settings/settings_controller.dart';
 import 'format_badges.dart';
 import 'now_playing_route.dart';
 import 'queue_sheet.dart';
@@ -28,8 +31,9 @@ Future<void> showNowPlaying(BuildContext context) => Navigator.of(
 
 /// The immersive player: header buttons, a large rounded cover, the title
 /// over an artist chip, a thick scrubber, three transport buttons and a row
-/// of secondary controls, all in round frosted glass. The cover area turns
-/// into the lyrics view and back.
+/// of secondary controls, all in round frosted glass. The lyrics button
+/// swaps all of that for the lyrics view, which is always dark and carries
+/// its own seek bar and transport.
 class NowPlayingScreen extends ConsumerStatefulWidget {
   const NowPlayingScreen({super.key});
 
@@ -39,10 +43,36 @@ class NowPlayingScreen extends ConsumerStatefulWidget {
 
 class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
   bool _showLyrics = false;
+  bool _lyricsFullscreen = false;
 
   @override
   Widget build(BuildContext context) {
     final item = ref.watch(currentMediaItemProvider).value;
+    final lyricsOpen = _showLyrics && item != null;
+    if (!lyricsOpen) return _page(context, item, lyricsOpen: false);
+
+    // Lyrics are white on a darkened cover whatever the app's theme is.
+    final settings = ref.watch(settingsProvider);
+    final cover = settings.accentFromCover
+        ? ref.watch(coverAccentProvider)
+        : (light: null, dark: null);
+    return Theme(
+      data: buildNocTheme(
+        Brightness.dark,
+        settings.accent,
+        coverAccent: cover.dark,
+      ),
+      child: Builder(
+        builder: (context) => _page(context, item, lyricsOpen: true),
+      ),
+    );
+  }
+
+  Widget _page(
+    BuildContext context,
+    MediaItem? item, {
+    required bool lyricsOpen,
+  }) {
     final palette = context.noc;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
@@ -59,6 +89,16 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
             child: _ArtworkWash(
               key: ValueKey(item?.artUri),
               path: item?.artUri?.toFilePath(),
+            ),
+          ),
+          // Deepens the backdrop under the lyrics.
+          IgnorePointer(
+            child: AnimatedOpacity(
+              opacity: lyricsOpen ? 1 : 0,
+              duration: reduceMotion
+                  ? Duration.zero
+                  : const Duration(milliseconds: 320),
+              child: const ColoredBox(color: Color(0x73000000)),
             ),
           ),
           SafeArea(
@@ -81,8 +121,13 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                 : _PlayerLayout(
                     item: item,
                     showLyrics: _showLyrics,
-                    onToggleLyrics: () =>
-                        setState(() => _showLyrics = !_showLyrics),
+                    lyricsFullscreen: _lyricsFullscreen,
+                    onToggleLyrics: () => setState(() {
+                      _showLyrics = !_showLyrics;
+                      _lyricsFullscreen = false;
+                    }),
+                    onToggleFullscreen: () =>
+                        setState(() => _lyricsFullscreen = !_lyricsFullscreen),
                   ),
           ),
         ],
@@ -140,12 +185,16 @@ class _PlayerLayout extends ConsumerWidget {
   const _PlayerLayout({
     required this.item,
     required this.showLyrics,
+    required this.lyricsFullscreen,
     required this.onToggleLyrics,
+    required this.onToggleFullscreen,
   });
 
   final MediaItem item;
   final bool showLyrics;
+  final bool lyricsFullscreen;
   final VoidCallback onToggleLyrics;
+  final VoidCallback onToggleFullscreen;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -156,32 +205,14 @@ class _PlayerLayout extends ConsumerWidget {
     final track = loaded != null && loaded.id == currentId ? loaded : null;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
 
-    // Cover or lyrics, cross-fading in the same space.
     Widget stage(double width, double height) => SizedBox(
       width: width,
       height: height,
-      child: AnimatedSwitcher(
-        duration: reduceMotion
-            ? Duration.zero
-            : const Duration(milliseconds: 320),
-        switchInCurve: Curves.easeOutCubic,
-        switchOutCurve: Curves.easeInCubic,
-        transitionBuilder: (child, animation) => FadeTransition(
-          opacity: animation,
-          child: ScaleTransition(
-            scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
-            child: child,
-          ),
+      child: Center(
+        child: _HeroArtwork(
+          path: item.artUri?.toFilePath(),
+          size: min(width, height),
         ),
-        child: showLyrics && track != null
-            ? LyricsView(key: const ValueKey('lyrics'), track: track)
-            : Center(
-                key: const ValueKey('cover'),
-                child: _HeroArtwork(
-                  path: item.artUri?.toFilePath(),
-                  size: min(width, height),
-                ),
-              ),
       ),
     );
 
@@ -192,6 +223,82 @@ class _PlayerLayout extends ConsumerWidget {
       onToggleLyrics: onToggleLyrics,
     );
 
+    // The player and the lyrics view cross-fade in place.
+    return AnimatedSwitcher(
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 320),
+      switchInCurve: Curves.easeOutCubic,
+      switchOutCurve: Curves.easeInCubic,
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: ScaleTransition(
+          scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
+          child: child,
+        ),
+      ),
+      child: showLyrics && track != null
+          ? _lyrics(
+              key: const ValueKey('lyrics'),
+              track: track,
+              details: details,
+            )
+          : KeyedSubtree(
+              key: const ValueKey('player'),
+              child: _player(stage: stage, details: details, track: track),
+            ),
+    );
+  }
+
+  /// Lyrics with their own controls under the header and the title row.
+  /// Fullscreen drops everything but the lyrics; so does a window too short
+  /// to hold the seek bar and transport as well.
+  Widget _lyrics({
+    required Key key,
+    required Track track,
+    required Widget details,
+  }) {
+    return LayoutBuilder(
+      key: key,
+      builder: (context, box) {
+        final side = box.maxWidth < 360 ? 16.0 : 24.0;
+        final short = box.maxHeight < 520;
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: Column(
+              children: [
+                if (!lyricsFullscreen && !short)
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(side, 4, side, 0),
+                    child: _Header(item: item, track: track),
+                  ),
+                if (!lyricsFullscreen)
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(side, 12, side, 0),
+                    child: details,
+                  ),
+                Expanded(
+                  child: LyricsPanel(
+                    track: track,
+                    duration: item.duration ?? track.duration,
+                    isFullscreen: lyricsFullscreen || short,
+                    onToggleFullscreen: onToggleFullscreen,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _player({
+    required Widget Function(double width, double height) stage,
+    required Widget details,
+    required Track? track,
+  }) {
     return LayoutBuilder(
       builder: (context, box) {
         // Short and wide (a phone on its side): cover beside the controls.
@@ -201,7 +308,7 @@ class _PlayerLayout extends ConsumerWidget {
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
             child: Row(
               children: [
-                stage(showLyrics ? box.maxWidth * 0.42 : side, side),
+                stage(side, side),
                 const SizedBox(width: 24),
                 Expanded(
                   child: SingleChildScrollView(
@@ -230,11 +337,10 @@ class _PlayerLayout extends ConsumerWidget {
         final side = box.maxWidth < 360 ? 16.0 : 24.0;
         final textScale = MediaQuery.textScalerOf(context).scale(1);
         final contentWidth = min(box.maxWidth, 560.0) - side * 2;
-        // With lyrics open the secondary row steps aside to give them room.
-        final reserved = (showLyrics ? 330 : 420) + 70 * textScale;
+        final reserved = 420 + 70 * textScale;
         final stageHeight = (box.maxHeight - reserved).clamp(
           150.0,
-          showLyrics ? 900.0 : contentWidth,
+          contentWidth,
         );
         return SingleChildScrollView(
           child: ConstrainedBox(
@@ -264,10 +370,8 @@ class _PlayerLayout extends ConsumerWidget {
                           const FormatBadges(),
                           const SizedBox(height: 10),
                           const PrimaryTransport(),
-                          if (!showLyrics) ...[
-                            const SizedBox(height: 18),
-                            const _SecondaryRow(),
-                          ],
+                          const SizedBox(height: 18),
+                          const _SecondaryRow(),
                         ],
                       ),
                     ],

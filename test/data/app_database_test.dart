@@ -50,6 +50,7 @@ void main() {
             'size_bytes': 3,
             'is_favorite': 1,
             'play_count': 4,
+            'last_played_at': 5000,
           });
         },
       ),
@@ -71,11 +72,18 @@ void main() {
       readerVersion: 1,
     ));
 
+    // The one play the old schema remembered opens the new play log.
+    final carried = (await repository.playLog()).single;
+    expect(carried.track.title, 'Kept');
+    expect(carried.playedAt.millisecondsSinceEpoch, 5000);
+
     // The lyrics table exists and follows its track.
     await repository.setImportedLyrics(track.id, '[00:01.00]Hello');
     expect(await repository.importedLyrics(track.id), '[00:01.00]Hello');
     await repository.removeTracks(['/music/a.flac']);
     expect(await repository.importedLyrics(track.id), isNull);
+    // So does the play log.
+    expect(await repository.playLog(), isEmpty);
     await db.close();
   });
 

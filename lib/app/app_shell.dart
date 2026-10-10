@@ -1,8 +1,8 @@
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/layout/window_class.dart';
 import '../core/theme/noc_palette.dart';
 import '../core/widgets/noc_backdrop.dart';
 import '../features/home/home_screen.dart';
@@ -10,51 +10,33 @@ import '../features/library/library_screen.dart';
 import '../features/library/scan/scan_controller.dart';
 import '../features/playback/mini_player.dart';
 import '../features/search/search_screen.dart';
+import '../features/settings/settings_controller.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/startup/startup_prompts.dart';
 import '../features/startup/update_dialog.dart';
 import '../features/startup/welcome_dialog.dart';
-import 'nav_icon_animations.dart';
-import 'noc_bottom_bar.dart';
+import '../third_party/spotiflac/mornye_bottom_bar.dart';
+import '../third_party/spotiflac/mornye_chrome.dart';
+import '../third_party/spotiflac/mornye_theme.dart';
+import '../third_party/spotiflac/runtime_profile_provider.dart';
 import 'providers.dart';
-
-// Search is last: when the tabs fold away it is the button kept on the right.
-const _destinations = [
-  NocDestination(
-    icon: Icons.home_outlined,
-    selectedIcon: Icons.home_rounded,
-    label: 'Home',
-    motion: NavIconMotion.bounce,
-  ),
-  NocDestination(
-    icon: Icons.library_music_outlined,
-    selectedIcon: Icons.library_music_rounded,
-    label: 'Library',
-    motion: NavIconMotion.slide,
-  ),
-  NocDestination(
-    icon: Icons.settings_outlined,
-    selectedIcon: Icons.settings_rounded,
-    label: 'Settings',
-    motion: NavIconMotion.spin,
-  ),
-  NocDestination(
-    icon: Icons.search_rounded,
-    selectedIcon: Icons.search_rounded,
-    label: 'Search',
-    motion: NavIconMotion.bounce,
-  ),
-];
 
 const _homeIndex = 0;
 const _libraryIndex = 1;
-const _searchIndex = 3;
+const _searchIndex = 2;
 
-/// The app frame: top-level destinations plus the persistent player bar.
+/// Window width from which a navigation rail replaces the bottom bar. As in
+/// the navigation's source, tablets keep the bottom bar in both orientations;
+/// the rail is for desktop-width windows.
+const _navigationRailBreakpoint = 1440.0;
+
+/// The app frame: Home, Library and Search behind the floating glass bar,
+/// with the mini-player riding on top of it. Settings opens as a page from
+/// the home screen rather than taking a slot in the bar.
 ///
-/// Phones and tablets get the floating bottom bar, which folds its tabs away
-/// while a page is being scrolled. Only wide, desktop-like windows switch to
-/// a navigation rail.
+/// The bar itself, its theme and its fold-on-scroll controller are the
+/// navigation shell from `third_party/spotiflac`; this class wires them to
+/// NocTune's screens the way that project's main shell does.
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
 
@@ -62,19 +44,12 @@ class AppShell extends ConsumerStatefulWidget {
   ConsumerState<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends ConsumerState<AppShell>
-    with SingleTickerProviderStateMixin {
-  int _index = _homeIndex;
+class _AppShellState extends ConsumerState<AppShell> {
+  int _currentIndex = _homeIndex;
   final _libraryNavigator = GlobalKey<NavigatorState>();
-  final _chrome = ChromeController();
+  final _mornyeChrome = MornyeChromeController();
   DateTime? _lastBackPress;
-
-  // Fades a destination in when it is selected.
-  late final _pageFade = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 200),
-    value: 1,
-  );
+  bool _settingsPageOpen = false;
 
   late final _startupPrompts = StartupPrompts(
     welcome: WelcomeStore(ref.read(sharedPreferencesProvider)),
@@ -105,37 +80,52 @@ class _AppShellState extends ConsumerState<AppShell>
 
   @override
   void dispose() {
-    _pageFade.dispose();
-    _chrome.dispose();
+    _mornyeChrome.dispose();
     super.dispose();
   }
 
-  void _select(int index) {
+  void _onNavTap(int index) {
     // Any tap on the bar brings the tabs back.
-    _chrome.expand();
-    if (index == _index) {
-      // Choosing the current destination again returns it to its first page.
-      if (index == _libraryIndex) {
-        _libraryNavigator.currentState?.popUntil((route) => route.isFirst);
-      }
-      return;
-    }
+    _mornyeChrome.expand();
+    if (_currentIndex == index) return;
     HapticFeedback.selectionClick();
+    setState(() => _currentIndex = index);
     FocusManager.instance.primaryFocus?.unfocus();
-    setState(() => _index = index);
-    if (!MediaQuery.disableAnimationsOf(context)) _pageFade.forward(from: 0);
   }
 
-  /// System back: leave an opened album or playlist, then return to Home,
-  /// then ask for a second press before leaving the app.
-  Future<void> _handleBack() async {
-    if (_index == _libraryIndex &&
+  Future<void> _openSettings() async {
+    if (_settingsPageOpen) return;
+    _settingsPageOpen = true;
+    FocusManager.instance.primaryFocus?.unfocus();
+    try {
+      await Navigator.of(
+        context,
+        rootNavigator: true,
+      ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
+    } finally {
+      _settingsPageOpen = false;
+    }
+  }
+
+  /// System back: leave an opened album or playlist, dismiss the keyboard on
+  /// Search, return to Home, then ask for a second press before leaving.
+  Future<void> _handleBackPress() async {
+    if (_currentIndex == _libraryIndex &&
         await (_libraryNavigator.currentState?.maybePop() ??
             Future.value(false))) {
+      _lastBackPress = null;
       return;
     }
-    if (_index != _homeIndex) {
-      _select(_homeIndex);
+    if (!mounted) return;
+    if (_currentIndex == _searchIndex &&
+        MediaQuery.viewInsetsOf(context).bottom > 0) {
+      FocusManager.instance.primaryFocus?.unfocus();
+      _lastBackPress = null;
+      return;
+    }
+    if (_currentIndex != _homeIndex) {
+      _onNavTap(_homeIndex);
+      _lastBackPress = null;
       return;
     }
     final now = DateTime.now();
@@ -181,19 +171,59 @@ class _AppShellState extends ConsumerState<AppShell>
     });
 
     final palette = context.noc;
-    final scanning = ref.watch(scanControllerProvider) is ScanRunning;
-    final useRail = WindowClass.of(context) == WindowClass.expanded;
+    // The bar keeps its own theme: it is drawn exactly as in its source app,
+    // whatever accent the rest of NocTune is using. NocTune's palette rides
+    // along for the cover placeholder in the mini-player.
+    final barBase = MornyeTheme.build(Theme.of(context).brightness);
+    final barTheme = barBase.copyWith(
+      extensions: [...barBase.extensions.values, palette],
+    );
+    final destinations = <NavigationDestination>[
+      const NavigationDestination(
+        icon: Icon(CupertinoIcons.house_fill),
+        label: 'Home',
+      ),
+      const NavigationDestination(
+        // The badge counts queued work in the navigation's source app.
+        // NocTune has nothing to count, so it stays at zero.
+        icon: MornyeNavigationIcon(
+          icon: CupertinoIcons.square_stack_fill,
+          badgeCount: 0,
+        ),
+        label: 'Library',
+      ),
+      const NavigationDestination(
+        icon: Icon(CupertinoIcons.search),
+        label: 'Search',
+      ),
+    ];
+
+    final screenSize = MediaQuery.sizeOf(context);
+    final useNavigationRail = screenSize.width >= _navigationRailBreakpoint;
     // Folding the tabs is for touch layouts with room to spare: not while
     // typing, and not when the text is so large the folded bar would crowd.
-    final canFoldTabs =
-        !useRail &&
+    final canMinimizeChrome =
+        ref.watch(settingsProvider.select((s) => s.foldNavigationOnScroll)) &&
+        !useNavigationRail &&
         MediaQuery.viewInsetsOf(context).bottom == 0 &&
         MediaQuery.textScalerOf(context).scale(15) <= 20;
 
-    final destinations = [
+    Widget observeScroll(Widget child, int index) =>
+        NotificationListener<ScrollNotification>(
+          onNotification: (notification) {
+            if (canMinimizeChrome && index == _currentIndex) {
+              return _mornyeChrome.handleScroll(notification);
+            }
+            return false;
+          },
+          child: child,
+        );
+
+    final tabs = <Widget>[
       HomeScreen(
-        onOpenSearch: () => _select(_searchIndex),
-        onOpenLibrary: () => _select(_libraryIndex),
+        onOpenSearch: () => _onNavTap(_searchIndex),
+        onOpenLibrary: () => _onNavTap(_libraryIndex),
+        onOpenSettings: _openSettings,
       ),
       // The library has its own navigator, so opening an album or playlist
       // keeps the navigation and mini-player on screen.
@@ -202,123 +232,94 @@ class _AppShellState extends ConsumerState<AppShell>
         onGenerateRoute: (_) =>
             MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
       ),
-      const SettingsScreen(),
       const SearchScreen(),
     ];
 
-    final pages = NotificationListener<ScrollNotification>(
-      onNotification: (notification) =>
-          canFoldTabs && _chrome.handleScroll(notification),
-      child: FadeTransition(
-        opacity: CurvedAnimation(parent: _pageFade, curve: Curves.easeOut),
-        // IndexedStack keeps each destination's scroll position and state.
-        child: IndexedStack(
-          index: _index,
-          children: [
-            for (final (index, page) in destinations.indexed)
-              // Animations on hidden destinations are paused.
-              TickerMode(enabled: index == _index, child: page),
-          ],
+    // IndexedStack keeps each destination's scroll position and state; the
+    // glass pill owns the tab transition, so the pages themselves just swap.
+    final pageView = IndexedStack(
+      index: _currentIndex,
+      children: [
+        for (final (index, tab) in tabs.indexed)
+          // Animations on hidden destinations are paused.
+          TickerMode(
+            enabled: index == _currentIndex,
+            child: observeScroll(tab, index),
+          ),
+      ],
+    );
+
+    final scaffold = Scaffold(
+      // Content scrolls underneath the floating glass chrome.
+      extendBody: true,
+      body: NocBackdrop(
+        child: useNavigationRail
+            ? Row(
+                children: [
+                  SafeArea(
+                    right: false,
+                    bottom: false,
+                    // On short windows the rail scrolls instead of
+                    // overflowing.
+                    child: LayoutBuilder(
+                      builder: (context, constraints) => SingleChildScrollView(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: constraints.maxHeight,
+                          ),
+                          child: IntrinsicHeight(
+                            child: NavigationRail(
+                              selectedIndex: _currentIndex,
+                              onDestinationSelected: _onNavTap,
+                              labelType: NavigationRailLabelType.all,
+                              backgroundColor: Colors.transparent,
+                              destinations: [
+                                for (final destination in destinations)
+                                  NavigationRailDestination(
+                                    icon: destination.icon,
+                                    label: Text(destination.label),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  VerticalDivider(width: 1, color: palette.glassBorder),
+                  Expanded(child: pageView),
+                ],
+              )
+            : pageView,
+      ),
+      bottomNavigationBar: Theme(
+        data: barTheme,
+        child: SafeArea(
+          top: false,
+          minimum: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          child: useNavigationRail
+              ? const MiniPlayer()
+              : ValueListenableBuilder<bool>(
+                  valueListenable: _mornyeChrome,
+                  builder: (context, collapsed, _) => MornyeBottomBar(
+                    collapsed: canMinimizeChrome && collapsed,
+                    destinations: destinations,
+                    selectedIndex: _currentIndex,
+                    onSelected: _onNavTap,
+                    onHome: () => _onNavTap(_homeIndex),
+                    onSearch: () => _onNavTap(_searchIndex),
+                    blurEnabled: ref.watch(mornyeBlurEnabledProvider),
+                  ),
+                ),
         ),
       ),
     );
-
-    final Widget scaffold;
-    if (useRail) {
-      scaffold = Scaffold(
-        body: NocBackdrop(
-          child: Row(
-            children: [
-              SafeArea(
-                right: false,
-                child: NavigationRail(
-                  backgroundColor: Colors.transparent,
-                  indicatorColor: palette.accent.withValues(alpha: 0.22),
-                  labelType: NavigationRailLabelType.all,
-                  selectedIndex: _index,
-                  onDestinationSelected: _select,
-                  destinations: [
-                    for (final destination in _destinations)
-                      NavigationRailDestination(
-                        icon: Icon(destination.icon),
-                        selectedIcon: Icon(destination.selectedIcon),
-                        label: Text(destination.label),
-                      ),
-                  ],
-                ),
-              ),
-              VerticalDivider(width: 1, color: palette.glassBorder),
-              Expanded(
-                child: Column(
-                  children: [
-                    Expanded(child: pages),
-                    SafeArea(
-                      top: false,
-                      minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                      // Capped so the player doesn't stretch across a tablet.
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxWidth: kMaxContentWidth,
-                        ),
-                        child: const MiniPlayer(),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    } else {
-      scaffold = Scaffold(
-        // Content scrolls underneath the floating glass chrome.
-        extendBody: true,
-        body: NocBackdrop(child: pages),
-        // Content dissolves into the page colour as it passes under the
-        // floating bars, instead of showing sharply in the gaps around them.
-        bottomNavigationBar: DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                palette.backgroundDeep.withValues(alpha: 0),
-                palette.backgroundDeep.withValues(alpha: 0.94),
-              ],
-              stops: const [0, 0.7],
-            ),
-          ),
-          child: SafeArea(
-            minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
-            child: Align(
-              alignment: Alignment.bottomCenter,
-              heightFactor: 1,
-              // On tablets the bar stays phone-sized and centred.
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 560),
-                child: ValueListenableBuilder<bool>(
-                  valueListenable: _chrome,
-                  builder: (context, collapsed, _) => NocBottomBar(
-                    collapsed: canFoldTabs && collapsed,
-                    destinations: _destinations,
-                    selectedIndex: _index,
-                    onSelected: _select,
-                    badgedIndex: scanning ? _libraryIndex : null,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      );
-    }
 
     // Back is handled here rather than popping the app's only route.
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _handleBack();
+        if (!didPop) _handleBackPress();
       },
       child: scaffold,
     );

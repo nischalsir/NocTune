@@ -174,13 +174,88 @@ class LibraryRepository {
     _changes.add(null);
   }
 
-  /// Bumps the play count and stamps the track as just played.
+  /// Bumps the play count, stamps the track as just played and adds the
+  /// play to the log.
   Future<void> recordPlay(int trackId, {DateTime? at}) async {
-    await _db.rawUpdate(
-      'UPDATE tracks SET play_count = play_count + 1, last_played_at = ? '
-      'WHERE id = ?',
-      [(at ?? DateTime.now()).millisecondsSinceEpoch, trackId],
+    final playedAt = (at ?? DateTime.now()).millisecondsSinceEpoch;
+    final batch = _db.batch()
+      ..rawUpdate(
+        'UPDATE tracks SET play_count = play_count + 1, last_played_at = ? '
+        'WHERE id = ?',
+        [playedAt, trackId],
+      )
+      ..rawInsert(
+        'INSERT INTO plays(track_id, played_at) '
+        'SELECT id, ? FROM tracks WHERE id = ?',
+        [playedAt, trackId],
+      );
+    await batch.commit(noResult: true);
+    _changes.add(null);
+  }
+
+  /// The play log, newest first: one entry for every time a track was played.
+  Future<List<PlayedTrack>> playLog({int limit = 300}) async {
+    final rows = await _db.rawQuery(
+      'SELECT t.*, p.played_at AS log_played_at FROM plays p '
+      'JOIN tracks t ON t.id = p.track_id '
+      'ORDER BY p.played_at DESC, p.id DESC LIMIT ?',
+      [limit],
     );
+    return [
+      for (final row in rows)
+        (
+          track: Track.fromRow(row),
+          playedAt: DateTime.fromMillisecondsSinceEpoch(
+            row['log_played_at']! as int,
+          ),
+        ),
+    ];
+  }
+
+  /// The tracks played since [since], most played in that period first.
+  Future<List<TrackPlays>> topTracksSince(
+    DateTime since, {
+    int limit = 100,
+  }) async {
+    final rows = await _db.rawQuery(
+      'SELECT t.*, COUNT(*) AS period_plays FROM plays p '
+      'JOIN tracks t ON t.id = p.track_id WHERE p.played_at >= ? '
+      'GROUP BY t.id '
+      'ORDER BY period_plays DESC, MAX(p.played_at) DESC LIMIT ?',
+      [since.millisecondsSinceEpoch, limit],
+    );
+    return [
+      for (final row in rows)
+        (track: Track.fromRow(row), plays: row['period_plays']! as int),
+    ];
+  }
+
+  /// The albums or artists that have been played, most played first.
+  Future<List<TrackGroupSummary>> topGroups(
+    TrackGroup group, {
+    int limit = 50,
+  }) async {
+    final column = group._column;
+    final rows = await _db.rawQuery(
+      'SELECT $column AS name, COUNT(*) AS track_count, '
+      'MAX(art_path) AS art_path, '
+      'MIN(COALESCE(album_artist, artist)) AS artist, '
+      'SUM(play_count) AS plays '
+      'FROM tracks WHERE $column IS NOT NULL '
+      'GROUP BY $column HAVING SUM(play_count) > 0 '
+      'ORDER BY plays DESC, $column COLLATE NOCASE LIMIT ?',
+      [limit],
+    );
+    return rows.map(TrackGroupSummary.fromRow).toList();
+  }
+
+  /// Forgets what has been played: the log, the counts and "last played".
+  /// Tracks, favourites and playlists are untouched.
+  Future<void> clearListeningHistory() async {
+    final batch = _db.batch()
+      ..delete('plays')
+      ..rawUpdate('UPDATE tracks SET play_count = 0, last_played_at = NULL');
+    await batch.commit(noResult: true);
     _changes.add(null);
   }
 
@@ -189,7 +264,8 @@ class LibraryRepository {
       'SELECT COUNT(*) AS tracks, COUNT(DISTINCT album) AS albums, '
       'COUNT(DISTINCT artist) AS artists, '
       'COALESCE(SUM(duration_ms), 0) AS duration_ms, '
-      'COALESCE(SUM(play_count), 0) AS plays FROM tracks',
+      'COALESCE(SUM(play_count), 0) AS plays, '
+      'COALESCE(SUM(duration_ms * play_count), 0) AS listened_ms FROM tracks',
     )).single;
     return LibraryStats(
       trackCount: row['tracks']! as int,
@@ -197,6 +273,7 @@ class LibraryRepository {
       artistCount: row['artists']! as int,
       totalDuration: Duration(milliseconds: row['duration_ms']! as int),
       playCount: row['plays']! as int,
+      listenedDuration: Duration(milliseconds: row['listened_ms']! as int),
     );
   }
 

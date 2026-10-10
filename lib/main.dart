@@ -7,6 +7,8 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app/app.dart';
+import 'app/device_profile.dart';
+import 'app/licenses.dart';
 import 'app/providers.dart';
 import 'data/db/app_database.dart';
 import 'data/repositories/library_repository.dart';
@@ -17,6 +19,7 @@ import 'features/playback/playback_session.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+  registerBundledLicenses();
 
   // The few things the first screen can't be drawn without, started together
   // rather than one after another. Nothing here touches the network or scans
@@ -65,6 +68,7 @@ Future<void> main() async {
           artworkDir: p.join(cacheDir.path, 'artwork'),
           musicDir: documentsDir.path,
         )),
+        ...deviceProfileOverrides,
       ],
       child: const NocTuneApp(),
     ),

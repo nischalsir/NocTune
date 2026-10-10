@@ -10,9 +10,9 @@ are listed in the [changelog](CHANGELOG.md).
 
 ## Screenshots
 
-| Home | Scrolling | Player | Lyrics |
-|---|---|---|---|
-| <img src="docs/screenshots/home.png" width="200" alt="Home screen with the track that is playing"> | <img src="docs/screenshots/library-list.png" width="200" alt="Track list with the navigation folded away"> | <img src="docs/screenshots/player.png" width="200" alt="Full player with a Dolby Atmos label"> | <img src="docs/screenshots/lyrics.png" width="200" alt="Time-synced lyrics"> |
+| Home | Listening feed | Player | Lyrics | Settings |
+|---|---|---|---|---|
+| <img src="docs/screenshots/home.png" width="160" alt="Home screen with the track that is playing"> | <img src="docs/screenshots/home-list.png" width="160" alt="Recent plays grouped by day, with the navigation folded away"> | <img src="docs/screenshots/player.png" width="160" alt="Full player with a Dolby Atmos label"> | <img src="docs/screenshots/lyrics.png" width="160" alt="Time-synced lyrics with their own seek bar and transport"> | <img src="docs/screenshots/settings.png" width="160" alt="Settings page"> |
 
 Shown with sample tracks.
 
@@ -106,13 +106,15 @@ lib/
   core/       theme, layout and shared widgets
   data/       database, models, repository
   features/
-    home/     dashboard
+    home/     hero and listening feed
     library/  browsing, playlists, device scan
+    lyrics/   lyrics view, seek bar, timing offset
     playback/ audio engine, mini-player, full player, queue
     search/
     settings/
     startup/  welcome and update popups
-android/app/src/main/kotlin/…  MediaStore and artwork channels
+  third_party/  bundled open-source code, each with its licence
+android/app/src/main/kotlin/…  MediaStore, artwork and device channels
 ```
 
 ## Previewing screens
@@ -136,6 +138,12 @@ flutter test tool/preview_screens.dart --dart-define=OUT=C:\some\folder
 - **Lyrics** come from the device only: a file you import for a track, an
   `.lrc` file beside it, or lyrics embedded in its tags. Time-synced lyrics
   follow playback; plain lyrics are shown as text.
+
+## Licences
+
+The licences of the open-source software and typefaces bundled with the app
+are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and, in the
+app, under Settings > About > Open-source licences.
 
 ## Developed by Nischal Pandey
 

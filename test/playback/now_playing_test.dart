@@ -301,29 +301,37 @@ void main() {
       return handler;
     }
 
-    testWidgets('open in place of the cover and close again', (tester) async {
+    // Position is 1:01 in every test here.
+    double alpha(WidgetTester tester, String line) =>
+        DefaultTextStyle.of(tester.element(find.text(line))).style.color!.a;
+
+    testWidgets('take over the player and hand it back', (tester) async {
       await open(tester, _syncedLyrics);
 
       expect(find.text('Second line'), findsOneWidget);
-      // The transport stays available while lyrics are showing.
-      expect(find.bySemanticsLabel('Play'), findsOneWidget);
+      expect(
+        find.text('LINE SYNC • Embedded in the audio file'),
+        findsOneWidget,
+      );
+      // The lyrics view brings its own transport and times.
+      expect(find.byTooltip('Play'), findsOneWidget);
+      expect(find.byTooltip('Previous'), findsOneWidget);
+      expect(find.byTooltip('Next'), findsOneWidget);
+      expect(find.text('1:01'), findsOneWidget);
+      expect(find.text('−2:59'), findsOneWidget);
 
       await tester.tap(find.byTooltip('Hide lyrics'));
       await tester.pumpAndSettle();
       expect(find.text('Second line'), findsNothing);
+      expect(find.bySemanticsLabel('Play'), findsOneWidget);
     });
 
     testWidgets('highlight the line at the playback position', (tester) async {
       await open(tester, _syncedLyrics);
 
-      // Position is 1:01, inside the second line.
-      double alpha(String line) =>
-          tester.widget<Text>(find.text(line)).style?.color?.a ??
-          DefaultTextStyle.of(tester.element(find.text(line))).style.color!.a;
-
-      expect(alpha('Second line'), 1);
-      expect(alpha('First line'), lessThan(0.5));
-      expect(alpha('Third'), lessThan(0.5));
+      expect(alpha(tester, 'Second line'), 1);
+      expect(alpha(tester, 'First line'), lessThan(0.5));
+      expect(alpha(tester, 'Third'), lessThan(0.5));
     });
 
     testWidgets('tapping a line seeks to it', (tester) async {
@@ -333,6 +341,16 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(handler.calls, ['seek 120']);
+    });
+
+    testWidgets('its transport drives the player', (tester) async {
+      final handler = await open(tester, _syncedLyrics);
+
+      await tester.tap(find.byTooltip('Play'));
+      await tester.tap(find.byTooltip('Next'));
+      await tester.tap(find.byTooltip('Previous'));
+
+      expect(handler.calls, ['play', 'next', 'previous']);
     });
 
     testWidgets('plain lyrics are shown without pretending to be synced', (
@@ -346,18 +364,21 @@ void main() {
         ),
       );
 
-      expect(find.text('Just words'), findsOneWidget);
-      expect(find.textContaining('NOT TIME-SYNCED'), findsOneWidget);
+      expect(find.text('Just words\nNo times'), findsOneWidget);
+      expect(find.text('Lyrics not time-synced'), findsOneWidget);
+      expect(find.textContaining('LINE SYNC'), findsNothing);
     });
 
     testWidgets('a track without lyrics offers a local import', (tester) async {
       await open(tester, null);
 
-      expect(find.text('No lyrics available'), findsOneWidget);
+      expect(find.text('No lyrics'), findsOneWidget);
       expect(find.text('Import lyrics file'), findsOneWidget);
     });
 
-    testWidgets('text size can be stepped up and down', (tester) async {
+    testWidgets('text size follows the slider and can be reset', (
+      tester,
+    ) async {
       await open(tester, _syncedLyrics);
       double size() =>
           DefaultTextStyle.of(tester.element(find.text('Second line')))
@@ -365,10 +386,83 @@ void main() {
               .fontSize!;
       final before = size();
 
-      await tester.tap(find.byTooltip('Larger text'));
+      await tester.tap(find.byTooltip('Adjust lyrics text size'));
+      await tester.pumpAndSettle();
+      expect(find.text('Lyrics size: 100%'), findsOneWidget);
+
+      await tester.drag(find.byType(Slider), const Offset(100, 0));
+      await tester.pumpAndSettle();
+      expect(size(), greaterThan(before));
+      final preferences = await SharedPreferences.getInstance();
+      expect(preferences.getDouble('lyrics_scale'), greaterThan(1));
+
+      await tester.tap(find.text('Reset'));
+      await tester.pumpAndSettle();
+      expect(size(), before);
+    });
+
+    testWidgets('fullscreen leaves only the lyrics and its two buttons', (
+      tester,
+    ) async {
+      await open(tester, _syncedLyrics);
+
+      await tester.tap(find.byTooltip('Fullscreen lyrics'));
+      await tester.pumpAndSettle();
+      expect(find.text('Second line'), findsOneWidget);
+      expect(find.byTooltip('Play'), findsNothing);
+      expect(find.byTooltip('Hide lyrics'), findsNothing);
+
+      await tester.tap(find.byTooltip('Exit fullscreen lyrics'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Play'), findsOneWidget);
+      expect(find.byTooltip('Hide lyrics'), findsOneWidget);
+    });
+
+    testWidgets('a saved sync offset moves the highlight, not playback', (
+      tester,
+    ) async {
+      // "Late" starts half a second after the playback position.
+      final handler = await open(
+        tester,
+        LoadedLyrics(
+          parseLyrics('[00:10.00]Early\n[01:01.50]Late\n[02:00.00]End')!,
+          LyricsOrigin.sidecar,
+        ),
+      );
+      expect(alpha(tester, 'Early'), 1);
+
+      await tester.tap(find.byTooltip('Lyrics options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Lyrics sync offset…'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('+1s'));
+      await tester.pumpAndSettle();
+      expect(find.text('+1000 ms'), findsOneWidget);
+      await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
 
-      expect(size(), greaterThan(before));
+      expect(alpha(tester, 'Late'), 1);
+      expect(alpha(tester, 'Early'), lessThan(0.5));
+      expect(handler.calls, isEmpty);
+      final preferences = await SharedPreferences.getInstance();
+      expect(
+        preferences.getKeys().where((key) => key.startsWith('lyrics_offset_')),
+        hasLength(1),
+      );
+    });
+
+    testWidgets('plain lyrics offer no sync offset', (tester) async {
+      await open(
+        tester,
+        LoadedLyrics(parseLyrics('Just words')!, LyricsOrigin.imported),
+      );
+
+      await tester.tap(find.byTooltip('Lyrics options'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Import lyrics file…'), findsOneWidget);
+      expect(find.text('Remove imported lyrics'), findsOneWidget);
+      expect(find.text('Lyrics sync offset…'), findsNothing);
     });
   });
 

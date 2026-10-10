@@ -7,7 +7,6 @@ import 'package:noctune/app/app.dart';
 import 'package:noctune/app/providers.dart';
 import 'package:noctune/data/models/playlist.dart';
 import 'package:noctune/data/models/track.dart';
-import 'package:noctune/app/noc_bottom_bar.dart';
 import 'package:noctune/core/widgets/wave_bars.dart';
 import 'package:noctune/features/playback/playback_mapping.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
@@ -15,6 +14,7 @@ import 'package:noctune/features/playback/audio_capabilities.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
 import 'package:noctune/features/startup/startup_prompts.dart';
 import 'package:noctune/features/startup/update_service.dart';
+import 'package:noctune/third_party/spotiflac/mornye_bottom_bar.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 Track _track(String title) => Track(
@@ -57,6 +57,7 @@ Future<void> _pumpApp(
   WidgetTester tester, {
   required Size size,
   List<Track> tracks = const [],
+  List<PlayedTrack> playLog = const [],
   MediaItem? nowPlaying,
   ScanState scan = const ScanIdle(),
   bool firstLaunch = false,
@@ -65,6 +66,7 @@ Future<void> _pumpApp(
   bool playing = false,
   bool settle = true,
   String? updateManifest,
+  Map<String, Object> preferences = const {},
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -72,14 +74,15 @@ Future<void> _pumpApp(
 
   SharedPreferences.setMockInitialValues({
     if (!firstLaunch) 'welcome_seen': true,
+    ...preferences,
   });
-  final preferences = await SharedPreferences.getInstance();
+  final prefs = await SharedPreferences.getInstance();
   const installed = AppVersion(1, 0, 0, 1);
 
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        sharedPreferencesProvider.overrideWithValue(preferences),
+        sharedPreferencesProvider.overrideWithValue(prefs),
         if (handler != null) audioHandlerProvider.overrideWithValue(handler),
         deviceDecodesAtmosProvider.overrideWith((ref) => false),
         allTracksProvider.overrideWith((ref) => tracks),
@@ -111,6 +114,9 @@ Future<void> _pumpApp(
         playbackErrorProvider.overrideWith((ref) => const Stream.empty()),
         scanControllerProvider.overrideWith(() => _IdleScanController(scan)),
         mostPlayedProvider.overrideWith((ref) => const []),
+        playLogProvider.overrideWith((ref) => playLog),
+        topTracksInDaysProvider.overrideWith((ref, days) => const []),
+        topGroupsProvider.overrideWith((ref, group) => const []),
         installedVersionProvider.overrideWith((ref) => installed),
         updateServiceProvider.overrideWith(
           (ref) => UpdateService(
@@ -118,7 +124,7 @@ Future<void> _pumpApp(
                 ? ''
                 : 'https://example.com/update.json',
             installed: installed,
-            preferences: preferences,
+            preferences: prefs,
             isIos: false,
             fetch: (_) async => updateManifest!,
           ),
@@ -139,29 +145,48 @@ Future<void> _pumpApp(
 void main() {
   const phone = Size(390, 844);
   const tabletLandscape = Size(1280, 800);
+  const desktop = Size(1600, 900);
 
-  testWidgets('phones get the floating bottom bar', (tester) async {
+  // The two round buttons the folded bar keeps. They are always in the tree;
+  // folding is what makes them take taps.
+  final foldedSearch = find
+      .byKey(const ValueKey('mornye-compact-search'))
+      .hitTestable();
+  final foldedLeading = find
+      .byKey(const ValueKey('mornye-compact-leading'))
+      .hitTestable();
+
+  testWidgets('phones get the floating glass bar with three tabs', (
+    tester,
+  ) async {
     await _pumpApp(tester, size: phone);
 
-    expect(find.byType(NocBottomBar), findsOneWidget);
+    expect(find.byType(MornyeBottomBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
-    for (final label in ['Home', 'Library', 'Settings', 'Search']) {
+    for (final label in ['Home', 'Library', 'Search']) {
       expect(find.text(label), findsWidgets, reason: label);
     }
+    // Settings is a page opened from Home, not a tab.
+    expect(find.text('Settings'), findsNothing);
   });
 
-  testWidgets('a tablet in portrait keeps the bottom bar', (tester) async {
+  testWidgets('tablets keep the bottom bar in both orientations', (
+    tester,
+  ) async {
     await _pumpApp(tester, size: const Size(800, 1200));
+    expect(find.byType(MornyeBottomBar), findsOneWidget);
+    expect(find.byType(NavigationRail), findsNothing);
 
-    expect(find.byType(NocBottomBar), findsOneWidget);
+    await _pumpApp(tester, size: tabletLandscape);
+    expect(find.byType(MornyeBottomBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
   });
 
-  testWidgets('wide windows get a navigation rail', (tester) async {
-    await _pumpApp(tester, size: tabletLandscape);
+  testWidgets('desktop-width windows get a navigation rail', (tester) async {
+    await _pumpApp(tester, size: desktop);
 
     expect(find.byType(NavigationRail), findsOneWidget);
-    expect(find.byType(NocBottomBar), findsNothing);
+    expect(find.byType(MornyeBottomBar), findsNothing);
   });
 
   group('bottom bar', () {
@@ -171,18 +196,49 @@ void main() {
       await _pumpApp(tester, size: phone, tracks: many);
       await tester.tap(find.text('Library').last);
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Search'), findsNothing);
+      expect(foldedSearch, findsNothing);
 
       await tester.drag(find.text('Track 3'), const Offset(0, -300));
       await tester.pumpAndSettle();
 
       // Folded: the two round side buttons replace the tabs.
-      expect(find.byTooltip('Search'), findsOneWidget);
-      expect(find.byTooltip('Library'), findsOneWidget);
+      expect(foldedSearch, findsOneWidget);
+      expect(foldedLeading, findsOneWidget);
 
-      await tester.tap(find.byTooltip('Library'));
+      await tester.tap(foldedLeading);
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Search'), findsNothing);
+      expect(foldedSearch, findsNothing);
+    });
+
+    testWidgets('stays put when folding is switched off in Settings', (
+      tester,
+    ) async {
+      await _pumpApp(
+        tester,
+        size: phone,
+        tracks: many,
+        preferences: {'fold_navigation_on_scroll': false},
+      );
+      await tester.tap(find.text('Library').last);
+      await tester.pumpAndSettle();
+
+      await tester.drag(find.text('Track 3'), const Offset(0, -300));
+      await tester.pumpAndSettle();
+
+      expect(foldedSearch, findsNothing);
+    });
+
+    testWidgets('the folded search button opens Search', (tester) async {
+      await _pumpApp(tester, size: phone, tracks: many);
+      await tester.tap(find.text('Library').last);
+      await tester.pumpAndSettle();
+      await tester.drag(find.text('Track 3'), const Offset(0, -300));
+      await tester.pumpAndSettle();
+
+      await tester.tap(foldedSearch);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Search your library'), findsOneWidget);
     });
 
     testWidgets('unfolds when the list is back at its top', (tester) async {
@@ -192,20 +248,20 @@ void main() {
 
       await tester.drag(find.text('Track 3'), const Offset(0, -300));
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Search'), findsOneWidget);
+      expect(foldedSearch, findsOneWidget);
 
       await tester.drag(find.byType(ListView).last, const Offset(0, 600));
       await tester.pumpAndSettle();
-      expect(find.byTooltip('Search'), findsNothing);
+      expect(foldedSearch, findsNothing);
     });
 
     testWidgets('back returns to Home, then asks before leaving', (
       tester,
     ) async {
       await _pumpApp(tester, size: phone);
-      await tester.tap(find.text('Settings').last);
+      await tester.tap(find.text('Search').last);
       await tester.pumpAndSettle();
-      expect(find.text('APPEARANCE'), findsOneWidget);
+      expect(find.text('Search your library'), findsOneWidget);
 
       await tester.binding.handlePopRoute();
       await tester.pumpAndSettle();
@@ -301,18 +357,71 @@ void main() {
     expect(find.text('Play now'), findsOneWidget);
     expect(find.text('Tracks'), findsOneWidget);
     expect(find.text('Plays'), findsOneWidget);
+    expect(find.text('Shuffle all'), findsOneWidget);
     // Nothing has been played yet, so the default list says so.
-    expect(find.text('Nothing played yet'), findsOneWidget);
+    expect(find.text('No tracks yet'), findsOneWidget);
 
+    // The menu offers every way of looking at the listening history.
     await tester.tap(find.byTooltip('Choose what the list shows'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Recently added').last);
+    for (final mode in [
+      'Recent',
+      'Most Played',
+      'Last 7 Days',
+      'Last 30 Days',
+      'Top Artists',
+      'Top Albums',
+    ]) {
+      expect(find.text(mode), findsWidgets, reason: mode);
+    }
+    await tester.tap(find.text('Top Artists').last);
     await tester.pumpAndSettle();
-    expect(find.text('Aashish'), findsOneWidget);
+    expect(find.text('Top Artists'), findsOneWidget);
 
     await tester.tap(find.text('Library').last);
     await tester.pumpAndSettle();
     expect(find.text('3:00'), findsOneWidget);
+  });
+
+  testWidgets('recent plays are grouped by day with repeat counts', (
+    tester,
+  ) async {
+    final song = _track('Aashish');
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    await _pumpApp(
+      tester,
+      size: const Size(390, 1700),
+      tracks: [song],
+      playLog: [
+        (track: song, playedAt: yesterday),
+        (track: song, playedAt: yesterday.subtract(const Duration(minutes: 5))),
+      ],
+    );
+
+    expect(find.text('Yesterday'), findsOneWidget);
+    expect(find.text('Aashish'), findsOneWidget);
+    expect(find.text('2\u00d7'), findsOneWidget);
+  });
+
+  testWidgets('Settings opens as a page from Home and back closes it', (
+    tester,
+  ) async {
+    await _pumpApp(tester, size: phone);
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.text('APPEARANCE'), findsOneWidget);
+    // The installed version and build number, not a placeholder.
+    await tester.scrollUntilVisible(
+      find.text('Version 1.0.0 (build 1)'),
+      300,
+      scrollable: find.byType(Scrollable).last,
+    );
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('APPEARANCE'), findsNothing);
+    expect(find.text('Welcome to NocTune'), findsOneWidget);
   });
 
   group('hero', () {
@@ -334,7 +443,10 @@ void main() {
       expect(find.text('SUSTARI'), findsOneWidget);
       expect(find.text('Now playing'), findsOneWidget);
       expect(find.text('Play now'), findsNothing);
-      expect(tester.widget<WaveBars>(find.byType(WaveBars)).playing, isTrue);
+      // The hero's bars, and the ones on the track's row in the list.
+      for (final bars in tester.widgetList<WaveBars>(find.byType(WaveBars))) {
+        expect(bars.playing, isTrue);
+      }
       // The bars keep moving, so this screen never comes to rest.
       expect(tester.hasRunningAnimations, isTrue);
     });
@@ -348,8 +460,10 @@ void main() {
       );
 
       expect(find.text('PAUSED'), findsOneWidget);
-      expect(find.text('Paused'), findsOneWidget);
-      expect(tester.widget<WaveBars>(find.byType(WaveBars)).playing, isFalse);
+      expect(find.text('Paused'), findsWidgets);
+      for (final bars in tester.widgetList<WaveBars>(find.byType(WaveBars))) {
+        expect(bars.playing, isFalse);
+      }
     });
 
     testWidgets('holds the bars still with reduced motion on', (tester) async {
@@ -387,7 +501,7 @@ void main() {
     );
     expect(find.text('Now Song'), findsOneWidget);
     expect(find.byTooltip('Next'), findsOneWidget);
-    expect(find.bySemanticsLabel('Play'), findsOneWidget);
+    expect(find.byTooltip('Play'), findsOneWidget);
   });
 
   group('startup popups', () {
@@ -474,13 +588,17 @@ void main() {
   testWidgets('navigates between destinations', (tester) async {
     await _pumpApp(tester, size: phone);
 
-    await tester.tap(find.text('Settings').last);
+    await tester.tap(find.text('Library').last);
     await tester.pumpAndSettle();
-    expect(find.text('APPEARANCE'), findsOneWidget);
+    expect(find.text('Tracks'), findsWidgets);
 
     await tester.tap(find.text('Search').last);
     await tester.pumpAndSettle();
     expect(find.text('Search your library'), findsOneWidget);
+
+    await tester.tap(find.text('Home').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Welcome to NocTune'), findsOneWidget);
   });
 
   testWidgets('the layout survives large text on a small phone', (

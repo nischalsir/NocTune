@@ -25,6 +25,7 @@ class HomeHero extends StatelessWidget {
     required this.eyebrow,
     required this.isCurrent,
     required this.onOpenSearch,
+    required this.onOpenSettings,
     required this.onPlay,
   });
 
@@ -34,6 +35,7 @@ class HomeHero extends StatelessWidget {
   /// Whether [track] is the one loaded in the player.
   final bool isCurrent;
   final VoidCallback onOpenSearch;
+  final VoidCallback onOpenSettings;
   final VoidCallback onPlay;
 
   static const _ink = Color(0xFF07080C);
@@ -122,9 +124,14 @@ class HomeHero extends StatelessWidget {
                         children: [
                           Expanded(
                             flex: 3,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: _SearchPill(onTap: onOpenSearch),
+                            child: Row(
+                              children: [
+                                Flexible(
+                                  child: _SearchPill(onTap: onOpenSearch),
+                                ),
+                                const SizedBox(width: 8),
+                                _SettingsButton(onTap: onOpenSettings),
+                              ],
                             ),
                           ),
                           const SizedBox(width: 16),
@@ -250,6 +257,36 @@ class _SearchPill extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The frosted round button beside the search field that opens Settings.
+class _SettingsButton extends StatelessWidget {
+  const _SettingsButton({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Settings',
+      excludeFromSemantics: true,
+      child: Pressable(
+        semanticLabel: 'Settings',
+        onTap: onTap,
+        child: const Frosted(
+          blurBackdrop: true,
+          child: SizedBox.square(
+            dimension: 40,
+            child: Icon(
+              Icons.settings_rounded,
+              size: 20,
+              color: Colors.white70,
             ),
           ),
         ),
