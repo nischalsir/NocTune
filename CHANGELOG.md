@@ -9,6 +9,48 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.4.1 (build 8) - 2026-10-11
+
+Published as a normal release at the owner's request; not yet run on a
+phone.
+
+### Fixed
+
+- Lyrics: on every line change, the new line and the six below it were
+  pushed down by 8 to 26 px in a single frame and then eased back. That
+  jump is gone. A test now fails if any line moves more than a few pixels
+  between two frames.
+- Lyrics: a line that arrives while the list is still gliding to the one
+  before no longer stops the list and starts it again. The glide carries on
+  at the speed it had.
+- Bottom bar: the grey pill is back under the selected tab. It gives way to
+  the glass selector while the selection moves (a tap, a slide, or a page
+  changed from elsewhere) and returns once the selection has stopped, so
+  the two are never shown together. A quick tap keeps the glass for the
+  whole trip instead of dropping it when the finger lifts.
+- Bottom bar: it parts and closes on the same clock as the mini-player
+  above it. In 1.4.0 the halves had reached the sides when the mini-player
+  was 60% of the way down, and only began to fill in again after it had
+  risen 40%.
+
+### Changed
+
+- Player: the blurred backdrop is drawn once for each cover and kept as a
+  picture, instead of being blurred again on every frame the lyrics or the
+  seek bar repaint.
+- Lyrics: every line, the word fill and the seek bar are their own layers,
+  so the fill redraws nothing but itself. While a line changes size it is
+  scaled as a picture, so its letters are not drawn afresh at a new size on
+  each frame; at rest it is text again.
+- The buttons over the lyrics no longer blur the backdrop a second time,
+  and the three over the cover share one blur.
+
+### Tests
+
+- The suite also passes with `flutter test --enable-impeller`, the renderer
+  phones use. That run includes the glass selector, which the default test
+  renderer cannot draw.
+
 ## 1.4.0 (build 7) - 2026-10-10
 
 Published as a normal release at the owner's request; not yet run on a
