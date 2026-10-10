@@ -128,10 +128,13 @@ flutter test tool/preview_screens.dart --dart-define=OUT=C:\some\folder
 
 ## Format labels and lyrics
 
-- **LOSSLESS** is shown only when the file's contents confirm a lossless
+The pill in the middle of the player's bottom row says what the audio is,
+for example `FLAC 24/96` or `AAC 256 kbps`.
+
+- It is marked **lossless** only when the file's contents confirm a lossless
   format: the FLAC stream marker, Apple Lossless inside an MP4 container, or
   uncompressed PCM in a WAV header. An extension alone is never enough.
-- **Dolby Atmos** is shown only when the file is flagged as Atmos (Dolby
+- It says **Dolby Atmos** only when the file is flagged as Atmos (Dolby
   Digital Plus with the JOC extension) *and* the device reports a decoder for
   that format. There is no Atmos switch, and nothing is labelled Atmos on iOS,
   where the app cannot check.

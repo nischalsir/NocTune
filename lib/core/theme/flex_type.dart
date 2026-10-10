@@ -3,6 +3,9 @@ import 'package:flutter/painting.dart';
 /// The type scale of the home feed and the lyrics view: Google Sans Flex,
 /// with its weight, width, roundness and optical-size axes set per role.
 ///
+/// Tracking is set per size: the large display roles are tightened, body
+/// and label roles are left as drawn.
+///
 /// Weight is set on the font's own axis, not with [TextStyle.fontWeight], so
 /// the in-between weights below render as drawn instead of being rounded to
 /// the nearest hundred or faked.
@@ -37,6 +40,7 @@ abstract final class FlexType {
     weight: 720,
     width: 118,
     round: 38,
+    letterSpacing: -0.6,
   );
   static final headlineSmall = custom(
     size: 24,
@@ -44,6 +48,7 @@ abstract final class FlexType {
     weight: 760,
     width: 116,
     round: 36,
+    letterSpacing: -0.3,
   );
   static final titleLarge = custom(
     size: 22,
@@ -51,6 +56,7 @@ abstract final class FlexType {
     weight: 640,
     width: 110,
     round: 30,
+    letterSpacing: -0.2,
   );
   static final titleMedium = custom(
     size: 16,

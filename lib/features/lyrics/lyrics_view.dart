@@ -10,15 +10,46 @@ import '../../core/format.dart';
 import '../../core/theme/flex_type.dart';
 import '../../data/models/track.dart';
 import '../playback/noc_audio_handler.dart';
+import '../playback/player_glass_button.dart';
+import '../playback/player_seek_bar.dart';
 import '../settings/settings_controller.dart';
 import 'lyrics.dart';
 import 'lyrics_offset.dart';
 import 'lyrics_source.dart';
-import 'wave_seek_bar.dart';
+
+/// Lets the user pick a lyrics file for [track], and says so when the file
+/// holds nothing readable.
+Future<void> importLyricsWithFeedback(
+  BuildContext context,
+  WidgetRef ref,
+  Track track,
+) async {
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await importLyricsFor(track, ref);
+  } on InvalidLyricsFile {
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            'That file has no lyrics NocTune can read. Try another file.',
+          ),
+        ),
+      );
+  }
+}
+
+/// Forgets the lyrics file imported for [track]; lyrics beside or inside the
+/// audio file, if any, show again.
+Future<void> removeImportedLyrics(WidgetRef ref, Track track) async {
+  await ref.read(libraryRepositoryProvider).removeImportedLyrics(track.id);
+  ref.invalidate(lyricsProvider((trackId: track.id, uri: track.uri)));
+}
 
 /// The lyrics view of the player, for a dark backdrop: the lyrics fill the
-/// space, and beneath them sit the lyric actions, a seek bar and the
-/// transport buttons.
+/// space, and beneath them sit the text-size and fullscreen buttons, a seek
+/// bar and the transport buttons.
 ///
 /// Synced lyrics follow the real playback position: the line being sung is
 /// large, bright and sharp, its neighbours recede, and the list keeps it a
@@ -51,36 +82,14 @@ class LyricsPanel extends ConsumerStatefulWidget {
 class _LyricsPanelState extends ConsumerState<LyricsPanel> {
   bool _showSizeSlider = false;
 
-  LyricsKey get _key => (trackId: widget.track.id, uri: widget.track.uri);
-
-  Future<void> _import() async {
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await importLyricsFor(widget.track, ref);
-    } on InvalidLyricsFile {
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text(
-              'That file has no lyrics NocTune can read. Try another file.',
-            ),
-          ),
-        );
-    }
-  }
-
-  Future<void> _removeImported() async {
-    await ref
-        .read(libraryRepositoryProvider)
-        .removeImportedLyrics(widget.track.id);
-    ref.invalidate(lyricsProvider(_key));
-  }
-
   @override
   Widget build(BuildContext context) {
-    final loaded = ref.watch(lyricsProvider(_key));
+    final track = widget.track;
+    final loaded = ref.watch(
+      lyricsProvider((trackId: track.id, uri: track.uri)),
+    );
     final scale = ref.watch(settingsProvider.select((s) => s.lyricsScale));
+    final wave = ref.watch(settingsProvider.select((s) => s.waveSeekBar));
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final found = loaded.value;
 
@@ -91,99 +100,113 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
       content = _Empty(
         key: const ValueKey('empty'),
         failed: loaded.hasError,
-        onImport: _import,
+        onImport: () => importLyricsWithFeedback(context, ref, track),
       );
     } else if (found.lyrics.synced) {
       content = _SyncedLyrics(
         // A new track starts at the top with fresh state.
-        key: ValueKey('synced-${widget.track.id}'),
-        trackId: widget.track.id,
+        key: ValueKey('synced-${track.id}'),
+        trackId: track.id,
         lyrics: found.lyrics,
         origin: found.origin,
         scale: scale,
       );
     } else {
       content = _PlainLyrics(
-        key: ValueKey('plain-${widget.track.id}'),
+        key: ValueKey('plain-${track.id}'),
         lyrics: found.lyrics,
         scale: scale,
       );
     }
 
-    return Column(
-      children: [
-        Expanded(
-          child: AnimatedSwitcher(
-            duration: reduceMotion
-                ? Duration.zero
-                : const Duration(milliseconds: 200),
-            transitionBuilder: (child, animation) => FadeTransition(
-              opacity: animation,
-              child: ScaleTransition(
-                scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
-                child: child,
-              ),
-            ),
-            child: content,
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AnimatedSize(
+    // A window too short for everything keeps the lyrics and drops the seek
+    // bar and transport, as fullscreen does.
+    return LayoutBuilder(
+      builder: (context, box) {
+        final lyricsOnly = widget.isFullscreen || box.maxHeight < 420;
+        return Column(
+          children: [
+            Expanded(
+              child: AnimatedSwitcher(
                 duration: reduceMotion
                     ? Duration.zero
                     : const Duration(milliseconds: 200),
-                alignment: Alignment.bottomCenter,
-                child: _showSizeSlider
-                    ? _SizeSlider(scale: scale)
-                    : const SizedBox(width: double.infinity),
+                transitionBuilder: (child, animation) => FadeTransition(
+                  opacity: animation,
+                  child: ScaleTransition(
+                    scale: Tween<double>(
+                      begin: 0.96,
+                      end: 1,
+                    ).animate(animation),
+                    child: child,
+                  ),
+                ),
+                child: content,
               ),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 22),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  _LyricsMenuButton(
-                    synced: found?.lyrics.synced ?? false,
-                    canRemove: found?.origin == LyricsOrigin.imported,
-                    onImport: _import,
-                    onRemove: _removeImported,
-                    onOffset: () =>
-                        showLyricsOffsetDialog(context, widget.track.id),
+                  AnimatedSize(
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 200),
+                    alignment: Alignment.bottomCenter,
+                    child: _showSizeSlider
+                        ? _SizeSlider(scale: scale)
+                        : const SizedBox(width: double.infinity),
                   ),
-                  const SizedBox(width: 10),
-                  _GlassCircle(
-                    icon: Icons.format_size,
-                    label: 'Adjust lyrics text size',
-                    iconSize: 22,
-                    highlighted: _showSizeSlider || scale != 1,
-                    onTap: () =>
-                        setState(() => _showSizeSlider = !_showSizeSlider),
+                  const SizedBox(height: 6),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      PlayerGlassButton(
+                        icon: Icons.format_size,
+                        label: 'Adjust lyrics text size',
+                        iconSize: 22,
+                        pressedScale: 0.82,
+                        color: _showSizeSlider || scale != 1
+                            ? Theme.of(context).colorScheme.primary
+                                  .withValues(alpha: 0.28)
+                            : null,
+                        foreground: _showSizeSlider || scale != 1
+                            ? Theme.of(context).colorScheme.primary
+                            : Colors.white.withValues(alpha: 0.90),
+                        onTap: () =>
+                            setState(() => _showSizeSlider = !_showSizeSlider),
+                      ),
+                      const SizedBox(width: 10),
+                      PlayerGlassButton(
+                        icon: widget.isFullscreen
+                            ? Icons.fullscreen_exit
+                            : Icons.fullscreen,
+                        label: widget.isFullscreen
+                            ? 'Exit fullscreen lyrics'
+                            : 'Fullscreen lyrics',
+                        pressedScale: 0.82,
+                        foreground: Colors.white.withValues(alpha: 0.90),
+                        onTap: widget.onToggleFullscreen,
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  _GlassCircle(
-                    icon: widget.isFullscreen
-                        ? Icons.fullscreen_exit
-                        : Icons.fullscreen,
-                    label: widget.isFullscreen
-                        ? 'Exit fullscreen lyrics'
-                        : 'Fullscreen lyrics',
-                    onTap: widget.onToggleFullscreen,
-                  ),
+                  if (!lyricsOnly) ...[
+                    const SizedBox(height: 6),
+                    PlayerSeekBar(
+                      duration: widget.duration,
+                      wave: wave,
+                      showTimes: false,
+                    ),
+                    const SizedBox(height: 6),
+                    _Transport(duration: widget.duration),
+                  ],
                 ],
               ),
-              if (!widget.isFullscreen) ...[
-                const SizedBox(height: 6),
-                WaveSeekBar(duration: widget.duration),
-                const SizedBox(height: 6),
-                _Transport(duration: widget.duration),
-              ],
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 }
@@ -301,22 +324,34 @@ class _PlainLyrics extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 20),
-          Text(
-            lyrics.lines.map((line) => line.text).join('\n'),
-            style: FlexType.custom(
-              size: 28 * scale,
-              lineHeight: 46 * scale,
-              weight: 500,
-              width: 102,
-              round: 18,
-              letterSpacing: 0.1,
-            ).copyWith(color: Colors.white.withValues(alpha: 0.94)),
+          // The size slider is the control for this text; the system text
+          // size adds to it only up to a point, so words still fit a line.
+          MediaQuery.withClampedTextScaling(
+            maxScaleFactor: _maxSystemTextScale,
+            child: Text(
+              lyrics.lines.map((line) => line.text).join('\n'),
+              style: FlexType.custom(
+                size: 28 * scale,
+                lineHeight: 46 * scale,
+                weight: 500,
+                width: 102,
+                round: 18,
+                letterSpacing: 0.1,
+              ).copyWith(color: Colors.white.withValues(alpha: 0.94)),
+            ),
           ),
         ],
       ),
     );
   }
 }
+
+/// How far the system text size may enlarge lyrics on top of the app's own
+/// size slider.
+const _maxSystemTextScale = 1.3;
+
+/// How much the line being sung is enlarged.
+const _activeScale = 1.085;
 
 /// Timestamped lyrics that follow playback.
 class _SyncedLyrics extends ConsumerStatefulWidget {
@@ -357,9 +392,10 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
       if (!mounted) return;
       _follow(
         _indexAt(
-          ref.read(playbackPositionProvider),
+          ref.read(lyricsPositionProvider),
           ref.read(lyricsOffsetOfProvider(widget.trackId)),
         ),
+        animate: false,
       );
     });
   }
@@ -381,7 +417,7 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
 
   /// Scrolls the active line to a third of the way down, unless the user
   /// has just been scrolling.
-  void _follow(int index) {
+  void _follow(int index, {bool animate = true}) {
     if (index < 0 || index >= _keys.length) return;
     if (DateTime.now().difference(_userScrolledAt) < _handsOff) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -390,7 +426,7 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
       Scrollable.ensureVisible(
         target,
         alignment: 1 / 3,
-        duration: MediaQuery.disableAnimationsOf(context)
+        duration: !animate || MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
             : const Duration(milliseconds: 420),
         curve: Curves.easeOutCubic,
@@ -417,15 +453,16 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
   Widget build(BuildContext context) {
     final lines = widget.lyrics.lines;
     final offset = ref.watch(lyricsOffsetOfProvider(widget.trackId));
-    // Rebuilds when the line changes, not on every position tick.
+    // The position ticks twenty times a second, but this only rebuilds when
+    // the line changes.
     final active = ref.watch(
-      playbackPositionProvider.select((p) => _indexAt(p, offset)),
+      lyricsPositionProvider.select((p) => _indexAt(p, offset)),
     );
     final playing = ref.watch(
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
     ref.listen(
-      playbackPositionProvider.select((p) => _indexAt(p, offset)),
+      lyricsPositionProvider.select((p) => _indexAt(p, offset)),
       (_, index) => _follow(index),
     );
 
@@ -442,7 +479,7 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
               decoration: BoxDecoration(
@@ -461,33 +498,50 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
             ),
           ),
           Expanded(
-            child: NotificationListener<ScrollNotification>(
-              onNotification: _onScroll,
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.fromLTRB(16, 40, 16, 130),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    for (final (index, line) in lines.indexed)
-                      Padding(
-                        key: _keys[index],
-                        padding: EdgeInsets.only(top: index == 0 ? 0 : 26),
-                        child: _LyricRow(
-                          text: line.text,
-                          style: style,
-                          relative: active < 0 ? null : index - active,
-                          playing: playing,
-                          browsing: _dragging,
-                          onTap: line.time == null
-                              ? null
-                              : () => ref
-                                    .read(audioHandlerProvider)
-                                    .seek(line.time!),
-                        ),
+            child: LayoutBuilder(
+              builder: (context, box) {
+                // The widest a line may be laid out so that, enlarged as the
+                // active line, it still ends inside the screen's edge. Line
+                // breaks never change when a line becomes active.
+                final textWidth = math.max(
+                  80.0,
+                  (box.maxWidth - 16) / _activeScale - 12,
+                );
+                return MediaQuery.withClampedTextScaling(
+                  maxScaleFactor: _maxSystemTextScale,
+                  child: NotificationListener<ScrollNotification>(
+                    onNotification: _onScroll,
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(16, 40, 16, 130),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          for (final (index, line) in lines.indexed)
+                            Padding(
+                              key: _keys[index],
+                              padding: EdgeInsets.only(
+                                top: index == 0 ? 0 : 26,
+                              ),
+                              child: _LyricRow(
+                                text: line.text,
+                                style: style,
+                                textWidth: textWidth,
+                                relative: active < 0 ? null : index - active,
+                                playing: playing,
+                                browsing: _dragging,
+                                onTap: line.time == null
+                                    ? null
+                                    : () => ref
+                                          .read(audioHandlerProvider)
+                                          .seek(line.time!),
+                              ),
+                            ),
+                        ],
                       ),
-                  ],
-                ),
-              ),
+                    ),
+                  ),
+                );
+              },
             ),
           ),
         ],
@@ -499,10 +553,15 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
 /// One lyric line. How it looks depends on where it is relative to the line
 /// being sung: that one is enlarged, bright and sharp with a soft glow; the
 /// further away a line is, the dimmer and softer it gets.
+///
+/// Its size on the page never changes, so the lines around it don't move
+/// when it becomes active: the enlargement, the lift and the blur are all
+/// painted effects.
 class _LyricRow extends StatefulWidget {
   const _LyricRow({
     required this.text,
     required this.style,
+    required this.textWidth,
     required this.relative,
     required this.playing,
     required this.browsing,
@@ -511,6 +570,7 @@ class _LyricRow extends StatefulWidget {
 
   final String text;
   final TextStyle style;
+  final double textWidth;
 
   /// Lines from the active one: negative above, positive below, zero for
   /// the active line itself. Null before the first line is reached.
@@ -527,14 +587,15 @@ class _LyricRow extends StatefulWidget {
 }
 
 class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
-  // The pulse a line gives as it becomes the active one.
-  late final _onset = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 480),
-  );
-  // The settle of lines below the active one as the list moves on.
-  late final _trail = AnimationController(vsync: this, value: 1);
+  // Lines further than this from the active one are off screen while the
+  // list is following, so they are not given a blur layer.
+  static const _blurReach = 8;
+
+  // Made only for lines that actually animate.
+  AnimationController? _onset;
+  AnimationController? _trail;
   double _trailFrom = 0;
+  Curve _trailCurve = Curves.linear;
 
   @override
   void didUpdateWidget(_LyricRow oldWidget) {
@@ -542,11 +603,17 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
     final relative = widget.relative;
     if (relative == oldWidget.relative) return;
     final animate = widget.playing && !MediaQuery.disableAnimationsOf(context);
+
+    // The pulse a line gives as it becomes the active one.
     if (relative == 0 && animate) {
-      _onset.forward(from: 0);
+      (_onset ??= AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 480),
+      )).forward(from: 0);
     } else {
-      _onset.value = 0;
+      _onset?.value = 0;
     }
+
     // Lines at and below the new active one lag, then spring up in turn.
     if (animate &&
         !widget.browsing &&
@@ -557,25 +624,23 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
       _trailFrom = 10.0 + relative * 4;
       const settle = 620;
       final wait = relative * 38;
-      _trail
-        ..duration = Duration(milliseconds: wait + settle)
-        ..forward(from: 0);
       _trailCurve = Interval(
         wait / (wait + settle),
         1,
         curve: const _Spring(ratio: 0.72, stiffness: 180, seconds: 0.62),
       );
+      (_trail ??= AnimationController(vsync: this))
+        ..duration = Duration(milliseconds: wait + settle)
+        ..forward(from: 0);
     } else {
-      _trail.value = 1;
+      _trail?.value = 1;
     }
   }
 
-  Curve _trailCurve = Curves.linear;
-
   @override
   void dispose() {
-    _onset.dispose();
-    _trail.dispose();
+    _onset?.dispose();
+    _trail?.dispose();
     super.dispose();
   }
 
@@ -588,23 +653,28 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     Duration timed(int ms) =>
         reduceMotion ? Duration.zero : Duration(milliseconds: ms);
+    final start = AlignmentDirectional.centerStart.resolve(
+      Directionality.of(context),
+    );
 
-    final scale = isActive ? 1.085 : (distance == 1 ? 0.99 : 0.965);
+    final scale = isActive ? _activeScale : (distance == 1 ? 0.99 : 0.965);
+    // Dimming is done in the text colour, not with a layer per line.
     final opacity = isActive
         ? 1.0
-        : (distance == 1 ? 0.58 : (isPast ? 0.38 : 0.30));
-    final blur = isActive || widget.browsing || relative == null
+        : 0.44 * (distance == 1 ? 0.58 : (isPast ? 0.38 : 0.30));
+    final blur =
+        isActive || widget.browsing || relative == null || distance > _blurReach
         ? 0.0
         : math.min(distance, 4) * 1.6;
     final shift = isActive ? -3.5 : (isPast ? -1.5 : 3.5);
+    final onset = _onset;
+    final trail = _trail;
 
     final text = AnimatedDefaultTextStyle(
-      duration: timed(240),
+      duration: timed(320),
       curve: Curves.fastOutSlowIn,
       style: widget.style.copyWith(
-        color: isActive
-            ? Colors.white
-            : Colors.white.withValues(alpha: 0.55 * 0.44),
+        color: Colors.white.withValues(alpha: opacity),
         shadows: [
           Shadow(
             color: Colors.white.withValues(alpha: isActive ? 0.50 : 0),
@@ -615,66 +685,57 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
       child: Text(widget.text.trim().isEmpty ? '♪' : widget.text),
     );
 
-    final row = AnimatedOpacity(
-      opacity: opacity,
-      duration: timed(320),
+    final row = TweenAnimationBuilder<double>(
+      tween: Tween(end: blur),
+      duration: timed(380),
       curve: Curves.fastOutSlowIn,
+      builder: (context, radius, child) => ImageFiltered(
+        enabled: radius > 0.2,
+        // A blur radius, expressed as the sigma the filter wants.
+        imageFilter: ImageFilter.blur(
+          sigmaX: radius * 0.58,
+          sigmaY: radius * 0.58,
+          tileMode: TileMode.decal,
+        ),
+        child: child,
+      ),
       child: TweenAnimationBuilder<double>(
-        tween: Tween(end: blur),
-        duration: timed(380),
-        curve: Curves.fastOutSlowIn,
-        builder: (context, radius, child) => ImageFiltered(
-          enabled: radius > 0.2,
-          // A blur radius, expressed as the sigma the filter wants.
-          imageFilter: ImageFilter.blur(
-            sigmaX: radius * 0.58,
-            sigmaY: radius * 0.58,
-            tileMode: TileMode.decal,
-          ),
+        tween: Tween(end: shift),
+        duration: timed(520),
+        curve: const _Spring(ratio: 0.82, stiffness: 400, seconds: 0.52),
+        builder: (context, dy, child) => AnimatedBuilder(
+          animation: Listenable.merge([?onset, ?trail]),
+          builder: (context, child) {
+            final lag = trail == null
+                ? 0.0
+                : _trailFrom * (1 - _trailCurve.transform(trail.value));
+            final wave = onset != null && onset.isAnimating
+                ? math.sin(
+                    math.pi * Curves.fastOutSlowIn.transform(onset.value),
+                  )
+                : 0.0;
+            return Transform.translate(
+              offset: Offset(0, dy + lag),
+              child: Transform.scale(
+                scale: 1 + 0.020 * wave,
+                alignment: start,
+                child: child,
+              ),
+            );
+          },
           child: child,
         ),
-        child: TweenAnimationBuilder<double>(
-          tween: Tween(end: shift),
-          duration: timed(520),
-          curve: const _Spring(ratio: 0.82, stiffness: 400, seconds: 0.52),
-          builder: (context, dy, child) => AnimatedBuilder(
-            animation: Listenable.merge([_onset, _trail]),
-            builder: (context, child) {
-              final trail =
-                  _trailFrom * (1 - _trailCurve.transform(_trail.value));
-              final wave = _onset.isAnimating
-                  ? math.sin(
-                      math.pi * Curves.fastOutSlowIn.transform(_onset.value),
-                    )
-                  : 0.0;
-              return Transform.translate(
-                offset: Offset(0, dy + trail),
-                child: Transform.scale(
-                  scale: 1 + 0.020 * wave,
-                  alignment: AlignmentDirectional.centerStart.resolve(
-                    Directionality.of(context),
-                  ),
-                  child: child,
-                ),
-              );
-            },
-            child: child,
-          ),
-          child: AnimatedScale(
-            scale: scale,
-            alignment: AlignmentDirectional.centerStart.resolve(
-              Directionality.of(context),
-            ),
-            duration: timed(600),
-            curve: const _Spring(ratio: 0.62, stiffness: 260, seconds: 0.6),
-            child: AnimatedPadding(
-              duration: timed(200),
-              padding: EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: isActive ? 8 : 6,
-              ),
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
+        child: AnimatedScale(
+          scale: scale,
+          alignment: start,
+          duration: timed(600),
+          curve: const _Spring(ratio: 0.62, stiffness: 260, seconds: 0.6),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            child: Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: ConstrainedBox(
+                constraints: BoxConstraints(maxWidth: widget.textWidth),
                 child: text,
               ),
             ),
@@ -813,176 +874,6 @@ class _SizeSlider extends ConsumerWidget {
   }
 }
 
-/// A round glass button that dips while pressed.
-class _GlassCircle extends StatefulWidget {
-  const _GlassCircle({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.size = 44,
-    this.iconSize = 24,
-    this.fill = 0.14,
-    this.highlighted = false,
-    this.showTooltip = true,
-    this.child,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final double size;
-  final double iconSize;
-
-  /// Opacity of the white fill.
-  final double fill;
-
-  /// Tints the button with the accent, for a control that is switched on.
-  final bool highlighted;
-
-  /// Off for a circle that sits inside something with its own tooltip.
-  final bool showTooltip;
-
-  /// Shown instead of the icon.
-  final Widget? child;
-
-  @override
-  State<_GlassCircle> createState() => _GlassCircleState();
-}
-
-class _GlassCircleState extends State<_GlassCircle> {
-  bool _pressed = false;
-
-  void _setPressed(bool pressed) {
-    if (pressed != _pressed) setState(() => _pressed = pressed);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    return Tooltip(
-      // An empty message shows no tooltip.
-      message: widget.showTooltip ? widget.label : '',
-      excludeFromSemantics: true,
-      child: Semantics(
-        button: true,
-        enabled: widget.onTap != null,
-        label: widget.label,
-        excludeSemantics: true,
-        child: Listener(
-          onPointerDown: (_) => _setPressed(true),
-          onPointerUp: (_) => _setPressed(false),
-          onPointerCancel: (_) => _setPressed(false),
-          child: AnimatedScale(
-            scale: _pressed && !reduceMotion ? 0.82 : 1,
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutBack,
-            child: Material(
-              color: widget.highlighted
-                  ? primary.withValues(alpha: 0.28)
-                  : Colors.white.withValues(alpha: widget.fill),
-              shape: CircleBorder(
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.10)),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: InkWell(
-                onTap: widget.onTap,
-                child: SizedBox.square(
-                  dimension: widget.size,
-                  child: Center(
-                    child:
-                        widget.child ??
-                        Icon(
-                          widget.icon,
-                          size: widget.iconSize,
-                          color: widget.highlighted
-                              ? primary
-                              : Colors.white.withValues(alpha: 0.92),
-                        ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-enum _LyricsAction { import, remove, offset }
-
-/// Where a lyrics file is added or removed and its timing corrected.
-class _LyricsMenuButton extends StatelessWidget {
-  const _LyricsMenuButton({
-    required this.synced,
-    required this.canRemove,
-    required this.onImport,
-    required this.onRemove,
-    required this.onOffset,
-  });
-
-  final bool synced;
-  final bool canRemove;
-  final VoidCallback onImport;
-  final VoidCallback onRemove;
-  final VoidCallback onOffset;
-
-  @override
-  Widget build(BuildContext context) {
-    return PopupMenuButton<_LyricsAction>(
-      tooltip: 'Lyrics options',
-      position: PopupMenuPosition.over,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      onSelected: (action) => switch (action) {
-        _LyricsAction.import => onImport(),
-        _LyricsAction.remove => onRemove(),
-        _LyricsAction.offset => onOffset(),
-      },
-      itemBuilder: (context) => [
-        const PopupMenuItem(
-          value: _LyricsAction.import,
-          child: ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.file_open_outlined),
-            title: Text('Import lyrics file…'),
-          ),
-        ),
-        if (canRemove)
-          const PopupMenuItem(
-            value: _LyricsAction.remove,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.delete_outline),
-              title: Text('Remove imported lyrics'),
-            ),
-          ),
-        if (synced)
-          const PopupMenuItem(
-            value: _LyricsAction.offset,
-            child: ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Icon(Icons.timer_outlined),
-              title: Text('Lyrics sync offset…'),
-            ),
-          ),
-      ],
-      // The menu button owns the tap, the tooltip and the semantics; the
-      // circle only draws.
-      child: const IgnorePointer(
-        child: ExcludeSemantics(
-          child: _GlassCircle(
-            icon: Icons.more_horiz,
-            label: 'Lyrics options',
-            onTap: null,
-            showTooltip: false,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// Elapsed time, previous / play-pause / next, and time remaining.
 class _Transport extends ConsumerWidget {
   const _Transport({required this.duration});
@@ -1023,32 +914,37 @@ class _Transport extends ConsumerWidget {
           Expanded(
             child: Text(formatDuration(shown), maxLines: 1, style: timeStyle),
           ),
-          _GlassCircle(
+          PlayerGlassButton(
             icon: Icons.skip_previous,
             label: 'Previous',
             size: 46,
             onTap: () => handler().skipToPrevious(),
           ),
           const SizedBox(width: 16),
-          _GlassCircle(
-            icon: playing ? Icons.pause : Icons.play_arrow,
-            label: playing ? 'Pause' : 'Play',
-            size: 56,
-            iconSize: 28,
-            fill: 0.18,
-            onTap: () => playing ? handler().pause() : handler().play(),
-            child: busy
-                ? const SizedBox.square(
-                    dimension: 24,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: Colors.white,
-                    ),
-                  )
-                : null,
-          ),
+          if (busy)
+            const SizedBox.square(
+              dimension: 56,
+              child: Center(
+                child: SizedBox.square(
+                  dimension: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            )
+          else
+            PlayerGlassButton(
+              icon: playing ? Icons.pause : Icons.play_arrow,
+              label: playing ? 'Pause' : 'Play',
+              size: 56,
+              iconSize: 28,
+              fill: 0.18,
+              onTap: () => playing ? handler().pause() : handler().play(),
+            ),
           const SizedBox(width: 16),
-          _GlassCircle(
+          PlayerGlassButton(
             icon: Icons.skip_next,
             label: 'Next',
             size: 46,

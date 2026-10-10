@@ -21,9 +21,12 @@ class EmptyState extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    // Centred in the part of the screen the floating navigation leaves free,
+    // so an action button never ends up behind it.
+    final covered = MediaQuery.paddingOf(context).bottom;
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(32),
+        padding: EdgeInsets.fromLTRB(32, 32, 32, 32 + covered),
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 360),
           child: Column(

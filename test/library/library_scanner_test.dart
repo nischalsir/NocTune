@@ -177,6 +177,35 @@ void main() {
       expect((await repository.tracks()).single.codec, 'pcm');
     });
 
+    test('re-reads a track whose cached cover has been cleared', () async {
+      write('a.wav', _wav());
+      write('b.wav', _wav());
+      await scanner().scan();
+      // As if both had covers in the cache, and one file was then cleared.
+      final kept = File(p.join(artworkDir, 'kept.jpg'))
+        ..createSync(recursive: true);
+      await db.update(
+        'tracks',
+        {'art_path': kept.path},
+        where: 'file_name = ?',
+        whereArgs: ['a.wav'],
+      );
+      await db.update(
+        'tracks',
+        {'art_path': p.join(artworkDir, 'cleared.jpg')},
+        where: 'file_name = ?',
+        whereArgs: ['b.wav'],
+      );
+
+      final summary = await scanner().scan();
+
+      expect(summary.scanned, 1);
+      // These files hold no picture, so the lost cover is simply forgotten
+      // and the next scan has nothing to do.
+      expect((await repository.artworkPaths()).keys.single, endsWith('a.wav'));
+      expect((await scanner().scan()).scanned, 0);
+    });
+
     test('re-reads a file that was modified', () async {
       final file = write('a.wav', _wav(seconds: 1));
       await scanner().scan();

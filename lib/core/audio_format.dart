@@ -67,6 +67,35 @@ String qualityLabel(Track track) {
   ].join(' · ');
 }
 
+/// A short description of a track's audio for the player's quality pill:
+/// `FLAC 24/96`, `AAC 256 kbps`, or `Dolby Atmos` when [atmos] is true.
+///
+/// [atmos] must come from [formatBadges], so an Atmos recording on a device
+/// that can't decode it is described by its codec instead.
+String qualityBadgeLabel(Track track, {required bool atmos}) {
+  if (atmos) return 'Dolby Atmos';
+  final codec = track.codec;
+  final name = switch (codec) {
+    'alac' => 'ALAC',
+    'eac3-joc' || 'eac3' => 'Dolby Digital+',
+    null => 'Audio',
+    _ => codecLabel(codec),
+  };
+  final rate = track.sampleRate;
+  final depth = track.bitDepth;
+  final bitrate = track.bitrate;
+  if (isLossless(codec)) {
+    final resolution = [
+      if (depth != null) '$depth',
+      if (rate != null) _trimZeros(rate / 1000),
+    ].join('/');
+    return resolution.isEmpty ? name : '$name $resolution';
+  }
+  return bitrate == null
+      ? name
+      : '$name ${_thousands((bitrate / 1000).round())} kbps';
+}
+
 String _trimZeros(double value) =>
     value == value.roundToDouble() ? '${value.round()}' : '$value';
 

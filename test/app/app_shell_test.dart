@@ -156,18 +156,20 @@ void main() {
       .byKey(const ValueKey('mornye-compact-leading'))
       .hitTestable();
 
-  testWidgets('phones get the floating glass bar with three tabs', (
+  testWidgets('phones get the floating glass bar with four tabs', (
     tester,
   ) async {
     await _pumpApp(tester, size: phone);
 
     expect(find.byType(MornyeBottomBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
-    for (final label in ['Home', 'Library', 'Search']) {
-      expect(find.text(label), findsWidgets, reason: label);
-    }
-    // Settings is a page opened from Home, not a tab.
-    expect(find.text('Settings'), findsNothing);
+    // Settings is reachable straight from the bar; Search is last.
+    final positions = [
+      for (final label in ['Home', 'Library', 'Settings', 'Search'])
+        tester.getCenter(find.text(label).last).dx,
+    ];
+    expect(positions, orderedEquals([...positions]..sort()));
+    expect(positions.toSet(), hasLength(4));
   });
 
   testWidgets('tablets keep the bottom bar in both orientations', (
@@ -403,14 +405,16 @@ void main() {
     expect(find.text('2\u00d7'), findsOneWidget);
   });
 
-  testWidgets('Settings opens as a page from Home and back closes it', (
+  testWidgets('Settings is a tab, and back returns from it to Home', (
     tester,
   ) async {
     await _pumpApp(tester, size: phone);
+    final heading = find.text('APPEARANCE').hitTestable();
+    expect(heading, findsNothing);
 
-    await tester.tap(find.byTooltip('Settings'));
+    await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
-    expect(find.text('APPEARANCE'), findsOneWidget);
+    expect(heading, findsOneWidget);
     // The installed version and build number, not a placeholder.
     await tester.scrollUntilVisible(
       find.text('Version 1.0.0 (build 1)'),
@@ -420,8 +424,34 @@ void main() {
 
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(find.text('APPEARANCE'), findsNothing);
-    expect(find.text('Welcome to NocTune'), findsOneWidget);
+    expect(heading, findsNothing);
+    expect(find.text('Welcome to NocTune').hitTestable(), findsOneWidget);
+  });
+
+  testWidgets('tabs keep their place when left and returned to', (
+    tester,
+  ) async {
+    await _pumpApp(
+      tester,
+      size: phone,
+      tracks: [for (var i = 0; i < 40; i++) _track('Track $i')],
+    );
+    await tester.tap(find.text('Library').last);
+    await tester.pumpAndSettle();
+    await tester.drag(find.text('Track 3'), const Offset(0, -900));
+    await tester.pumpAndSettle();
+    expect(find.text('Track 3').hitTestable(), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('mornye-compact-leading')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Library').last);
+    await tester.pumpAndSettle();
+
+    // Still scrolled to where it was left.
+    expect(find.text('Track 3').hitTestable(), findsNothing);
+    expect(find.text('Track 20').hitTestable(), findsOneWidget);
   });
 
   group('hero', () {

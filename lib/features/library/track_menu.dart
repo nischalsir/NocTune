@@ -108,7 +108,7 @@ Future<void> showTrackMenu(
               title: const Text('Details'),
               onTap: () {
                 Navigator.of(sheetContext).pop();
-                _showDetails(context, track);
+                showTrackDetails(context, track);
               },
             ),
           ],
@@ -118,7 +118,9 @@ Future<void> showTrackMenu(
   );
 }
 
-void _showDetails(BuildContext context, Track track) {
+/// Shows what is known about a track's file: its format, size and where it
+/// is stored.
+void showTrackDetails(BuildContext context, Track track) {
   final megabytes = (track.sizeBytes / (1024 * 1024)).toStringAsFixed(1);
   final rows = <(String, String)>[
     ('Title', track.title),

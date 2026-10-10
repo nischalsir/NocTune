@@ -20,8 +20,10 @@ import 'home_rows.dart';
 
 const _pillRadius = BorderRadius.all(Radius.circular(999));
 const _artworkRadius = 12.0;
-const _rowRadius = BorderRadius.all(Radius.circular(16));
-const _nowPlayingRadius = BorderRadius.all(Radius.circular(18));
+// Rows sit 8 inside a container of radius 28, so their own radius is 20:
+// the two curves stay parallel.
+const _rowRadius = BorderRadius.all(Radius.circular(20));
+const _nowPlayingRadius = _rowRadius;
 
 /// The row under the hero: an action pill on the left and the listening
 /// time on the right.
@@ -204,18 +206,19 @@ class _HomeStatsCardState extends State<HomeStatsCard>
     final stats = widget.stats;
     final onContainer = scheme.onPrimaryContainer;
 
+    // The panels inside sit 12 in from the card's edge, so their radius is
+    // the card's less 12 and the corners stay concentric.
     final card = Material(
       color: scheme.surfaceContainerHigh,
       surfaceTintColor: Colors.transparent,
-      elevation: 4,
-      borderRadius: BorderRadius.circular(32),
+      borderRadius: BorderRadius.circular(28),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        padding: const EdgeInsets.all(12),
         child: Column(
           children: [
             Material(
               color: scheme.primaryContainer,
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(16),
               child: Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 18,

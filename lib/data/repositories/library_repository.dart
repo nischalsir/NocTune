@@ -86,6 +86,18 @@ class LibraryRepository {
     };
   }
 
+  /// Where each track's cached cover is, for the tracks that have one.
+  Future<Map<String, String>> artworkPaths() async {
+    final rows = await _db.query(
+      'tracks',
+      columns: ['uri', 'art_path'],
+      where: 'art_path IS NOT NULL',
+    );
+    return {
+      for (final row in rows) row['uri']! as String: row['art_path']! as String,
+    };
+  }
+
   /// Forgets library entries by URI. The audio files themselves are not deleted.
   Future<void> removeTracks(Iterable<String> uris) async {
     final batch = _db.batch();

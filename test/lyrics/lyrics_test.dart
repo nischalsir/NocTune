@@ -147,4 +147,90 @@ void main() {
       expect(decodeLyricsBytes([0x63, 0x61, 0x66, 0xE9]), 'café');
     });
   });
+
+  group('untidy files', () {
+    List<String> texts(String source) => [
+      for (final line in parseLyrics(source)!.lines) line.text,
+    ];
+
+    test('lines sharing a timestamp become one row, in the file order', () {
+      final lyrics = parseLyrics(
+        '[00:10.00]Original\n[00:10.00]Translation\n[00:20.00]Next',
+      )!;
+
+      expect(lyrics.lines.map((l) => l.text), [
+        'Original\nTranslation',
+        'Next',
+      ]);
+      // Both are lit together, from the moment the file gives.
+      expect(lyrics.indexAt(const Duration(seconds: 12)), 0);
+      expect(lyrics.lines.first.time, const Duration(seconds: 10));
+    });
+
+    test('equal timestamps keep the file order however many there are', () {
+      final source = [
+        for (var i = 0; i < 12; i++) '[00:10.00]line $i',
+        '[00:20.00]end',
+      ].join('\n');
+
+      expect(texts(source).first.split('\n'), [
+        for (var i = 0; i < 12; i++) 'line $i',
+      ]);
+    });
+
+    test('an exact repeat at the same time is dropped', () {
+      expect(texts('[00:10.00]Same\n[00:10.00]Same\n[00:20.00]Next'), [
+        'Same',
+        'Next',
+      ]);
+    });
+
+    test('an untimed line under a timed one is the rest of that line', () {
+      expect(texts('[00:10.00]First half\nsecond half\n\n[00:20.00]Next\n'), [
+        'First half\nsecond half',
+        'Next',
+      ]);
+    });
+
+    test('a blank line ends the continuation', () {
+      expect(texts('[00:10.00]Line\n\nstray note\n[00:20.00]Next'), [
+        'Line',
+        'Next',
+      ]);
+    });
+
+    test('a long run of untimed text is not swallowed into one line', () {
+      expect(texts('[00:10.00]A\nb\nc\nd\ne\n[00:20.00]Next').first, 'A\nb\nc');
+    });
+
+    test('several gaps in a row count as one', () {
+      final lyrics = parseLyrics(
+        '[00:10.00]A\n[00:15.00]\n[00:16.00]\n[00:17.00]\n[00:20.00]B',
+      )!;
+
+      expect(lyrics.lines.map((l) => l.text), ['A', '', 'B']);
+      expect(lyrics.lines[1].time, const Duration(seconds: 15));
+    });
+
+    test('every row keeps a time the file gave; none is made up', () {
+      const source =
+          '[00:10.00]A\ncontinued\n[00:10.00]A again\n[00:30.50]B\n[01:00]C';
+      final given = {
+        const Duration(seconds: 10),
+        const Duration(seconds: 30, milliseconds: 500),
+        const Duration(minutes: 1),
+      };
+
+      for (final line in parseLyrics(source)!.lines) {
+        expect(given, contains(line.time));
+      }
+    });
+
+    test('a file with no timestamps at all stays plain', () {
+      final lyrics = parseLyrics('Just words\nNo times')!;
+
+      expect(lyrics.synced, isFalse);
+      expect(lyrics.indexAt(const Duration(seconds: 5)), -1);
+    });
+  });
 }

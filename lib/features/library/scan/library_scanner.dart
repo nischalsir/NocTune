@@ -44,7 +44,8 @@ class ScanSummary {
 /// Brings the library database in line with the audio files on the device.
 ///
 /// Only new or modified files are read, so a rescan of an unchanged library
-/// is quick. Files are never written to or deleted.
+/// is quick; a track is also read again if its cached cover has been cleared.
+/// Files are never written to or deleted.
 class LibraryScanner {
   LibraryScanner({
     required this.repository,
@@ -79,14 +80,23 @@ class LibraryScanner {
     }
 
     final known = await repository.fingerprints();
+    // Covers are kept in the cache folder, which the system or a cleaner app
+    // may empty at any time. A track whose cover file has gone is read
+    // again, which brings the cover back.
+    final lostCover = {
+      for (final MapEntry(key: uri, value: path)
+          in (await repository.artworkPaths()).entries)
+        if (!File(path).existsSync()) uri,
+    };
     final changed = [
       for (final file in discovered.values)
-        if (known[file.path] !=
-            (
-              modifiedMs: file.modifiedMs,
-              sizeBytes: file.sizeBytes,
-              readerVersion: kTrackReaderVersion,
-            ))
+        if (lostCover.contains(file.path) ||
+            known[file.path] !=
+                (
+                  modifiedMs: file.modifiedMs,
+                  sizeBytes: file.sizeBytes,
+                  readerVersion: kTrackReaderVersion,
+                ))
           file,
     ];
 

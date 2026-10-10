@@ -212,6 +212,9 @@ void main() {
             playbackPositionProvider.overrideWith(
               (ref) => Stream.value(const Duration(seconds: 63)),
             ),
+            lyricsPositionProvider.overrideWith(
+              (ref) => Stream.value(const Duration(seconds: 63)),
+            ),
             playbackErrorProvider.overrideWith((ref) => const Stream.empty()),
             queueProvider.overrideWith((ref) => Stream.value(const [])),
             scanControllerProvider.overrideWith(_IdleScan.new),
@@ -284,14 +287,14 @@ void main() {
       '6_settings',
       child: const NocTuneApp(),
       playing: tracks[0],
-      act: () => tester.tap(find.byTooltip('Settings')),
+      act: () => tester.tap(find.text('Settings').last),
     );
     await shoot(
       '7_settings_about',
       child: const NocTuneApp(),
       playing: tracks[0],
       act: () async {
-        await tester.tap(find.byTooltip('Settings'));
+        await tester.tap(find.text('Settings').last);
         await tester.pump(const Duration(milliseconds: 600));
         await tester.pump(const Duration(milliseconds: 600));
         await tester.drag(find.byType(Scrollable).last, const Offset(0, -2400));

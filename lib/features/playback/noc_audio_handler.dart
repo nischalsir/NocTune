@@ -30,6 +30,15 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// Playback position, updated several times a second while playing.
   Stream<Duration> get positionStream => _player.positionStream;
+
+  /// The position twenty times a second, for following lyrics line by line.
+  /// The ordinary stream ticks five times a second, which is fine for a
+  /// seek bar but makes a lyric highlight visibly late.
+  Stream<Duration> get precisePositionStream => _player.createPositionStream(
+    steps: 800,
+    minPeriod: const Duration(milliseconds: 50),
+    maxPeriod: const Duration(milliseconds: 50),
+  );
   Duration get position => _player.position;
 
   /// Human-readable messages for tracks that failed to load or decode.

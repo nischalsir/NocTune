@@ -7,7 +7,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
-import '../../core/widgets/noc_backdrop.dart';
 import '../../core/widgets/noc_dialog.dart';
 import '../library/duplicates_screen.dart';
 import '../library/scan/scan_banner.dart';
@@ -30,7 +29,7 @@ final _notificationAccessProvider = FutureProvider.autoDispose<bool?>((
   }
 });
 
-/// The settings page, opened from the home screen. Every control here
+/// The Settings destination. Every control here
 /// changes something real and is remembered; rows that only inform say what
 /// the app found rather than offering a switch that does nothing.
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -131,7 +130,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
   Widget build(BuildContext context) {
     final settings = ref.watch(settingsProvider);
     final controller = ref.read(settingsProvider.notifier);
-    final palette = context.noc;
     final text = Theme.of(context).textTheme;
     final version = ref.watch(installedVersionProvider).value;
     final atmosDecoder = ref.watch(deviceDecodesAtmosProvider).value;
@@ -141,367 +139,402 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final notifications = ref.watch(_notificationAccessProvider).value;
     final lyricsPercent = (settings.lyricsScale * 100).round();
 
-    return Scaffold(
-      backgroundColor: palette.background,
-      body: NocBackdrop(
-        child: SafeArea(
-          bottom: false,
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 720),
-              child: ListView(
-                padding: EdgeInsets.fromLTRB(
-                  16,
-                  4,
-                  16,
-                  MediaQuery.paddingOf(context).bottom + 32,
+    return SafeArea(
+      bottom: false,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: ListView(
+            padding: EdgeInsets.fromLTRB(
+              16,
+              4,
+              16,
+              MediaQuery.paddingOf(context).bottom + 24,
+            ),
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 12, 4, 0),
+                child: Semantics(
+                  header: true,
+                  child: Text('Settings', style: text.headlineSmall),
                 ),
+              ),
+
+              _Group(
+                title: 'Appearance',
                 children: [
-                  Row(
-                    children: [
-                      IconButton(
-                        tooltip: 'Back',
-                        onPressed: () => Navigator.of(context).maybePop(),
-                        icon: const Icon(Icons.arrow_back_rounded),
-                      ),
-                      const SizedBox(width: 4),
-                      Expanded(
-                        child: Semantics(
-                          header: true,
-                          child: Text('Settings', style: text.headlineSmall),
+                  _Block(
+                    icon: Icons.brightness_6_rounded,
+                    title: 'Theme',
+                    child: SegmentedButton<ThemeMode>(
+                      segments: const [
+                        ButtonSegment(
+                          value: ThemeMode.system,
+                          label: Text('System'),
                         ),
-                      ),
-                    ],
+                        ButtonSegment(
+                          value: ThemeMode.light,
+                          label: Text('Light'),
+                        ),
+                        ButtonSegment(
+                          value: ThemeMode.dark,
+                          label: Text('Dark'),
+                        ),
+                      ],
+                      selected: {settings.themeMode},
+                      showSelectedIcon: false,
+                      onSelectionChanged: (modes) =>
+                          controller.setThemeMode(modes.single),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-
-                  _Group(
-                    title: 'Appearance',
-                    children: [
-                      _Block(
-                        icon: Icons.brightness_6_rounded,
-                        title: 'Theme',
-                        child: SegmentedButton<ThemeMode>(
-                          segments: const [
-                            ButtonSegment(
-                              value: ThemeMode.system,
-                              label: Text('System'),
-                            ),
-                            ButtonSegment(
-                              value: ThemeMode.light,
-                              label: Text('Light'),
-                            ),
-                            ButtonSegment(
-                              value: ThemeMode.dark,
-                              label: Text('Dark'),
-                            ),
-                          ],
-                          selected: {settings.themeMode},
-                          showSelectedIcon: false,
-                          onSelectionChanged: (modes) =>
-                              controller.setThemeMode(modes.single),
-                        ),
-                      ),
-                      SwitchListTile(
-                        secondary: const _TileIcon(Icons.image_rounded),
-                        title: const Text('Match the cover art'),
-                        subtitle: const Text(
-                          'The accent follows the artwork of the track that '
-                          'is playing',
-                        ),
-                        value: settings.accentFromCover,
-                        onChanged: controller.setAccentFromCover,
-                      ),
-                      _Block(
-                        icon: Icons.palette_rounded,
-                        title: settings.accentFromCover
-                            ? 'Accent when nothing is playing'
-                            : 'Accent colour',
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final accent in NocAccent.values)
-                              ChoiceChip(
-                                avatar: CircleAvatar(
-                                  backgroundColor: accent.onDark,
-                                ),
-                                label: Text(accent.label),
-                                selected: accent == settings.accent,
-                                showCheckmark: false,
-                                onSelected: (_) => controller.setAccent(accent),
-                              ),
-                          ],
-                        ),
-                      ),
-                      SwitchListTile(
-                        secondary: const _TileIcon(Icons.unfold_less_rounded),
-                        title: const Text('Fold the navigation bar'),
-                        subtitle: const Text(
-                          'Tucks the tabs away while you scroll down a page',
-                        ),
-                        value: settings.foldNavigationOnScroll,
-                        onChanged: controller.setFoldNavigationOnScroll,
-                      ),
-                    ],
+                  SwitchListTile(
+                    secondary: const _TileIcon(Icons.image_rounded),
+                    title: const Text('Match the cover art'),
+                    subtitle: const Text(
+                      'The accent follows the artwork of the track that '
+                      'is playing',
+                    ),
+                    value: settings.accentFromCover,
+                    onChanged: controller.setAccentFromCover,
                   ),
-
-                  _Group(
-                    title: 'Lyrics',
-                    children: [
-                      _Block(
-                        icon: Icons.format_size_rounded,
-                        title: 'Text size',
-                        trailing: Text(
-                          '$lyricsPercent%',
-                          style: text.titleSmall,
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Slider(
-                                value: settings.lyricsScale,
-                                min: SettingsController.minLyricsScale,
-                                max: SettingsController.maxLyricsScale,
-                                divisions: 16,
-                                label: '$lyricsPercent%',
-                                semanticFormatterCallback: (value) =>
-                                    '${(value * 100).round()} percent',
-                                onChanged: controller.setLyricsScale,
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: settings.lyricsScale == 1
-                                  ? null
-                                  : () => controller.setLyricsScale(1),
-                              child: const Text('Reset'),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const ListTile(
-                        leading: _TileIcon(Icons.lyrics_rounded),
-                        title: Text('Where lyrics come from'),
-                        subtitle: Text(
-                          'A file you import, an .lrc file beside the track, '
-                          'or lyrics stored inside the audio file. Nothing is '
-                          'downloaded.',
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  _Group(
-                    title: 'Audio',
-                    children: [
-                      ListTile(
-                        leading: const _TileIcon(Icons.surround_sound_rounded),
-                        title: const Text('Dolby Atmos'),
-                        subtitle: Text(switch (atmosDecoder) {
-                          true =>
-                            'This device reports a Dolby Atmos decoder. '
-                                'Tracks that are Atmos recordings are decoded '
-                                'by it and labelled in the player.',
-                          false =>
-                            'This device reports no Dolby Atmos decoder, so '
-                                'no track is labelled as Atmos.',
-                          null => 'Checking what this device can decode…',
-                        }),
-                      ),
-                      const ListTile(
-                        leading: _TileIcon(Icons.graphic_eq_rounded),
-                        title: Text('Sound processing'),
-                        subtitle: Text(
-                          'None. Files are played as they are; a track is '
-                          'labelled lossless only when its format is.',
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  if (notifications != null)
-                    _Group(
-                      title: 'Notification',
+                  _Block(
+                    icon: Icons.palette_rounded,
+                    title: settings.accentFromCover
+                        ? 'Accent when nothing is playing'
+                        : 'Accent colour',
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
                       children: [
-                        ListTile(
-                          leading: const _TileIcon(Icons.notifications_rounded),
-                          title: const Text('Playback notification'),
-                          subtitle: Text(
-                            notifications
-                                ? 'Allowed. Playback controls appear in the '
-                                      'notification shade and on the lock '
-                                      'screen.'
-                                : 'Off. Music still plays in the background, '
-                                      'but without controls in the '
-                                      'notification shade.',
+                        for (final accent in NocAccent.values)
+                          ChoiceChip(
+                            avatar: CircleAvatar(
+                              backgroundColor: accent.onDark,
+                            ),
+                            label: Text(accent.label),
+                            selected: accent == settings.accent,
+                            showCheckmark: false,
+                            onSelected: (_) => controller.setAccent(accent),
                           ),
-                          trailing: notifications
-                              ? null
-                              : const Icon(Icons.chevron_right_rounded),
-                          onTap: notifications ? null : _allowNotifications,
+                      ],
+                    ),
+                  ),
+                  _Block(
+                    icon: Icons.blur_on_rounded,
+                    title: 'Navigation bar glass',
+                    child: Column(
+                      children: [
+                        Slider(
+                          value: settings.navigationGlassClarity,
+                          min: AppSettings.minGlassClarity,
+                          divisions: 15,
+                          semanticFormatterCallback: (value) =>
+                              '${(value * 100).round()} percent clear',
+                          onChanged: controller.setNavigationGlassClarity,
+                        ),
+                        // Under the slider, so large text has room.
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Flexible(
+                              child: Text(
+                                'Frosted',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.bodySmall,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Flexible(
+                              child: Text(
+                                'Clear',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.bodySmall,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-
-                  _Group(
-                    title: 'Library',
-                    children: [
-                      if (stats != null)
-                        ListTile(
-                          leading: const _TileIcon(Icons.library_music_rounded),
-                          title: Text(
-                            '${formatCount(stats.trackCount)} tracks · '
-                            '${formatCount(stats.albumCount)} albums · '
-                            '${formatCount(stats.artistCount)} artists',
-                          ),
-                          subtitle: Text(
-                            '${formatLongDuration(stats.totalDuration)} of '
-                            'music on this device',
-                          ),
-                        ),
-                      ListTile(
-                        leading: const _TileIcon(Icons.refresh_rounded),
-                        title: const Text('Rescan library'),
-                        subtitle: const Text(
-                          'Looks for new, changed and removed files',
-                        ),
-                        onTap: ref.read(scanControllerProvider.notifier).scan,
-                      ),
-                      ListTile(
-                        leading: const _TileIcon(Icons.copy_all_rounded),
-                        title: const Text('Find duplicates'),
-                        subtitle: const Text(
-                          'Lists tracks stored more than once',
-                        ),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const DuplicatesScreen(),
-                          ),
-                        ),
-                      ),
-                      ListTile(
-                        leading: _TileIcon(
-                          Icons.history_toggle_off_rounded,
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                        title: const Text('Clear listening history'),
-                        subtitle: const Text(
-                          'Resets play counts and the home screen lists',
-                        ),
-                        onTap: _clearHistory,
-                      ),
-                      const ScanBanner(),
-                    ],
                   ),
-
-                  _Group(
-                    title: 'Privacy',
-                    children: [
-                      const ListTile(
-                        leading: _TileIcon(Icons.lock_rounded),
-                        title: Text('Everything stays on this device'),
-                        subtitle: Text(
-                          'No account. Your music, file names, lyrics and '
-                          'listening history are never uploaded, and playback '
-                          'works with no connection at all.',
-                        ),
-                      ),
-                      ListTile(
-                        leading: const _TileIcon(Icons.cloud_off_rounded),
-                        title: const Text('Network use'),
-                        subtitle: Text(
-                          updatesConfigured
-                              ? 'Only the update check: one small file is '
-                                    'fetched to see whether a newer version '
-                                    'exists. It sends nothing about you or '
-                                    'your library.'
-                              : 'None. This build makes no network requests: '
-                                    'update checks are not set up.',
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  _Group(
-                    title: 'About',
-                    children: [
-                      ListTile(
-                        leading: const _TileIcon(Icons.info_rounded),
-                        title: const Text('NocTune'),
-                        subtitle: Text(
-                          version == null
-                              ? 'Reading the version…'
-                              : 'Version ${version.label} '
-                                    '(build ${version.build})',
-                        ),
-                      ),
-                      if (updatesConfigured)
-                        ListTile(
-                          leading: const _TileIcon(Icons.system_update_rounded),
-                          title: const Text('Check for updates'),
-                          subtitle: Text(
-                            _checkingForUpdate
-                                ? 'Checking…'
-                                : 'Looks for a newer release now',
-                          ),
-                          enabled: !_checkingForUpdate,
-                          onTap: _checkForUpdate,
-                        ),
-                      ListTile(
-                        leading: const _TileIcon(Icons.description_rounded),
-                        title: const Text('Open-source licences'),
-                        subtitle: const Text(
-                          'The open-source software and typefaces NocTune '
-                          'includes, with their licences',
-                        ),
-                        trailing: const Icon(Icons.chevron_right_rounded),
-                        onTap: () => showLicensePage(
-                          context: context,
-                          applicationName: 'NocTune',
-                          applicationVersion: version?.toString(),
-                          applicationLegalese: '© 2026 Nischal Pandey',
-                        ),
-                      ),
-                      ListTile(
-                        leading: const _TileIcon(Icons.code_rounded),
-                        title: const Text('Source code'),
-                        subtitle: const Text('github.com/nischalsir/NocTune'),
-                        trailing: const Icon(Icons.open_in_new_rounded),
-                        onTap: () => _open(
-                          'https://github.com/nischalsir/NocTune',
-                          fallback: 'github.com/nischalsir/NocTune',
-                        ),
-                      ),
-                      const ListTile(
-                        leading: _TileIcon(Icons.person_rounded),
-                        title: Text('Developed by Nischal Pandey'),
-                      ),
-                      ListTile(
-                        leading: const _TileIcon(Icons.camera_alt_rounded),
-                        title: const Text('Instagram'),
-                        subtitle: const Text('@nischal_sir'),
-                        trailing: const Icon(Icons.open_in_new_rounded),
-                        onTap: () => _open(
-                          'https://instagram.com/nischal_sir',
-                          fallback: 'Instagram: @nischal_sir',
-                        ),
-                      ),
-                      ListTile(
-                        leading: const _TileIcon(Icons.mail_rounded),
-                        title: const Text('Email'),
-                        subtitle: const Text('nischalpandey.dev@gmail.com'),
-                        trailing: const Icon(Icons.open_in_new_rounded),
-                        onTap: () => _open(
-                          'mailto:nischalpandey.dev@gmail.com',
-                          fallback: 'nischalpandey.dev@gmail.com',
-                        ),
-                      ),
-                    ],
+                  SwitchListTile(
+                    secondary: const _TileIcon(Icons.unfold_less_rounded),
+                    title: const Text('Fold the navigation bar'),
+                    subtitle: const Text(
+                      'Tucks the tabs away while you scroll down a page',
+                    ),
+                    value: settings.foldNavigationOnScroll,
+                    onChanged: controller.setFoldNavigationOnScroll,
                   ),
                 ],
               ),
-            ),
+
+              _Group(
+                title: 'Playback',
+                children: [
+                  SwitchListTile(
+                    secondary: const _TileIcon(Icons.waves_rounded),
+                    title: const Text('Wave seek bar'),
+                    subtitle: const Text(
+                      'The seek bar in the player moves like a wave while '
+                      'music plays. Off, it is a plain thick bar.',
+                    ),
+                    value: settings.waveSeekBar,
+                    onChanged: controller.setWaveSeekBar,
+                  ),
+                ],
+              ),
+
+              _Group(
+                title: 'Lyrics',
+                children: [
+                  _Block(
+                    icon: Icons.format_size_rounded,
+                    title: 'Text size',
+                    trailing: Text('$lyricsPercent%', style: text.titleSmall),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Slider(
+                            value: settings.lyricsScale,
+                            min: SettingsController.minLyricsScale,
+                            max: SettingsController.maxLyricsScale,
+                            divisions: 16,
+                            label: '$lyricsPercent%',
+                            semanticFormatterCallback: (value) =>
+                                '${(value * 100).round()} percent',
+                            onChanged: controller.setLyricsScale,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: settings.lyricsScale == 1
+                              ? null
+                              : () => controller.setLyricsScale(1),
+                          child: const Text('Reset'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const ListTile(
+                    leading: _TileIcon(Icons.lyrics_rounded),
+                    title: Text('Where lyrics come from'),
+                    subtitle: Text(
+                      'A file you import, an .lrc file beside the track, '
+                      'or lyrics stored inside the audio file. Nothing is '
+                      'downloaded.',
+                    ),
+                  ),
+                ],
+              ),
+
+              _Group(
+                title: 'Audio',
+                children: [
+                  ListTile(
+                    leading: const _TileIcon(Icons.surround_sound_rounded),
+                    title: const Text('Dolby Atmos'),
+                    subtitle: Text(switch (atmosDecoder) {
+                      true =>
+                        'This device reports a Dolby Atmos decoder. '
+                            'Tracks that are Atmos recordings are decoded '
+                            'by it and labelled in the player.',
+                      false =>
+                        'This device reports no Dolby Atmos decoder, so '
+                            'no track is labelled as Atmos.',
+                      null => 'Checking what this device can decode…',
+                    }),
+                  ),
+                  const ListTile(
+                    leading: _TileIcon(Icons.graphic_eq_rounded),
+                    title: Text('Sound processing'),
+                    subtitle: Text(
+                      'None. Files are played as they are; a track is '
+                      'labelled lossless only when its format is.',
+                    ),
+                  ),
+                ],
+              ),
+
+              if (notifications != null)
+                _Group(
+                  title: 'Notification',
+                  children: [
+                    ListTile(
+                      leading: const _TileIcon(Icons.notifications_rounded),
+                      title: const Text('Playback notification'),
+                      subtitle: Text(
+                        notifications
+                            ? 'Allowed. Playback controls appear in the '
+                                  'notification shade and on the lock '
+                                  'screen.'
+                            : 'Off. Music still plays in the background, '
+                                  'but without controls in the '
+                                  'notification shade.',
+                      ),
+                      trailing: notifications
+                          ? null
+                          : const Icon(Icons.chevron_right_rounded),
+                      onTap: notifications ? null : _allowNotifications,
+                    ),
+                  ],
+                ),
+
+              _Group(
+                title: 'Library',
+                children: [
+                  if (stats != null)
+                    ListTile(
+                      leading: const _TileIcon(Icons.library_music_rounded),
+                      title: Text(
+                        '${formatCount(stats.trackCount)} tracks · '
+                        '${formatCount(stats.albumCount)} albums · '
+                        '${formatCount(stats.artistCount)} artists',
+                      ),
+                      subtitle: Text(
+                        '${formatLongDuration(stats.totalDuration)} of '
+                        'music on this device',
+                      ),
+                    ),
+                  ListTile(
+                    leading: const _TileIcon(Icons.refresh_rounded),
+                    title: const Text('Rescan library'),
+                    subtitle: const Text(
+                      'Looks for new, changed and removed files',
+                    ),
+                    onTap: ref.read(scanControllerProvider.notifier).scan,
+                  ),
+                  ListTile(
+                    leading: const _TileIcon(Icons.copy_all_rounded),
+                    title: const Text('Find duplicates'),
+                    subtitle: const Text('Lists tracks stored more than once'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const DuplicatesScreen(),
+                      ),
+                    ),
+                  ),
+                  ListTile(
+                    leading: _TileIcon(
+                      Icons.history_toggle_off_rounded,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    title: const Text('Clear listening history'),
+                    subtitle: const Text(
+                      'Resets play counts and the home screen lists',
+                    ),
+                    onTap: _clearHistory,
+                  ),
+                  const ScanBanner(),
+                ],
+              ),
+
+              _Group(
+                title: 'Privacy',
+                children: [
+                  const ListTile(
+                    leading: _TileIcon(Icons.lock_rounded),
+                    title: Text('Everything stays on this device'),
+                    subtitle: Text(
+                      'No account. Your music, file names, lyrics and '
+                      'listening history are never uploaded, and playback '
+                      'works with no connection at all.',
+                    ),
+                  ),
+                  ListTile(
+                    leading: const _TileIcon(Icons.cloud_off_rounded),
+                    title: const Text('Network use'),
+                    subtitle: Text(
+                      updatesConfigured
+                          ? 'Only the update check: one small file is '
+                                'fetched to see whether a newer version '
+                                'exists. It sends nothing about you or '
+                                'your library.'
+                          : 'None. This build makes no network requests: '
+                                'update checks are not set up.',
+                    ),
+                  ),
+                ],
+              ),
+
+              _Group(
+                title: 'About',
+                children: [
+                  ListTile(
+                    leading: const _TileIcon(Icons.info_rounded),
+                    title: const Text('NocTune'),
+                    subtitle: Text(
+                      version == null
+                          ? 'Reading the version…'
+                          : 'Version ${version.label} '
+                                '(build ${version.build})',
+                    ),
+                  ),
+                  if (updatesConfigured)
+                    ListTile(
+                      leading: const _TileIcon(Icons.system_update_rounded),
+                      title: const Text('Check for updates'),
+                      subtitle: Text(
+                        _checkingForUpdate
+                            ? 'Checking…'
+                            : 'Looks for a newer release now',
+                      ),
+                      enabled: !_checkingForUpdate,
+                      onTap: _checkForUpdate,
+                    ),
+                  ListTile(
+                    leading: const _TileIcon(Icons.description_rounded),
+                    title: const Text('Open-source licences'),
+                    subtitle: const Text(
+                      'The open-source software and typefaces NocTune '
+                      'includes, with their licences',
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => showLicensePage(
+                      context: context,
+                      applicationName: 'NocTune',
+                      applicationVersion: version?.toString(),
+                      applicationLegalese: '© 2026 Nischal Pandey',
+                    ),
+                  ),
+                  ListTile(
+                    leading: const _TileIcon(Icons.code_rounded),
+                    title: const Text('Source code'),
+                    subtitle: const Text('github.com/nischalsir/NocTune'),
+                    trailing: const Icon(Icons.open_in_new_rounded),
+                    onTap: () => _open(
+                      'https://github.com/nischalsir/NocTune',
+                      fallback: 'github.com/nischalsir/NocTune',
+                    ),
+                  ),
+                  const ListTile(
+                    leading: _TileIcon(Icons.person_rounded),
+                    title: Text('Developed by Nischal Pandey'),
+                  ),
+                  ListTile(
+                    leading: const _TileIcon(Icons.camera_alt_rounded),
+                    title: const Text('Instagram'),
+                    subtitle: const Text('@nischal_sir'),
+                    trailing: const Icon(Icons.open_in_new_rounded),
+                    onTap: () => _open(
+                      'https://instagram.com/nischal_sir',
+                      fallback: 'Instagram: @nischal_sir',
+                    ),
+                  ),
+                  ListTile(
+                    leading: const _TileIcon(Icons.mail_rounded),
+                    title: const Text('Email'),
+                    subtitle: const Text('nischalpandey.dev@gmail.com'),
+                    trailing: const Icon(Icons.open_in_new_rounded),
+                    onTap: () => _open(
+                      'mailto:nischalpandey.dev@gmail.com',
+                      fallback: 'nischalpandey.dev@gmail.com',
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),
@@ -537,7 +570,7 @@ class _Group extends StatelessWidget {
           Material(
             color: palette.glass,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(24),
+              borderRadius: BorderRadius.circular(28),
               side: BorderSide(color: palette.glassBorder),
             ),
             clipBehavior: Clip.antiAlias,

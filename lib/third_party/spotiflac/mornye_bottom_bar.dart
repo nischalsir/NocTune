@@ -1,6 +1,7 @@
 // Copied from SpotiFLAC-Mobile (https://github.com/zarzet/SpotiFLAC-Mobile),
 // Copyright (c) 2026 zarzet, MIT licence. See LICENSE in this folder.
-// Changes for NocTune are limited to imports and app-specific hooks.
+// Changes for NocTune: imports, app-specific hooks, and the height of the
+// mini-player row (58 instead of 48, so the cover has room around it).
 
 import 'dart:math' as math;
 
@@ -317,12 +318,16 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
                                 children: [
                                   SizedBox(
                                     width: 60 * amount,
-                                    height: hasPlayer ? 48 + 4 * amount : 52,
+                                    height: hasPlayer
+                                        ? kMiniPlayerHeight - 6 * amount
+                                        : 52,
                                   ),
                                   Expanded(child: player),
                                   SizedBox(
                                     width: 60 * amount,
-                                    height: hasPlayer ? 48 + 4 * amount : 52,
+                                    height: hasPlayer
+                                        ? kMiniPlayerHeight - 6 * amount
+                                        : 52,
                                   ),
                                 ],
                               ),

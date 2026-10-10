@@ -5,7 +5,8 @@ import 'package:flutter/foundation.dart';
 class LyricLine {
   const LyricLine(this.text, [this.time]);
 
-  /// Empty for an instrumental gap in synced lyrics.
+  /// Empty for an instrumental gap in synced lyrics. May hold more than one
+  /// line of text when the file gives several for the same moment.
   final String text;
   final Duration? time;
 }
@@ -46,6 +47,22 @@ final _offsetTag = RegExp(r'^offset\s*:\s*([+-]?\d+)$', caseSensitive: false);
 final _metadataTag = RegExp(r'^[a-zA-Z#]+\s*:');
 final _wordTime = RegExp(r'<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>');
 
+/// How many untimed lines directly under a timed one are taken as part of
+/// it. More than this is not a wrapped lyric but stray text.
+const _maxContinuationLines = 2;
+
+/// A timestamped line while the file is being read.
+class _Timed {
+  _Timed(this.time, this.text, this.order);
+
+  Duration time;
+  String text;
+
+  /// Position in the file, which keeps equal times in the file's order.
+  final int order;
+  int continued = 0;
+}
+
 /// Parses LRC or plain-text lyrics. Returns null when the text has no lyric
 /// lines at all, so callers can treat it as "no lyrics" or an invalid file.
 ///
@@ -53,12 +70,23 @@ final _wordTime = RegExp(r'<\d{1,3}:\d{1,2}(?:[.:]\d{1,3})?>');
 /// stamps on one line, the `[offset:±ms]` tag, and skips information tags
 /// such as `[ar:…]`. Word-level `<mm:ss.xx>` stamps are dropped, keeping the
 /// line's own time.
+///
+/// Files in the wild are untidy, so for synced lyrics:
+/// - lines that share a timestamp (a lyric and its translation, say) become
+///   one row in the file's order, and exact repeats are dropped;
+/// - an untimed line directly under a timed one is taken as the rest of it;
+/// - several gaps in a row count as one.
+/// No timestamp is ever made up: every row keeps a time the file gave.
 Lyrics? parseLyrics(String source) {
-  final timed = <LyricLine>[];
+  final timed = <_Timed>[];
   final plain = <String>[];
   var offset = Duration.zero;
+  // What the previous line of the file produced, while untimed lines under
+  // it can still continue it.
+  var open = const <_Timed>[];
 
-  for (final raw in source.replaceFirst('﻿', '').split(RegExp(r'\r?\n'))) {
+  for (final raw
+      in source.replaceFirst('\u{FEFF}', '').split(RegExp(r'\r?\n'))) {
     var rest = raw.trim();
     final times = <Duration>[];
     var isMetadata = false;
@@ -86,23 +114,55 @@ Lyrics? parseLyrics(String source) {
 
     final text = rest.replaceAll(_wordTime, '').trim();
     if (times.isNotEmpty) {
-      for (final time in times) {
-        timed.add(LyricLine(text, time));
-      }
-    } else if (!isMetadata) {
+      open = [
+        for (final (index, time) in times.indexed)
+          _Timed(time, text, timed.length + index),
+      ];
+      timed.addAll(open);
+    } else if (isMetadata) {
+      open = const [];
+    } else {
       plain.add(text);
+      if (text.isEmpty) {
+        open = const [];
+      } else {
+        for (final line in open) {
+          if (line.continued >= _maxContinuationLines) continue;
+          line
+            ..text = line.text.isEmpty ? text : '${line.text}\n$text'
+            ..continued += 1;
+        }
+      }
     }
   }
 
   if (timed.isNotEmpty) {
-    // A positive offset means the lyrics should appear that much sooner.
-    final lines = [
-      for (final line in timed)
-        LyricLine(
-          line.text,
-          line.time! > offset ? line.time! - offset : Duration.zero,
-        ),
-    ]..sort((a, b) => a.time!.compareTo(b.time!));
+    for (final line in timed) {
+      // A positive offset means the lyrics should appear that much sooner.
+      line.time = line.time > offset ? line.time - offset : Duration.zero;
+    }
+    timed.sort((a, b) {
+      final byTime = a.time.compareTo(b.time);
+      return byTime != 0 ? byTime : a.order.compareTo(b.order);
+    });
+
+    final lines = <LyricLine>[];
+    for (final line in timed) {
+      final last = lines.lastOrNull;
+      if (last != null && last.time == line.time) {
+        if (line.text.isEmpty || last.text.split('\n').contains(line.text)) {
+          continue;
+        }
+        lines[lines.length - 1] = LyricLine(
+          last.text.isEmpty ? line.text : '${last.text}\n${line.text}',
+          last.time,
+        );
+      } else if (line.text.isEmpty && last != null && last.text.isEmpty) {
+        continue;
+      } else {
+        lines.add(LyricLine(line.text, line.time));
+      }
+    }
     return lines.any((line) => line.text.isNotEmpty)
         ? Lyrics(lines, synced: true)
         : null;

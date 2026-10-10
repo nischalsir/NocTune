@@ -28,12 +28,10 @@ class HomeScreen extends ConsumerStatefulWidget {
     super.key,
     required this.onOpenSearch,
     required this.onOpenLibrary,
-    required this.onOpenSettings,
   });
 
   final VoidCallback onOpenSearch;
   final VoidCallback onOpenLibrary;
-  final VoidCallback onOpenSettings;
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -112,10 +110,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
 
     // Shown while there is no track to feature: an empty or loading library.
-    final header = _Header(
-      onOpenSearch: widget.onOpenSearch,
-      onOpenSettings: widget.onOpenSettings,
-    );
+    final header = _Header(onOpenSearch: widget.onOpenSearch);
 
     final summary = stats.value;
     if (stats.isLoading && summary == null) {
@@ -223,7 +218,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                                 ? 'JUMP BACK IN'
                                 : 'RECENTLY ADDED'),
                       onOpenSearch: widget.onOpenSearch,
-                      onOpenSettings: widget.onOpenSettings,
                       onPlay: () =>
                           ref.read(audioHandlerProvider).playTracks([featured]),
                     ),
@@ -293,12 +287,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 }
 
 /// The rounded header panel shown before there is a track to feature: the
-/// app's name, and the ways into search and settings.
+/// app's name and a way into search.
 class _Header extends StatelessWidget {
-  const _Header({required this.onOpenSearch, required this.onOpenSettings});
+  const _Header({required this.onOpenSearch});
 
   final VoidCallback onOpenSearch;
-  final VoidCallback onOpenSettings;
 
   @override
   Widget build(BuildContext context) {
@@ -333,12 +326,6 @@ class _Header extends StatelessWidget {
                 icon: Icons.search_rounded,
                 label: 'Search',
                 onTap: onOpenSearch,
-              ),
-              const SizedBox(width: 8),
-              _RoundAction(
-                icon: Icons.settings_rounded,
-                label: 'Settings',
-                onTap: onOpenSettings,
               ),
             ],
           ),

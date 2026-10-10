@@ -67,7 +67,7 @@ Future<(_FakeRepository, ProviderContainer)> _pump(
       ],
       child: MaterialApp(
         theme: buildNocTheme(Brightness.dark, NocAccent.red),
-        home: const SettingsScreen(),
+        home: const Scaffold(body: SettingsScreen()),
       ),
     ),
   );
@@ -95,6 +95,7 @@ void main() {
 
     for (final heading in [
       'APPEARANCE',
+      'PLAYBACK',
       'LYRICS',
       'AUDIO',
       'LIBRARY',
@@ -155,6 +156,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(preferences.getBool('fold_navigation_on_scroll'), isFalse);
     expect(container.read(settingsProvider).foldNavigationOnScroll, isFalse);
+
+    await _reveal(tester, find.text('Wave seek bar'));
+    await tester.tap(find.text('Wave seek bar'));
+    await tester.pumpAndSettle();
+    expect(preferences.getBool('wave_seek_bar'), isFalse);
+    expect(container.read(settingsProvider).waveSeekBar, isFalse);
 
     await _reveal(tester, find.byType(Slider));
     await tester.drag(find.byType(Slider), const Offset(120, 0));

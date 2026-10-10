@@ -12,6 +12,7 @@ import 'package:noctune/features/playback/audio_capabilities.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
 import 'package:noctune/features/playback/now_playing_screen.dart';
 import 'package:noctune/features/playback/playback_mapping.dart';
+import 'package:noctune/features/playback/player_seek_bar.dart';
 import 'package:noctune/features/playback/queue_sheet.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -87,12 +88,13 @@ Future<_FakeHandler> _pump(
   bool atmosDecoder = false,
   LoadedLyrics? lyrics,
   List<MediaItem>? queue,
+  Map<String, Object> preferences = const {},
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
-  SharedPreferences.setMockInitialValues({});
-  final preferences = await SharedPreferences.getInstance();
+  SharedPreferences.setMockInitialValues(preferences);
+  final prefs = await SharedPreferences.getInstance();
   final handler = _FakeHandler();
   final current = track ?? _trackWith();
   final item = mediaItemFromTrack(current);
@@ -100,7 +102,7 @@ Future<_FakeHandler> _pump(
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        sharedPreferencesProvider.overrideWithValue(preferences),
+        sharedPreferencesProvider.overrideWithValue(prefs),
         audioHandlerProvider.overrideWithValue(handler),
         currentMediaItemProvider.overrideWith(
           (ref) => Stream.value(nothingLoaded ? null : item),
@@ -116,6 +118,9 @@ Future<_FakeHandler> _pump(
         playbackPositionProvider.overrideWith(
           (ref) => Stream.value(const Duration(seconds: 61)),
         ),
+        lyricsPositionProvider.overrideWith(
+          (ref) => Stream.value(const Duration(seconds: 61)),
+        ),
         queueProvider.overrideWith((ref) => Stream.value(queue ?? [item])),
       ],
       child: MaterialApp(
@@ -124,7 +129,14 @@ Future<_FakeHandler> _pump(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (state?.playing ?? false) {
+    // The wave seek bar keeps moving while music plays, so this never
+    // settles.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 700));
+  } else {
+    await tester.pumpAndSettle();
+  }
   return handler;
 }
 
@@ -134,21 +146,24 @@ void main() {
   ) async {
     await _pump(tester);
 
+    expect(find.text('NOW PLAYING'), findsOneWidget);
     expect(find.text('Aashish'), findsOneWidget);
     expect(find.text('Bipul Chettri'), findsOneWidget);
     expect(find.text('Maya'), findsOneWidget);
     expect(find.text('1:01'), findsOneWidget);
-    expect(find.text('-2:59'), findsOneWidget);
+    expect(find.text('−2:59'), findsOneWidget);
   });
 
   testWidgets('transport buttons drive the player', (tester) async {
     final handler = await _pump(tester);
 
-    await tester.tap(find.bySemanticsLabel('Play'));
+    // The wide button says what it will do.
+    expect(find.text('Play'), findsOneWidget);
+    await tester.tap(find.byTooltip('Play'));
     await tester.tap(find.byTooltip('Next'));
     await tester.tap(find.byTooltip('Previous'));
-    await tester.tap(find.byTooltip('Shuffle is off'));
-    await tester.tap(find.byTooltip('Repeat is off'));
+    await tester.tap(find.byTooltip('Shuffle off'));
+    await tester.tap(find.byTooltip('Repeat off'));
 
     expect(handler.calls, [
       'play',
@@ -169,33 +184,91 @@ void main() {
       ),
     );
 
-    await tester.tap(find.bySemanticsLabel('Pause'));
-    await tester.tap(find.byTooltip('Shuffle is on'));
-    await tester.tap(find.byTooltip('Repeating this track'));
+    expect(find.text('Pause'), findsOneWidget);
+    await tester.tap(find.byTooltip('Pause'));
+    await tester.tap(find.byTooltip('Shuffle on'));
+    await tester.tap(find.byTooltip('Repeat one'));
 
     expect(handler.calls, ['pause', 'shuffle none', 'repeat none']);
   });
 
-  testWidgets('dragging the scrubber seeks once, on release', (tester) async {
-    final handler = await _pump(tester);
+  group('seek bar', () {
+    testWidgets('dragging it seeks once, on release', (tester) async {
+      final handler = await _pump(tester);
+      expect(
+        tester.widget<PlayerSeekBar>(find.byType(PlayerSeekBar)).wave,
+        isTrue,
+      );
 
-    await tester.drag(find.byType(Slider), const Offset(120, 0));
-    await tester.pumpAndSettle();
+      await tester.drag(find.byType(PlayerSeekBar), const Offset(120, 0));
+      await tester.pumpAndSettle();
 
-    expect(handler.calls, hasLength(1));
-    expect(handler.calls.single, startsWith('seek '));
-  });
+      expect(handler.calls, hasLength(1));
+      expect(handler.calls.single, startsWith('seek '));
+    });
 
-  testWidgets('a track of unknown length cannot be scrubbed', (tester) async {
-    await _pump(tester, track: _trackWith(duration: Duration.zero));
+    testWidgets('tapping it seeks to that point', (tester) async {
+      final handler = await _pump(tester);
 
-    expect(find.text('–:––'), findsOneWidget);
-    expect(tester.widget<Slider>(find.byType(Slider)).onChanged, isNull);
+      final bar = tester.getRect(
+        find
+            .descendant(
+              of: find.byType(PlayerSeekBar),
+              matching: find.byType(CustomPaint),
+            )
+            .first,
+      );
+      await tester.tapAt(Offset(bar.left + bar.width / 2, bar.center.dy));
+      await tester.pumpAndSettle();
+
+      // Half way through a four-minute track.
+      expect(handler.calls, ['seek 120']);
+    });
+
+    testWidgets('is the plain bar when the wave is switched off', (
+      tester,
+    ) async {
+      final handler = await _pump(
+        tester,
+        preferences: {'wave_seek_bar': false},
+      );
+      expect(
+        tester.widget<PlayerSeekBar>(find.byType(PlayerSeekBar)).wave,
+        isFalse,
+      );
+
+      await tester.drag(find.byType(PlayerSeekBar), const Offset(120, 0));
+      await tester.pumpAndSettle();
+
+      expect(handler.calls.single, startsWith('seek '));
+    });
+
+    testWidgets('a track of unknown length cannot be scrubbed', (tester) async {
+      final handler = await _pump(
+        tester,
+        track: _trackWith(duration: Duration.zero),
+      );
+
+      expect(find.text('–:––'), findsOneWidget);
+      await tester.drag(find.byType(PlayerSeekBar), const Offset(120, 0));
+      await tester.pumpAndSettle();
+
+      expect(handler.calls, isEmpty);
+    });
   });
 
   testWidgets('shows the favourite state', (tester) async {
     await _pump(tester);
     expect(find.byTooltip('Add to favourites'), findsOneWidget);
+  });
+
+  testWidgets('the queue opens from the top bar', (tester) async {
+    await _pump(tester);
+
+    await tester.tap(find.byTooltip('Queue'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(QueueSheet), findsOneWidget);
   });
 
   testWidgets('says so when nothing is loaded', (tester) async {
@@ -204,29 +277,44 @@ void main() {
     expect(find.text('Nothing is playing'), findsOneWidget);
   });
 
-  group('format badges', () {
-    testWidgets('verified FLAC is LOSSLESS and never Atmos', (tester) async {
+  group('audio quality pill', () {
+    Finder lossless() => find.bySemanticsLabel(RegExp('^Lossless quality'));
+
+    testWidgets('verified FLAC is described as lossless, never as Atmos', (
+      tester,
+    ) async {
       await _pump(tester, atmosDecoder: true);
 
-      expect(find.text('LOSSLESS'), findsOneWidget);
+      expect(find.text('FLAC 16/44.1'), findsOneWidget);
+      expect(lossless(), findsOneWidget);
+      expect(find.byIcon(Icons.high_quality), findsOneWidget);
       expect(find.text('Dolby Atmos'), findsNothing);
     });
 
-    testWidgets('lossy audio shows no badge', (tester) async {
+    testWidgets('lossy audio is not called lossless', (tester) async {
       for (final codec in ['aac', 'mp3', 'opus']) {
         await _pump(tester, track: _trackWith(codec: codec));
 
-        expect(find.text('LOSSLESS'), findsNothing, reason: codec);
+        expect(lossless(), findsNothing, reason: codec);
+        expect(find.byIcon(Icons.high_quality), findsNothing, reason: codec);
         expect(find.text('Dolby Atmos'), findsNothing, reason: codec);
+        expect(
+          find.bySemanticsLabel(RegExp('^Audio quality')),
+          findsOneWidget,
+          reason: codec,
+        );
         await tester.pumpWidget(const SizedBox());
       }
     });
 
-    testWidgets('unknown or unverified formats show no badge', (tester) async {
+    testWidgets('unknown or unverified formats are not called lossless', (
+      tester,
+    ) async {
       for (final codec in [null, 'wav', 'm4a']) {
         await _pump(tester, track: _trackWith(codec: codec));
 
-        expect(find.text('LOSSLESS'), findsNothing, reason: '$codec');
+        expect(lossless(), findsNothing, reason: '$codec');
+        expect(find.byIcon(Icons.high_quality), findsNothing, reason: '$codec');
         await tester.pumpWidget(const SizedBox());
       }
     });
@@ -241,15 +329,18 @@ void main() {
       );
 
       expect(find.text('Dolby Atmos'), findsOneWidget);
-      expect(find.text('LOSSLESS'), findsNothing);
+      expect(find.byIcon(Icons.surround_sound), findsOneWidget);
+      expect(lossless(), findsNothing);
     });
 
-    testWidgets('Atmos content without a decoder is not labelled', (
+    testWidgets('Atmos content without a decoder is described by its codec', (
       tester,
     ) async {
       await _pump(tester, track: _trackWith(codec: 'eac3-joc'));
 
       expect(find.text('Dolby Atmos'), findsNothing);
+      expect(find.byIcon(Icons.surround_sound), findsNothing);
+      expect(find.textContaining('Dolby Digital+'), findsOneWidget);
     });
 
     testWidgets("a previous track's format is never shown for the next", (
@@ -264,32 +355,45 @@ void main() {
       );
 
       expect(find.text('Next'), findsOneWidget);
-      expect(find.text('LOSSLESS'), findsNothing);
+      expect(find.text('FLAC 16/44.1'), findsNothing);
+      expect(find.byIcon(Icons.high_quality), findsNothing);
     });
 
-    testWidgets('sit directly above the Play button', (tester) async {
-      await _pump(tester);
-
-      final badge = tester.getRect(find.text('LOSSLESS'));
-      final play = tester.getRect(find.bySemanticsLabel('Play'));
-      final scrubber = tester.getRect(find.byType(Slider));
-
-      expect(badge.top, greaterThan(scrubber.bottom));
-      expect(badge.bottom, lessThanOrEqualTo(play.top));
-      expect((badge.center.dx - play.center.dx).abs(), lessThan(2));
-    });
-
-    testWidgets('the controls do not move when the badge disappears', (
+    testWidgets('sits between shuffle and repeat, under the transport', (
       tester,
     ) async {
       await _pump(tester);
-      final withBadge = tester.getRect(find.bySemanticsLabel('Play'));
+
+      final pill = tester.getRect(find.text('FLAC 16/44.1'));
+      final play = tester.getRect(find.byTooltip('Play'));
+      final shuffle = tester.getRect(find.byTooltip('Shuffle off'));
+      final repeat = tester.getRect(find.byTooltip('Repeat off'));
+
+      expect(pill.top, greaterThan(play.bottom));
+      expect(pill.left, greaterThan(shuffle.right));
+      expect(pill.right, lessThan(repeat.left));
+      expect((pill.center.dy - shuffle.center.dy).abs(), lessThan(2));
+    });
+
+    testWidgets('opens the details of the track', (tester) async {
+      await _pump(tester);
+
+      await tester.tap(find.text('FLAC 16/44.1'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Track details'), findsOneWidget);
+    });
+
+    testWidgets('the controls sit in the same place whatever the format', (
+      tester,
+    ) async {
+      await _pump(tester);
+      final withLossless = tester.getRect(find.byTooltip('Play'));
       await tester.pumpWidget(const SizedBox());
 
       await _pump(tester, track: _trackWith(codec: 'mp3'));
-      final withoutBadge = tester.getRect(find.bySemanticsLabel('Play'));
 
-      expect(withoutBadge, withBadge);
+      expect(tester.getRect(find.byTooltip('Play')), withLossless);
     });
   });
 
@@ -320,10 +424,12 @@ void main() {
       expect(find.text('1:01'), findsOneWidget);
       expect(find.text('−2:59'), findsOneWidget);
 
-      await tester.tap(find.byTooltip('Hide lyrics'));
+      expect(find.text('LYRICS'), findsOneWidget);
+      await tester.tap(find.byTooltip('Back to the player'));
       await tester.pumpAndSettle();
       expect(find.text('Second line'), findsNothing);
-      expect(find.bySemanticsLabel('Play'), findsOneWidget);
+      expect(find.text('NOW PLAYING'), findsOneWidget);
+      expect(find.byTooltip('Play'), findsOneWidget);
     });
 
     testWidgets('highlight the line at the playback position', (tester) async {
@@ -410,12 +516,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Second line'), findsOneWidget);
       expect(find.byTooltip('Play'), findsNothing);
-      expect(find.byTooltip('Hide lyrics'), findsNothing);
+      expect(find.byTooltip('Back to the player'), findsNothing);
 
       await tester.tap(find.byTooltip('Exit fullscreen lyrics'));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Play'), findsOneWidget);
-      expect(find.byTooltip('Hide lyrics'), findsOneWidget);
+      expect(find.byTooltip('Back to the player'), findsOneWidget);
     });
 
     testWidgets('a saved sync offset moves the highlight, not playback', (
@@ -431,9 +537,7 @@ void main() {
       );
       expect(alpha(tester, 'Early'), 1);
 
-      await tester.tap(find.byTooltip('Lyrics options'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Lyrics sync offset…'));
+      await tester.tap(find.byTooltip('Lyrics sync offset'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('+1s'));
       await tester.pumpAndSettle();
@@ -457,12 +561,12 @@ void main() {
         LoadedLyrics(parseLyrics('Just words')!, LyricsOrigin.imported),
       );
 
+      expect(find.byTooltip('Lyrics sync offset'), findsNothing);
       await tester.tap(find.byTooltip('Lyrics options'));
       await tester.pumpAndSettle();
 
       expect(find.text('Import lyrics file…'), findsOneWidget);
       expect(find.text('Remove imported lyrics'), findsOneWidget);
-      expect(find.text('Lyrics sync offset…'), findsNothing);
     });
   });
 
@@ -479,7 +583,8 @@ void main() {
 
       await _pump(tester, size: size, lyrics: _syncedLyrics);
       expect(tester.takeException(), isNull);
-      expect(find.text('Aashish'), findsOneWidget);
+      // A title too long for the line is drawn twice, to scroll round.
+      expect(find.text('Aashish'), findsWidgets);
 
       await tester.tap(find.byTooltip('Show lyrics'));
       await tester.pumpAndSettle();

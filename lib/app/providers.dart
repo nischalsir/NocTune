@@ -170,6 +170,12 @@ final playbackPositionProvider = StreamProvider<Duration>(
   (ref) => ref.watch(audioHandlerProvider).positionStream,
 );
 
+/// The position at a finer grain, for the lyrics highlight. Only listened
+/// to while lyrics are on screen.
+final lyricsPositionProvider = StreamProvider.autoDispose<Duration>(
+  (ref) => ref.watch(audioHandlerProvider).precisePositionStream,
+);
+
 final playbackErrorProvider = StreamProvider<String>(
   (ref) => ref.watch(audioHandlerProvider).errors,
 );

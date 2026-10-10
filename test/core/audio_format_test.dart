@@ -74,4 +74,58 @@ void main() {
       );
     });
   });
+
+  group('quality label for the player', () {
+    Track track(String? codec, {int? rate, int? depth, int? bitrate}) => Track(
+      uri: '/music/a',
+      fileName: 'a',
+      folder: '/music',
+      title: 'A',
+      codec: codec,
+      sampleRate: rate,
+      bitDepth: depth,
+      bitrate: bitrate,
+      dateAdded: DateTime(2026),
+      dateModified: DateTime(2026),
+    );
+
+    test('lossless files give the codec with bit depth and sample rate', () {
+      expect(
+        qualityBadgeLabel(track('flac', rate: 96000, depth: 24), atmos: false),
+        'FLAC 24/96',
+      );
+      expect(
+        qualityBadgeLabel(track('flac', rate: 44100, depth: 16), atmos: false),
+        'FLAC 16/44.1',
+      );
+      expect(
+        qualityBadgeLabel(track('alac', rate: 48000, depth: 24), atmos: false),
+        'ALAC 24/48',
+      );
+      expect(qualityBadgeLabel(track('flac'), atmos: false), 'FLAC');
+    });
+
+    test('lossy files give the codec with its bitrate', () {
+      expect(
+        qualityBadgeLabel(track('aac', bitrate: 256000), atmos: false),
+        'AAC 256 kbps',
+      );
+      expect(qualityBadgeLabel(track('mp3'), atmos: false), 'MP3');
+    });
+
+    test('says Dolby Atmos only when told the track qualifies', () {
+      final atmosTrack = track('eac3-joc', bitrate: 768000);
+
+      expect(qualityBadgeLabel(atmosTrack, atmos: true), 'Dolby Atmos');
+      // On a device that can't decode it, it is described by its codec.
+      expect(
+        qualityBadgeLabel(atmosTrack, atmos: false),
+        'Dolby Digital+ 768 kbps',
+      );
+    });
+
+    test('an unknown format claims nothing', () {
+      expect(qualityBadgeLabel(track(null), atmos: false), 'Audio');
+    });
+  });
 }

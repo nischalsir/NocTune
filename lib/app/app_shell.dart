@@ -15,6 +15,7 @@ import '../features/settings/settings_screen.dart';
 import '../features/startup/startup_prompts.dart';
 import '../features/startup/update_dialog.dart';
 import '../features/startup/welcome_dialog.dart';
+import '../third_party/spotiflac/lazy_tab_view.dart';
 import '../third_party/spotiflac/mornye_bottom_bar.dart';
 import '../third_party/spotiflac/mornye_chrome.dart';
 import '../third_party/spotiflac/mornye_theme.dart';
@@ -23,16 +24,18 @@ import 'providers.dart';
 
 const _homeIndex = 0;
 const _libraryIndex = 1;
-const _searchIndex = 2;
+// Settings sits between them, at index 2.
+const _searchIndex = 3;
 
 /// Window width from which a navigation rail replaces the bottom bar. As in
 /// the navigation's source, tablets keep the bottom bar in both orientations;
 /// the rail is for desktop-width windows.
 const _navigationRailBreakpoint = 1440.0;
 
-/// The app frame: Home, Library and Search behind the floating glass bar,
-/// with the mini-player riding on top of it. Settings opens as a page from
-/// the home screen rather than taking a slot in the bar.
+/// The app frame: Home, Library, Settings and Search behind the floating
+/// glass bar, with the mini-player riding on top of it. Settings takes the
+/// bar's optional third slot; Search stays last because the folded bar keeps
+/// it as its right-hand button.
 ///
 /// The bar itself, its theme and its fold-on-scroll controller are the
 /// navigation shell from `third_party/spotiflac`; this class wires them to
@@ -49,7 +52,6 @@ class _AppShellState extends ConsumerState<AppShell> {
   final _libraryNavigator = GlobalKey<NavigatorState>();
   final _mornyeChrome = MornyeChromeController();
   DateTime? _lastBackPress;
-  bool _settingsPageOpen = false;
 
   late final _startupPrompts = StartupPrompts(
     welcome: WelcomeStore(ref.read(sharedPreferencesProvider)),
@@ -91,20 +93,6 @@ class _AppShellState extends ConsumerState<AppShell> {
     HapticFeedback.selectionClick();
     setState(() => _currentIndex = index);
     FocusManager.instance.primaryFocus?.unfocus();
-  }
-
-  Future<void> _openSettings() async {
-    if (_settingsPageOpen) return;
-    _settingsPageOpen = true;
-    FocusManager.instance.primaryFocus?.unfocus();
-    try {
-      await Navigator.of(
-        context,
-        rootNavigator: true,
-      ).push(MaterialPageRoute<void>(builder: (_) => const SettingsScreen()));
-    } finally {
-      _settingsPageOpen = false;
-    }
   }
 
   /// System back: leave an opened album or playlist, dismiss the keyboard on
@@ -174,7 +162,12 @@ class _AppShellState extends ConsumerState<AppShell> {
     // The bar keeps its own theme: it is drawn exactly as in its source app,
     // whatever accent the rest of NocTune is using. NocTune's palette rides
     // along for the cover placeholder in the mini-player.
-    final barBase = MornyeTheme.build(Theme.of(context).brightness);
+    final barBase = MornyeTheme.build(
+      Theme.of(context).brightness,
+      glassClarity: ref.watch(
+        settingsProvider.select((s) => s.navigationGlassClarity),
+      ),
+    );
     final barTheme = barBase.copyWith(
       extensions: [...barBase.extensions.values, palette],
     );
@@ -191,6 +184,10 @@ class _AppShellState extends ConsumerState<AppShell> {
           badgeCount: 0,
         ),
         label: 'Library',
+      ),
+      const NavigationDestination(
+        icon: Icon(CupertinoIcons.gear_alt_fill),
+        label: 'Settings',
       ),
       const NavigationDestination(
         icon: Icon(CupertinoIcons.search),
@@ -219,31 +216,41 @@ class _AppShellState extends ConsumerState<AppShell> {
           child: child,
         );
 
-    final tabs = <Widget>[
-      HomeScreen(
-        onOpenSearch: () => _onNavTap(_searchIndex),
-        onOpenLibrary: () => _onNavTap(_libraryIndex),
-        onOpenSettings: _openSettings,
+    // Each destination with the name its state is kept under.
+    final tabs = <(String, Widget)>[
+      (
+        'home',
+        HomeScreen(
+          onOpenSearch: () => _onNavTap(_searchIndex),
+          onOpenLibrary: () => _onNavTap(_libraryIndex),
+        ),
       ),
       // The library has its own navigator, so opening an album or playlist
       // keeps the navigation and mini-player on screen.
-      Navigator(
-        key: _libraryNavigator,
-        onGenerateRoute: (_) =>
-            MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
+      (
+        'library',
+        Navigator(
+          key: _libraryNavigator,
+          onGenerateRoute: (_) =>
+              MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
+        ),
       ),
-      const SearchScreen(),
+      ('settings', const SettingsScreen()),
+      ('search', const SearchScreen()),
     ];
-
-    // IndexedStack keeps each destination's scroll position and state; the
-    // glass pill owns the tab transition, so the pages themselves just swap.
-    final pageView = IndexedStack(
+    // Each destination is built the first time it is opened and then kept,
+    // with its scroll position; hidden ones have their animations paused.
+    //
+    // Nothing is preloaded. The tab view can prepare a tab while the app is
+    // idle, but it does that with a scheduler task that is retried without
+    // pause for as long as any animation runs, and Home has one whenever
+    // music plays.
+    final pageView = LazyTabView(
       index: _currentIndex,
       children: [
-        for (final (index, tab) in tabs.indexed)
-          // Animations on hidden destinations are paused.
-          TickerMode(
-            enabled: index == _currentIndex,
+        for (final (index, (name, tab)) in tabs.indexed)
+          KeyedSubtree(
+            key: ValueKey('tab-$name'),
             child: observeScroll(tab, index),
           ),
       ],
