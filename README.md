@@ -106,9 +106,4 @@ lib/
 android/app/src/main/kotlin/…  MediaStore and artwork channels
 ```
 
-## Credits
-
-The drag-to-dismiss player route follows the approach used in
-SpotiFLAC-Mobile (MIT licence, © zarzet).
-
-Developed by Nischal Pandey.
+## Developed by Nischal Pandey.
