@@ -9,6 +9,34 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.3.2 (build 6) - 2026-10-10
+
+Published as a normal release at the owner's request; not yet run on a
+phone.
+
+### Changed
+
+- Lyrics light up word by word instead of the whole line turning white at
+  once, with a soft edge that moves across the word being sung. When a file
+  times each word, those times are used and the view says "WORD SYNC". Most
+  files only time whole lines ("LINE SYNC"); for those the line's time is
+  shared between its words by length, which is an even sweep and not
+  knowledge of when each word is sung.
+- Lyric lines change over more slowly and smoothly: the scroll, the
+  enlargement, the dimming and the blur all ease in and out without a snap.
+  The fill itself moves on every frame.
+- Folding the bottom bar no longer wipes the tabs away from the top. They
+  fade out where they are while the two icons glide to the sides, and the
+  fold takes a little longer.
+- The app asks the phone for its fastest screen refresh rate, so motion can
+  run at 90 or 120 Hz where the screen supports it.
+
+### Fixed
+
+- The selected tab in the bottom bar had a second, larger glass outline
+  sitting off-centre around it, which swelled further when touched. It is
+  gone; the selection is a single pill.
+
 ## 1.3.1 (build 5) - 2026-10-10
 
 Published as a normal release at the owner's request; not yet run on a
