@@ -147,8 +147,9 @@ void main() {
   const tabletLandscape = Size(1280, 800);
   const desktop = Size(1600, 900);
 
-  // The two round buttons the folded bar keeps. They are always in the tree;
-  // folding is what makes them take taps.
+  // The two round buttons the folded bar keeps: the current tab on the left
+  // and the bar's last tab (Settings) on the right, whatever the key says.
+  // They are always in the tree; folding is what makes them take taps.
   final foldedSearch = find
       .byKey(const ValueKey('mornye-compact-search'))
       .hitTestable();
@@ -163,9 +164,9 @@ void main() {
 
     expect(find.byType(MornyeBottomBar), findsOneWidget);
     expect(find.byType(NavigationRail), findsNothing);
-    // Settings is reachable straight from the bar; Search is last.
+    // Settings is reachable straight from the bar, in its last slot.
     final positions = [
-      for (final label in ['Home', 'Library', 'Settings', 'Search'])
+      for (final label in ['Home', 'Library', 'Search', 'Settings'])
         tester.getCenter(find.text(label).last).dx,
     ];
     expect(positions, orderedEquals([...positions]..sort()));
@@ -230,19 +231,19 @@ void main() {
       expect(foldedSearch, findsNothing);
     });
 
-    testWidgets('the folded search button opens Search', (tester) async {
+    testWidgets('the folded bar keeps Settings on its right', (tester) async {
       await _pumpApp(tester, size: phone, tracks: many);
       await tester.tap(find.text('Library').last);
       await tester.pumpAndSettle();
       await tester.drag(find.text('Track 3'), const Offset(0, -300));
       await tester.pumpAndSettle();
 
+      expect(find.byTooltip('Settings'), findsOneWidget);
       await tester.tap(foldedSearch);
       await tester.pumpAndSettle();
 
-      expect(find.text('Search your library'), findsOneWidget);
+      expect(find.text('APPEARANCE').hitTestable(), findsOneWidget);
     });
-
     testWidgets('unfolds when the list is back at its top', (tester) async {
       await _pumpApp(tester, size: phone, tracks: many);
       await tester.tap(find.text('Library').last);

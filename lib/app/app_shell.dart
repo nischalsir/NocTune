@@ -24,18 +24,17 @@ import 'providers.dart';
 
 const _homeIndex = 0;
 const _libraryIndex = 1;
-// Settings sits between them, at index 2.
-const _searchIndex = 3;
+const _searchIndex = 2;
+const _settingsIndex = 3;
 
 /// Window width from which a navigation rail replaces the bottom bar. As in
 /// the navigation's source, tablets keep the bottom bar in both orientations;
 /// the rail is for desktop-width windows.
 const _navigationRailBreakpoint = 1440.0;
 
-/// The app frame: Home, Library, Settings and Search behind the floating
-/// glass bar, with the mini-player riding on top of it. Settings takes the
-/// bar's optional third slot; Search stays last because the folded bar keeps
-/// it as its right-hand button.
+/// The app frame: Home, Library, Search and Settings behind the floating
+/// glass bar, with the mini-player riding on top of it. Settings is last,
+/// which also makes it the button the folded bar keeps on its right.
 ///
 /// The bar itself, its theme and its fold-on-scroll controller are the
 /// navigation shell from `third_party/spotiflac`; this class wires them to
@@ -186,12 +185,12 @@ class _AppShellState extends ConsumerState<AppShell> {
         label: 'Library',
       ),
       const NavigationDestination(
-        icon: Icon(CupertinoIcons.gear_alt_fill),
-        label: 'Settings',
-      ),
-      const NavigationDestination(
         icon: Icon(CupertinoIcons.search),
         label: 'Search',
+      ),
+      const NavigationDestination(
+        icon: Icon(CupertinoIcons.gear_alt_fill),
+        label: 'Settings',
       ),
     ];
 
@@ -235,8 +234,8 @@ class _AppShellState extends ConsumerState<AppShell> {
               MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
         ),
       ),
-      ('settings', const SettingsScreen()),
       ('search', const SearchScreen()),
+      ('settings', const SettingsScreen()),
     ];
     // Each destination is built the first time it is opened and then kept,
     // with its scroll position; hidden ones have their animations paused.
@@ -314,7 +313,9 @@ class _AppShellState extends ConsumerState<AppShell> {
                     selectedIndex: _currentIndex,
                     onSelected: _onNavTap,
                     onHome: () => _onNavTap(_homeIndex),
-                    onSearch: () => _onNavTap(_searchIndex),
+                    // The bar's last slot, which is also the button the
+                    // folded bar keeps on its right: Settings here.
+                    onSearch: () => _onNavTap(_settingsIndex),
                     blurEnabled: ref.watch(mornyeBlurEnabledProvider),
                   ),
                 ),

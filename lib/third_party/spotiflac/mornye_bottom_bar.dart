@@ -1,7 +1,9 @@
 // Copied from SpotiFLAC-Mobile (https://github.com/zarzet/SpotiFLAC-Mobile),
 // Copyright (c) 2026 zarzet, MIT licence. See LICENSE in this folder.
 // Changes for NocTune: imports, app-specific hooks, and the height of the
-// mini-player row (58 instead of 48, so the cover has room around it).
+// mini-player row (58 instead of 48, so the cover has room around it), and
+// the folded bar's right-hand button is named after the last destination
+// rather than always "Search".
 
 import 'dart:math' as math;
 
@@ -264,7 +266,7 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
                             ),
                             tooltip: leading
                                 ? destinations[leadingIndex].label
-                                : 'Search',
+                                : destinations.last.label,
                             iconSize: 25,
                             constraints: BoxConstraints.tightFor(
                               width: size,
