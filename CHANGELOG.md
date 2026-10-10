@@ -9,6 +9,58 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.3.0 (build 4) - 2026-10-10
+
+Published as a normal release at the owner's request. It passes the automated
+checks and was reviewed as rendered screens; it has not yet been run on a
+phone.
+
+### Changed
+
+- Navigation: Settings is in the bottom bar again, so the bar reads Home,
+  Library, Settings, Search. Each tab is built the first time it is opened
+  and keeps its place afterwards.
+- Player: rebuilt. The cover fills the top of the screen edge to edge and
+  melts into a blurred, darkened copy of itself; below it are the title and
+  artist, the seek bar, previous / play / next with a wide labelled play
+  button, and a row with shuffle, the audio quality and repeat. The player is
+  always dark. The queue opens from the top bar.
+- The lossless and Dolby Atmos labels moved into the quality pill of that
+  row, which now also names the format, for example `FLAC 24/96`. The rules
+  for when they appear are unchanged.
+- Mini-player: taller, with a larger cover and room around it. A title or
+  artist too long for the bar scrolls past instead of being cut off.
+- The navigation bar's glass is more frosted, so lists passing behind it no
+  longer clash with its labels. Settings > Appearance has a slider for it.
+- Lyrics: the sync-offset button and the lyrics menu moved to the top bar.
+- Settings: a Playback section with a switch between the wave seek bar and a
+  plain thick one.
+- Home and Settings cards share one set of corner radii, with inner panels
+  rounded to match the card around them.
+
+### Fixed
+
+- Lyrics could light up a line late: the position was read five times a
+  second. It is now read twenty times a second while lyrics are showing.
+- Lyric files with several lines at one timestamp showed them as separate
+  rows in an unpredictable order, only one of which ever lit up. They are now
+  one row, in the file's order, and exact repeats are dropped.
+- An untimed line directly under a timed one was thrown away; it is now kept
+  as the rest of that line. Several empty gaps in a row count as one.
+- The other lyric lines shifted slightly every time the active line changed.
+- Lines other than the active one were dimmer than intended, a long active
+  line could touch the edge of the screen, and a large system text size made
+  lyrics oversized.
+- The lyrics view built a blur layer for every line of the song; it now does
+  so only for the lines near the one being sung.
+- On screens with an empty library or no search results, the message and its
+  buttons could sit behind the navigation bar.
+- Covers are kept in the app's cache, and stayed missing if the phone cleared
+  it. A track whose cover has gone is now read again at the next scan, which
+  the app runs at launch.
+- With very large text, the player's top bar clipped its title and the
+  "Nothing is playing" message overflowed.
+
 ## 1.2.0 (build 3) - 2026-10-10
 
 Published as a normal release at the owner's request. It passes the automated
