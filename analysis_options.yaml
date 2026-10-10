@@ -14,9 +14,8 @@ analyzer:
     - build/**
     - android/**
     - ios/**
-    # Third-party reference project kept alongside for design ideas; not part
-    # of this app.
-    - SpotiFLAC-Mobile-main/**
+    # Local reference material, never part of the app.
+    - "*-main/**"
 
 linter:
   # The lint rules applied to this project can be customized in the

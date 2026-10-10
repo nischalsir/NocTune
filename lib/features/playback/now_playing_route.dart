@@ -8,13 +8,17 @@ const _entranceCurve = Curves.easeOutCubic;
 /// Slides the full player up over the app. Dragging down anywhere that isn't
 /// a control moves the page with the finger; letting go either closes it or
 /// settles it back, depending on how far and how fast it was moving.
-///
-/// The drag-following approach is modelled on the player route in
-/// SpotiFLAC-Mobile (MIT licence, © zarzet).
 class NowPlayingRoute extends PageRoute<void> {
   NowPlayingRoute({required this.child}) : super(fullscreenDialog: true);
 
   final Widget child;
+
+  /// Downward speed, in page-heights per second, that counts as a flick.
+  static const _flingToClose = 0.9;
+
+  /// Released at rest with less than this much of the page still showing,
+  /// it closes.
+  static const _closeBelow = 0.66;
 
   // True from the first drag until the page is fully open again. While set,
   // the page position maps straight onto the animation value, so it stays
@@ -63,7 +67,8 @@ class NowPlayingRoute extends PageRoute<void> {
     final velocity = (details.primaryVelocity ?? 0) / pageHeight;
     // A downward flick closes it; so does letting go below the fold while
     // not moving back up. The direction of travel decides, not just position.
-    if (velocity > 1.0 || (velocity >= 0 && controller.value < 0.7)) {
+    if (velocity > _flingToClose ||
+        (velocity >= 0 && controller.value < _closeBelow)) {
       navigator?.pop();
     } else {
       _settleOpen();

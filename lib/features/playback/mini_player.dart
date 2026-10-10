@@ -131,7 +131,7 @@ class _CompactBar extends ConsumerWidget {
               // With the side buttons showing there is only room for one.
               if (!tight) ...[
                 const SizedBox(width: 8),
-                SquircleButton(
+                GlassButton(
                   icon: Icons.skip_next_rounded,
                   label: 'Next',
                   width: 46,

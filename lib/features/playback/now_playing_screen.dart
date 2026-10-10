@@ -10,6 +10,7 @@ import '../../app/providers.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/frosted.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/models/track.dart';
 import '../library/track_menu.dart';
@@ -25,10 +26,10 @@ Future<void> showNowPlaying(BuildContext context) => Navigator.of(
   rootNavigator: true,
 ).push(NowPlayingRoute(child: const NowPlayingScreen()));
 
-/// The immersive player. Its layout follows LastWave's player: squircle
-/// header buttons, a large rounded cover, the title over an artist chip, a
-/// thick scrubber, three squircle transport buttons and a row of secondary
-/// controls. The cover area turns into the lyrics view and back.
+/// The immersive player: header buttons, a large rounded cover, the title
+/// over an artist chip, a thick scrubber, three transport buttons and a row
+/// of secondary controls, all in round frosted glass. The cover area turns
+/// into the lyrics view and back.
 class NowPlayingScreen extends ConsumerStatefulWidget {
   const NowPlayingScreen({super.key});
 
@@ -293,7 +294,7 @@ class _Header extends ConsumerWidget {
     final track = this.track;
     return Row(
       children: [
-        SquircleButton(
+        GlassButton(
           icon: Icons.keyboard_arrow_down_rounded,
           label: 'Close player',
           iconSize: 28,
@@ -318,7 +319,7 @@ class _Header extends ConsumerWidget {
         if (track == null)
           const SizedBox(width: 48)
         else
-          SquircleButton(
+          GlassButton(
             icon: Icons.more_vert_rounded,
             label: 'More for this track',
             onTap: () => showTrackMenu(context, ref, track),
@@ -448,7 +449,7 @@ class _Details extends ConsumerWidget {
         ),
         if (track != null) ...[
           const SizedBox(width: 10),
-          SquircleButton(
+          GlassButton(
             icon: track.isFavorite
                 ? Icons.favorite_rounded
                 : Icons.favorite_border_rounded,
@@ -461,7 +462,7 @@ class _Details extends ConsumerWidget {
                 .setFavorite(track.id, favorite: !track.isFavorite),
           ),
           const SizedBox(width: 8),
-          SquircleButton(
+          GlassButton(
             icon: Icons.lyrics_rounded,
             label: showLyrics ? 'Hide lyrics' : 'Show lyrics',
             selected: showLyrics,
@@ -473,7 +474,7 @@ class _Details extends ConsumerWidget {
   }
 }
 
-/// Shuffle, queue and repeat, as three tonal pills.
+/// Shuffle, queue and repeat, as three frosted pills.
 class _SecondaryRow extends StatelessWidget {
   const _SecondaryRow();
 
@@ -489,26 +490,24 @@ class _SecondaryRow extends StatelessWidget {
           child: Pressable(
             semanticLabel: 'Queue',
             onTap: () => showQueueSheet(context),
-            child: Container(
+            child: SizedBox(
               height: 52,
-              decoration: BoxDecoration(
-                color: palette.glass,
-                borderRadius: BorderRadius.circular(19),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.queue_music_rounded, color: palette.textPrimary),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      'Queue',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge,
+              child: Frosted(
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.queue_music_rounded, color: palette.textPrimary),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        'Queue',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),

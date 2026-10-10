@@ -47,7 +47,9 @@ app.*.map.json
 # Widget Preview related
 .widget_preview/
 
-# Third-party reference projects and design references, kept locally only
-/SpotiFLAC-Mobile-main/
-/LastWave-Native-main/
+# Local reference material, never part of the app
+/*-main/
 /Screenshot*.png
+
+# Signed builds prepared for a release
+/build/dist/

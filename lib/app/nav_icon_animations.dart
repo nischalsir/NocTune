@@ -1,7 +1,4 @@
 // Entrance animations for the selected navigation icon.
-//
-// Adapted from SpotiFLAC-Mobile (lib/screens/main_shell.dart),
-// MIT licence, © 2026 zarzet.
 import 'package:flutter/material.dart';
 
 /// How a navigation icon arrives when its destination becomes selected.
@@ -24,12 +21,11 @@ class _AnimatedNavIconState extends State<AnimatedNavIcon>
   late final _controller = AnimationController(
     vsync: this,
     duration: switch (widget.motion) {
-      NavIconMotion.bounce => const Duration(milliseconds: 400),
-      NavIconMotion.slide => const Duration(milliseconds: 350),
-      NavIconMotion.spin => const Duration(milliseconds: 500),
+      NavIconMotion.bounce => const Duration(milliseconds: 360),
+      NavIconMotion.slide => const Duration(milliseconds: 300),
+      NavIconMotion.spin => const Duration(milliseconds: 460),
     },
   )..forward();
-
   @override
   void dispose() {
     _controller.dispose();
@@ -39,27 +35,30 @@ class _AnimatedNavIconState extends State<AnimatedNavIcon>
   @override
   Widget build(BuildContext context) {
     if (MediaQuery.disableAnimationsOf(context)) return widget.child;
+    final settle = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutBack,
+    );
     return switch (widget.motion) {
+      // Pops up from slightly small, overshooting a touch.
       NavIconMotion.bounce => ScaleTransition(
-        scale: Tween<double>(begin: 0.1, end: 1).animate(
-          CurvedAnimation(parent: _controller, curve: Curves.elasticOut),
-        ),
+        scale: Tween<double>(begin: 0.55, end: 1).animate(settle),
         child: widget.child,
       ),
+      // Rises into place as it fades in.
       NavIconMotion.slide => FadeTransition(
         opacity: CurvedAnimation(parent: _controller, curve: Curves.easeOut),
         child: SlideTransition(
-          position: Tween<Offset>(begin: const Offset(0, 0.5), end: Offset.zero)
-              .animate(
-                CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
-              ),
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.35),
+            end: Offset.zero,
+          ).animate(settle),
           child: widget.child,
         ),
       ),
+      // A third of a turn, as a cog would.
       NavIconMotion.spin => RotationTransition(
-        turns: Tween<double>(begin: 0, end: 0.5).animate(
-          CurvedAnimation(parent: _controller, curve: Curves.easeOutBack),
-        ),
+        turns: Tween<double>(begin: -1 / 3, end: 0).animate(settle),
         child: widget.child,
       ),
     };

@@ -7,12 +7,14 @@ import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/frosted.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/track.dart';
 import '../library/scan/add_music_actions.dart';
 import '../library/scan/scan_banner.dart';
 import '../library/track_menu.dart';
+import 'home_hero.dart';
 
 /// Which tracks the home list shows.
 enum FeedList {
@@ -28,10 +30,10 @@ enum FeedList {
   final String emptyText;
 }
 
-/// The home feed. Its composition follows LastWave's home screen: a rounded
-/// header, a row of summary pills, a statistics card with one headline
-/// number over three tiles, and a switchable track list. Every number and
-/// row comes from the library on this device.
+/// The home feed: a hero featuring one track, a row of summary pills, a
+/// statistics card with one headline number over three tiles, and a
+/// switchable track list. Every number and row comes from the library on
+/// this device.
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({
     super.key,
@@ -62,16 +64,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final palette = context.noc;
     final bottomInset = MediaQuery.paddingOf(context).bottom;
 
-    final header = _Header(
-      onOpenSearch: widget.onOpenSearch,
-      onShuffleAll: () async {
-        final all = await ref.read(allTracksProvider.future);
-        if (all.isEmpty) return;
-        final handler = ref.read(audioHandlerProvider);
-        await handler.playTracks(all);
-        await handler.setShuffleMode(AudioServiceShuffleMode.all);
-      },
-    );
+    Future<void> shuffleAll() async {
+      final all = await ref.read(allTracksProvider.future);
+      if (all.isEmpty) return;
+      final handler = ref.read(audioHandlerProvider);
+      await handler.playTracks(all);
+      await handler.setShuffleMode(AudioServiceShuffleMode.all);
+    }
+
+    // Shown while there is no track to feature: an empty or loading library.
+    final header = _Header(onOpenSearch: widget.onOpenSearch);
 
     final summary = stats.value;
     if (stats.isLoading && summary == null) {
@@ -108,13 +110,43 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     // library holds the rest.
     final shown = rows.take(30).toList();
 
+    // The hero features what is in the player; failing that, the last thing
+    // played; failing that, the newest arrival.
+    final playing = ref.watch(currentTrackProvider).value;
+    final current = playing != null && playing.id == currentId ? playing : null;
+    final lastPlayed = ref.watch(recentlyPlayedProvider).value?.firstOrNull;
+    final featured =
+        current ??
+        lastPlayed ??
+        ref.watch(recentlyAddedProvider).value?.firstOrNull;
+    final isPlaying = ref.watch(
+      playbackStateProvider.select((state) => state.value?.playing ?? false),
+    );
+
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 760),
         child: CustomScrollView(
           slivers: [
-            SliverToBoxAdapter(child: header),
-            SliverToBoxAdapter(child: _SummaryPills(stats: summary)),
+            SliverToBoxAdapter(
+              child: featured == null
+                  ? header
+                  : HomeHero(
+                      track: featured,
+                      isCurrent: current != null,
+                      eyebrow: current != null
+                          ? (isPlaying ? 'NOW PLAYING' : 'PAUSED')
+                          : (lastPlayed != null
+                                ? 'JUMP BACK IN'
+                                : 'RECENTLY ADDED'),
+                      onOpenSearch: widget.onOpenSearch,
+                      onPlay: () =>
+                          ref.read(audioHandlerProvider).playTracks([featured]),
+                    ),
+            ),
+            SliverToBoxAdapter(
+              child: _SummaryPills(stats: summary, onShuffleAll: shuffleAll),
+            ),
             const SliverToBoxAdapter(child: ScanBanner()),
             SliverToBoxAdapter(
               child: _StatsCard(
@@ -187,12 +219,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
-/// The rounded header panel: the app's name and two round actions.
+/// The rounded header panel: the app's name and a way into search.
 class _Header extends StatelessWidget {
-  const _Header({required this.onOpenSearch, required this.onShuffleAll});
+  const _Header({required this.onOpenSearch});
 
   final VoidCallback onOpenSearch;
-  final VoidCallback onShuffleAll;
 
   @override
   Widget build(BuildContext context) {
@@ -223,12 +254,6 @@ class _Header extends StatelessWidget {
                   ),
                 ),
               ),
-              _RoundAction(
-                icon: Icons.shuffle_rounded,
-                label: 'Shuffle all tracks',
-                onTap: onShuffleAll,
-              ),
-              const SizedBox(width: 10),
               _RoundAction(
                 icon: Icons.search_rounded,
                 label: 'Search',
@@ -276,11 +301,13 @@ class _RoundAction extends StatelessWidget {
   }
 }
 
-/// Two pills under the header: where the music is, and how much there is.
+/// Pills under the hero: how much music there is, and a button to shuffle
+/// all of it.
 class _SummaryPills extends StatelessWidget {
-  const _SummaryPills({required this.stats});
+  const _SummaryPills({required this.stats, required this.onShuffleAll});
 
   final LibraryStats stats;
+  final VoidCallback onShuffleAll;
 
   @override
   Widget build(BuildContext context) {
@@ -288,13 +315,21 @@ class _SummaryPills extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: Wrap(
         alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
         runSpacing: 8,
         spacing: 8,
         children: [
-          const _Pill(text: 'On this device'),
           _Pill(
             icon: Icons.headphones_rounded,
-            text: formatLongDuration(stats.totalDuration),
+            text: '${formatLongDuration(stats.totalDuration)} on this device',
+          ),
+          Pressable(
+            semanticLabel: 'Shuffle all tracks',
+            onTap: onShuffleAll,
+            child: const _Pill(
+              icon: Icons.shuffle_rounded,
+              text: 'Shuffle all',
+            ),
           ),
         ],
       ),
@@ -311,28 +346,26 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.noc;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-      decoration: BoxDecoration(
-        color: palette.glass,
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (icon != null) ...[
-            Icon(icon, size: 18, color: palette.textPrimary),
-            const SizedBox(width: 8),
-          ],
-          Flexible(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall,
+    return Frosted(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: 18, color: palette.textPrimary),
+              const SizedBox(width: 8),
+            ],
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

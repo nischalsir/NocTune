@@ -8,6 +8,8 @@ import 'package:noctune/app/providers.dart';
 import 'package:noctune/data/models/playlist.dart';
 import 'package:noctune/data/models/track.dart';
 import 'package:noctune/app/noc_bottom_bar.dart';
+import 'package:noctune/core/widgets/wave_bars.dart';
+import 'package:noctune/features/playback/playback_mapping.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
@@ -59,6 +61,9 @@ Future<void> _pumpApp(
   ScanState scan = const ScanIdle(),
   bool firstLaunch = false,
   NocAudioHandler? handler,
+  Track? currentTrack,
+  bool playing = false,
+  bool settle = true,
   String? updateManifest,
 }) async {
   tester.view.physicalSize = size;
@@ -90,11 +95,16 @@ Future<void> _pumpApp(
           ),
         ),
         playbackStateProvider.overrideWith(
-          (ref) => Stream.value(PlaybackState()),
+          (ref) => Stream.value(PlaybackState(playing: playing)),
         ),
         currentMediaItemProvider.overrideWith(
-          (ref) => Stream.value(nowPlaying),
+          (ref) => Stream.value(
+            currentTrack == null
+                ? nowPlaying
+                : mediaItemFromTrack(currentTrack),
+          ),
         ),
+        currentTrackProvider.overrideWith((ref) => currentTrack),
         playbackPositionProvider.overrideWith(
           (ref) => Stream.value(Duration.zero),
         ),
@@ -117,7 +127,13 @@ Future<void> _pumpApp(
       child: const NocTuneApp(),
     ),
   );
-  await tester.pumpAndSettle();
+  if (settle) {
+    await tester.pumpAndSettle();
+  } else {
+    // For screens with a continuous animation, which never settle.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 600));
+  }
 }
 
 void main() {
@@ -271,9 +287,18 @@ void main() {
   testWidgets('home shows library totals and a switchable list', (
     tester,
   ) async {
-    await _pumpApp(tester, size: phone, tracks: [_track('Aashish')]);
+    // Tall enough to show the hero, the totals and the list at once.
+    await _pumpApp(
+      tester,
+      size: const Size(390, 1700),
+      tracks: [_track('Aashish')],
+    );
 
-    expect(find.text('NocTune'), findsOneWidget);
+    // Nothing is loaded, so the hero offers the newest track.
+    expect(find.text('NOCTUNE'), findsOneWidget);
+    expect(find.text('RECENTLY ADDED'), findsOneWidget);
+    expect(find.text('AASHISH'), findsOneWidget);
+    expect(find.text('Play now'), findsOneWidget);
     expect(find.text('Tracks'), findsOneWidget);
     expect(find.text('Plays'), findsOneWidget);
     // Nothing has been played yet, so the default list says so.
@@ -288,6 +313,62 @@ void main() {
     await tester.tap(find.text('Library').last);
     await tester.pumpAndSettle();
     expect(find.text('3:00'), findsOneWidget);
+  });
+
+  group('hero', () {
+    final loaded = _track('Sustari');
+
+    testWidgets('shows moving bars and Now playing for the playing track', (
+      tester,
+    ) async {
+      await _pumpApp(
+        tester,
+        size: phone,
+        tracks: [_track('Other'), loaded],
+        currentTrack: loaded,
+        playing: true,
+        settle: false,
+      );
+
+      expect(find.text('NOW PLAYING'), findsOneWidget);
+      expect(find.text('SUSTARI'), findsOneWidget);
+      expect(find.text('Now playing'), findsOneWidget);
+      expect(find.text('Play now'), findsNothing);
+      expect(tester.widget<WaveBars>(find.byType(WaveBars)).playing, isTrue);
+      // The bars keep moving, so this screen never comes to rest.
+      expect(tester.hasRunningAnimations, isTrue);
+    });
+
+    testWidgets('holds the bars still while paused', (tester) async {
+      await _pumpApp(
+        tester,
+        size: phone,
+        tracks: [loaded],
+        currentTrack: loaded,
+      );
+
+      expect(find.text('PAUSED'), findsOneWidget);
+      expect(find.text('Paused'), findsOneWidget);
+      expect(tester.widget<WaveBars>(find.byType(WaveBars)).playing, isFalse);
+    });
+
+    testWidgets('holds the bars still with reduced motion on', (tester) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+
+      await _pumpApp(
+        tester,
+        size: phone,
+        tracks: [loaded],
+        currentTrack: loaded,
+        playing: true,
+      );
+
+      expect(find.text('Now playing'), findsOneWidget);
+    });
   });
 
   testWidgets('the mini-player is hidden while nothing is loaded', (

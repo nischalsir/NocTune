@@ -7,13 +7,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
+import '../../core/widgets/frosted.dart';
 import '../../core/widgets/pressable.dart';
 import 'noc_audio_handler.dart';
 
-/// A rounded-square ("squircle") button, the control shape used across the
-/// player. [filled] ones carry the accent; the rest are quiet tonal surfaces.
-class SquircleButton extends StatelessWidget {
-  const SquircleButton({
+/// A fully rounded frosted-glass button: a circle when square, a pill when
+/// wide. It is the control shape used across the player.
+class GlassButton extends StatelessWidget {
+  const GlassButton({
     super.key,
     required this.icon,
     required this.label,
@@ -21,7 +22,6 @@ class SquircleButton extends StatelessWidget {
     this.width = 48,
     this.height = 48,
     this.iconSize = 24,
-    this.filled = false,
     this.selected = false,
   });
 
@@ -33,7 +33,6 @@ class SquircleButton extends StatelessWidget {
   final double width;
   final double height;
   final double iconSize;
-  final bool filled;
 
   /// Draws the icon in the accent colour, for toggles that are on.
   final bool selected;
@@ -47,19 +46,15 @@ class SquircleButton extends StatelessWidget {
       child: Pressable(
         semanticLabel: label,
         onTap: onTap,
-        child: Container(
+        child: SizedBox(
           width: width,
           height: height,
-          decoration: BoxDecoration(
-            color: filled ? palette.accent : palette.glass,
-            borderRadius: BorderRadius.circular(min(width, height) * 0.36),
-          ),
-          child: Icon(
-            icon,
-            size: iconSize,
-            color: filled
-                ? palette.onAccent
-                : (selected ? palette.accent : palette.textPrimary),
+          child: Frosted(
+            child: Icon(
+              icon,
+              size: iconSize,
+              color: selected ? palette.accent : palette.textPrimary,
+            ),
           ),
         ),
       ),
@@ -67,8 +62,9 @@ class SquircleButton extends StatelessWidget {
   }
 }
 
-/// The accent play/pause squircle. The icon swaps with a quick scale-and-fade
-/// rather than snapping.
+/// The play/pause button: frosted glass carrying the accent, so it stays the
+/// most prominent control. The icon swaps with a quick scale-and-fade rather
+/// than snapping.
 class PlayPauseButton extends ConsumerWidget {
   const PlayPauseButton({super.key, this.width = 84, this.height = 84});
 
@@ -89,26 +85,25 @@ class PlayPauseButton extends ConsumerWidget {
         final handler = ref.read(audioHandlerProvider);
         playing ? handler.pause() : handler.play();
       },
-      child: Container(
+      child: SizedBox(
         width: width,
         height: height,
-        decoration: BoxDecoration(
-          color: palette.accent,
-          borderRadius: BorderRadius.circular(min(width, height) * 0.36),
-        ),
-        child: AnimatedSwitcher(
-          duration: reduceMotion
-              ? Duration.zero
-              : const Duration(milliseconds: 160),
-          transitionBuilder: (child, animation) => ScaleTransition(
-            scale: Tween<double>(begin: 0.6, end: 1).animate(animation),
-            child: FadeTransition(opacity: animation, child: child),
-          ),
-          child: Icon(
-            playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-            key: ValueKey(playing),
-            size: min(width, height) * 0.5,
-            color: palette.onAccent,
+        child: Frosted(
+          tint: palette.accent,
+          child: AnimatedSwitcher(
+            duration: reduceMotion
+                ? Duration.zero
+                : const Duration(milliseconds: 160),
+            transitionBuilder: (child, animation) => ScaleTransition(
+              scale: Tween<double>(begin: 0.6, end: 1).animate(animation),
+              child: FadeTransition(opacity: animation, child: child),
+            ),
+            child: Icon(
+              playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+              key: ValueKey(playing),
+              size: min(width, height) * 0.5,
+              color: palette.onAccent,
+            ),
           ),
         ),
       ),
@@ -116,7 +111,8 @@ class PlayPauseButton extends ConsumerWidget {
   }
 }
 
-/// Previous, play/pause and next as three squircles, the middle one largest.
+/// Previous, play/pause and next as three round buttons, the middle one
+/// largest.
 class PrimaryTransport extends ConsumerWidget {
   const PrimaryTransport({super.key, this.dense = false});
 
@@ -131,7 +127,7 @@ class PrimaryTransport extends ConsumerWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        SquircleButton(
+        GlassButton(
           icon: Icons.skip_previous_rounded,
           label: 'Previous',
           width: side,
@@ -142,7 +138,7 @@ class PrimaryTransport extends ConsumerWidget {
         SizedBox(width: gap),
         PlayPauseButton(width: dense ? 52 : 88, height: dense ? 48 : 84),
         SizedBox(width: gap),
-        SquircleButton(
+        GlassButton(
           icon: Icons.skip_next_rounded,
           label: 'Next',
           width: side,
@@ -170,7 +166,7 @@ class ShuffleButton extends ConsumerWidget {
             AudioServiceShuffleMode.none,
       ),
     );
-    return SquircleButton(
+    return GlassButton(
       icon: Icons.shuffle_rounded,
       label: shuffling ? 'Shuffle is on' : 'Shuffle is off',
       width: double.infinity,
@@ -200,7 +196,7 @@ class RepeatButton extends ConsumerWidget {
         (state) => state.value?.repeatMode ?? AudioServiceRepeatMode.none,
       ),
     );
-    return SquircleButton(
+    return GlassButton(
       icon: repeat == AudioServiceRepeatMode.one
           ? Icons.repeat_one_rounded
           : Icons.repeat_rounded,

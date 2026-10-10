@@ -5,7 +5,16 @@
 An offline music player for Android and iOS, built with Flutter. It plays the
 music stored on the device, needs no account, and uploads nothing.
 
-Builds are published on the [Releases](../../releases) page.
+Builds are published on the [Releases](../../releases) page, and changes
+are listed in the [changelog](CHANGELOG.md).
+
+## Screenshots
+
+| Home | Scrolling | Player | Lyrics |
+|---|---|---|---|
+| <img src="docs/screenshots/home.png" width="200" alt="Home screen with the track that is playing"> | <img src="docs/screenshots/library-list.png" width="200" alt="Track list with the navigation folded away"> | <img src="docs/screenshots/player.png" width="200" alt="Full player with a Dolby Atmos label"> | <img src="docs/screenshots/lyrics.png" width="200" alt="Time-synced lyrics"> |
+
+Shown with sample tracks.
 
 ## Running it
 
@@ -128,4 +137,7 @@ flutter test tool/preview_screens.dart --dart-define=OUT=C:\some\folder
   `.lrc` file beside it, or lyrics embedded in its tags. Time-synced lyrics
   follow playback; plain lyrics are shown as text.
 
-## Developed by Nischal Pandey.
+## Developed by Nischal Pandey
+
+- Instagram: [@nischal_sir](https://www.instagram.com/nischal_sir)
+- Email: [nischalpandey.dev@gmail.com](mailto:nischalpandey.dev@gmail.com)

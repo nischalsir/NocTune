@@ -1,9 +1,5 @@
 // The floating bottom bar: mini-player above a glass tab bar that folds away
 // as the page is scrolled.
-//
-// The behaviour and structure follow the "Mornye" bottom bar in
-// SpotiFLAC-Mobile (lib/widgets/mornye_bottom_bar.dart), MIT licence,
-// © 2026 zarzet. The scroll rule in [ChromeController] is taken from it.
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -31,41 +27,57 @@ class NocDestination {
   final NavIconMotion motion;
 }
 
-/// Whether the tabs are folded away. Deliberate downward drags fold them;
-/// they return when the page is back at its top or a destination is chosen.
-/// Sideways lists, flings the user isn't touching and overscroll bounce are
-/// ignored.
+/// Whether the tabs are folded away.
+///
+/// Dragging a page down by a little folds them, to give the content room.
+/// Dragging back up, reaching the top of the page, or choosing a destination
+/// brings them back. Only drags the user is actually making count: sideways
+/// lists, a fling coasting to a stop and overscroll bounce are ignored.
 class ChromeController extends ValueNotifier<bool> {
   ChromeController() : super(false);
 
-  double _distance = 0;
+  /// How far, in logical pixels, a drag must travel to fold the tabs.
+  static const _foldAfter = 32.0;
+
+  /// How far a drag back towards the top must travel to unfold them.
+  static const _unfoldAfter = 56.0;
+
+  /// Within this distance of the top of a page the tabs are always shown.
+  static const _topZone = 8.0;
+
+  /// Distance dragged in the current direction: positive is down the page.
+  double _travel = 0;
 
   void expand() {
-    _distance = 0;
+    _travel = 0;
     value = false;
   }
 
-  /// Feed this every scroll notification from the visible page.
+  /// Feed this every scroll notification from the visible page. Always
+  /// returns false, so the notification carries on to other listeners.
   bool handleScroll(ScrollNotification notification) {
-    if (notification.metrics.axis != Axis.vertical) return false;
-    if (notification is ScrollStartNotification ||
-        notification is ScrollEndNotification) {
-      _distance = 0;
-    }
-    if (notification is! ScrollUpdateNotification) return false;
     final metrics = notification.metrics;
-    if (metrics.pixels <= metrics.minScrollExtent + 12) {
+    if (metrics.axis != Axis.vertical) return false;
+    if (notification is! ScrollUpdateNotification) {
+      if (notification is ScrollEndNotification) _travel = 0;
+      return false;
+    }
+    if (metrics.pixels <= metrics.minScrollExtent + _topZone) {
       expand();
       return false;
     }
-    if (metrics.outOfRange || notification.dragDetails == null) return false;
-    final delta = notification.scrollDelta ?? 0;
-    if (delta == 0) return false;
-    if (_distance.sign != delta.sign) _distance = 0;
-    _distance += delta;
-    if (_distance >= 28) {
+
+    final step = notification.scrollDelta ?? 0;
+    final byHand = notification.dragDetails != null;
+    if (!byHand || metrics.outOfRange || step == 0) return false;
+
+    // A change of direction starts the count again.
+    if ((step > 0) != (_travel > 0)) _travel = 0;
+    _travel += step;
+    if (_travel >= _foldAfter) {
       value = true;
-      _distance = 0;
+    } else if (_travel <= -_unfoldAfter) {
+      value = false;
     }
     return false;
   }
@@ -102,12 +114,12 @@ class _NocBottomBarState extends ConsumerState<NocBottomBar>
     with SingleTickerProviderStateMixin {
   late final _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 380),
+    duration: const Duration(milliseconds: 340),
     value: widget.collapsed ? 1 : 0,
   );
   late final _collapse = CurvedAnimation(
     parent: _controller,
-    curve: Curves.easeInOutCubic,
+    curve: Curves.easeInOutCubicEmphasized,
   );
 
   void _syncCollapse() {

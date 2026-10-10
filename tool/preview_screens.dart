@@ -194,9 +194,9 @@ void main() {
         ),
       );
       // Let file images load and decode, which needs real time.
-      for (var i = 0; i < 6; i++) {
+      for (var i = 0; i < 14; i++) {
         await tester.runAsync(
-          () => Future<void>.delayed(const Duration(milliseconds: 60)),
+          () => Future<void>.delayed(const Duration(milliseconds: 120)),
         );
         await tester.pump(const Duration(milliseconds: 300));
       }
@@ -230,11 +230,7 @@ void main() {
       '2_home_scrolled',
       child: const NocTuneApp(),
       playing: tracks[0],
-      act: () => tester.drag(
-        find.text('Low Tide'),
-        const Offset(0, -260),
-        warnIfMissed: false,
-      ),
+      act: () => tester.dragFrom(const Offset(195, 560), const Offset(0, -470)),
     );
     await shoot('3_player_lossless', child: player(), playing: tracks[0]);
     await shoot(
