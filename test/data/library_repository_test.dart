@@ -93,7 +93,11 @@ void main() {
 
       final fingerprints = await repository.fingerprints();
 
-      expect(fingerprints['/music/Song.flac'], (modifiedMs: 42, sizeBytes: 7));
+      expect(fingerprints['/music/Song.flac'], (
+        modifiedMs: 42,
+        sizeBytes: 7,
+        readerVersion: 1,
+      ));
     });
 
     test('removes library entries by uri', () async {

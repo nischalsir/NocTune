@@ -10,6 +10,7 @@ class AppSettings {
     required this.themeMode,
     required this.accent,
     required this.accentFromCover,
+    this.lyricsScale = 1,
   });
 
   final ThemeMode themeMode;
@@ -20,14 +21,19 @@ class AppSettings {
   /// Whether the accent follows the cover art of the track that is playing.
   final bool accentFromCover;
 
+  /// Multiplier applied to the lyrics text size.
+  final double lyricsScale;
+
   AppSettings copyWith({
     ThemeMode? themeMode,
     NocAccent? accent,
     bool? accentFromCover,
+    double? lyricsScale,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     accent: accent ?? this.accent,
     accentFromCover: accentFromCover ?? this.accentFromCover,
+    lyricsScale: lyricsScale ?? this.lyricsScale,
   );
 }
 
@@ -36,6 +42,11 @@ class SettingsController extends Notifier<AppSettings> {
   static const _themeKey = 'theme_mode';
   static const _accentKey = 'accent';
   static const _coverAccentKey = 'accent_from_cover';
+  static const _lyricsScaleKey = 'lyrics_scale';
+
+  /// Smallest and largest lyrics text multipliers offered.
+  static const minLyricsScale = 0.7;
+  static const maxLyricsScale = 1.6;
 
   @override
   AppSettings build() {
@@ -49,6 +60,7 @@ class SettingsController extends Notifier<AppSettings> {
           NocAccent.values.asNameMap()[prefs.getString(_accentKey)] ??
           NocAccent.red,
       accentFromCover: prefs.getBool(_coverAccentKey) ?? true,
+      lyricsScale: prefs.getDouble(_lyricsScaleKey) ?? 1,
     );
   }
 
@@ -60,6 +72,15 @@ class SettingsController extends Notifier<AppSettings> {
   void setAccent(NocAccent accent) {
     ref.read(sharedPreferencesProvider).setString(_accentKey, accent.name);
     state = state.copyWith(accent: accent);
+  }
+
+  /// Makes the lyrics text one step larger or smaller, within limits.
+  void stepLyricsScale({required bool larger}) {
+    final scale = (state.lyricsScale + (larger ? 0.15 : -0.15))
+        .clamp(minLyricsScale, maxLyricsScale)
+        .toDouble();
+    ref.read(sharedPreferencesProvider).setDouble(_lyricsScaleKey, scale);
+    state = state.copyWith(lyricsScale: scale);
   }
 
   void setAccentFromCover(bool enabled) {

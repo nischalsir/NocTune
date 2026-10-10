@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/layout/window_class.dart';
 import '../core/theme/noc_palette.dart';
-import '../core/widgets/glass_panel.dart';
 import '../core/widgets/noc_backdrop.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/library_screen.dart';
@@ -14,34 +14,47 @@ import '../features/settings/settings_screen.dart';
 import '../features/startup/startup_prompts.dart';
 import '../features/startup/update_dialog.dart';
 import '../features/startup/welcome_dialog.dart';
+import 'nav_icon_animations.dart';
+import 'noc_bottom_bar.dart';
 import 'providers.dart';
 
-typedef _Destination = ({IconData icon, IconData selectedIcon, String label});
-
-const _destinations = <_Destination>[
-  (icon: Icons.home_outlined, selectedIcon: Icons.home_rounded, label: 'Home'),
-  (
+// Search is last: when the tabs fold away it is the button kept on the right.
+const _destinations = [
+  NocDestination(
+    icon: Icons.home_outlined,
+    selectedIcon: Icons.home_rounded,
+    label: 'Home',
+    motion: NavIconMotion.bounce,
+  ),
+  NocDestination(
     icon: Icons.library_music_outlined,
     selectedIcon: Icons.library_music_rounded,
     label: 'Library',
+    motion: NavIconMotion.slide,
   ),
-  (
-    icon: Icons.search_rounded,
-    selectedIcon: Icons.search_rounded,
-    label: 'Search',
-  ),
-  (
+  NocDestination(
     icon: Icons.settings_outlined,
     selectedIcon: Icons.settings_rounded,
     label: 'Settings',
+    motion: NavIconMotion.spin,
+  ),
+  NocDestination(
+    icon: Icons.search_rounded,
+    selectedIcon: Icons.search_rounded,
+    label: 'Search',
+    motion: NavIconMotion.bounce,
   ),
 ];
 
+const _homeIndex = 0;
 const _libraryIndex = 1;
-const _searchIndex = 2;
+const _searchIndex = 3;
 
-/// The app frame: top-level destinations plus the persistent mini-player.
-/// Phones get a floating bottom bar; wider windows get a navigation rail.
+/// The app frame: top-level destinations plus the persistent player bar.
+///
+/// Phones and tablets get the floating bottom bar, which folds its tabs away
+/// while a page is being scrolled. Only wide, desktop-like windows switch to
+/// a navigation rail.
 class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
 
@@ -51,8 +64,10 @@ class AppShell extends ConsumerStatefulWidget {
 
 class _AppShellState extends ConsumerState<AppShell>
     with SingleTickerProviderStateMixin {
-  int _index = 0;
+  int _index = _homeIndex;
   final _libraryNavigator = GlobalKey<NavigatorState>();
+  final _chrome = ChromeController();
+  DateTime? _lastBackPress;
 
   // Fades a destination in when it is selected.
   late final _pageFade = AnimationController(
@@ -91,19 +106,57 @@ class _AppShellState extends ConsumerState<AppShell>
   @override
   void dispose() {
     _pageFade.dispose();
+    _chrome.dispose();
     super.dispose();
   }
 
   void _select(int index) {
-    if (index == _index) return;
+    // Any tap on the bar brings the tabs back.
+    _chrome.expand();
+    if (index == _index) {
+      // Choosing the current destination again returns it to its first page.
+      if (index == _libraryIndex) {
+        _libraryNavigator.currentState?.popUntil((route) => route.isFirst);
+      }
+      return;
+    }
+    HapticFeedback.selectionClick();
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _index = index);
     if (!MediaQuery.disableAnimationsOf(context)) _pageFade.forward(from: 0);
   }
 
-  void _showMessage(String message) {
+  /// System back: leave an opened album or playlist, then return to Home,
+  /// then ask for a second press before leaving the app.
+  Future<void> _handleBack() async {
+    if (_index == _libraryIndex &&
+        await (_libraryNavigator.currentState?.maybePop() ??
+            Future.value(false))) {
+      return;
+    }
+    if (_index != _homeIndex) {
+      _select(_homeIndex);
+      return;
+    }
+    final now = DateTime.now();
+    final last = _lastBackPress;
+    if (last != null && now.difference(last) < const Duration(seconds: 2)) {
+      await SystemNavigator.pop();
+      return;
+    }
+    _lastBackPress = now;
+    _showMessage('Press back again to exit', seconds: 2);
+  }
+
+  void _showMessage(String message, {int seconds = 4}) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: Duration(seconds: seconds),
+        ),
+      );
   }
 
   @override
@@ -128,36 +181,97 @@ class _AppShellState extends ConsumerState<AppShell>
     });
 
     final palette = context.noc;
-    // IndexedStack keeps each destination's scroll position and state alive.
-    final pages = FadeTransition(
-      opacity: CurvedAnimation(parent: _pageFade, curve: Curves.easeOut),
-      child: IndexedStack(
-        index: _index,
-        children: [
-          HomeScreen(
-            onOpenSearch: () => _select(_searchIndex),
-            onOpenLibrary: () => _select(_libraryIndex),
-          ),
-          // The library has its own navigator, so opening an album or playlist
-          // keeps the navigation and mini-player on screen.
-          NavigatorPopHandler(
-            enabled: _index == _libraryIndex,
-            onPopWithResult: (_) => _libraryNavigator.currentState?.maybePop(),
-            child: Navigator(
-              key: _libraryNavigator,
-              onGenerateRoute: (_) => MaterialPageRoute<void>(
-                builder: (_) => const LibraryScreen(),
-              ),
-            ),
-          ),
-          const SearchScreen(),
-          const SettingsScreen(),
-        ],
+    final scanning = ref.watch(scanControllerProvider) is ScanRunning;
+    final useRail = WindowClass.of(context) == WindowClass.expanded;
+    // Folding the tabs is for touch layouts with room to spare: not while
+    // typing, and not when the text is so large the folded bar would crowd.
+    final canFoldTabs =
+        !useRail &&
+        MediaQuery.viewInsetsOf(context).bottom == 0 &&
+        MediaQuery.textScalerOf(context).scale(15) <= 20;
+
+    final destinations = [
+      HomeScreen(
+        onOpenSearch: () => _select(_searchIndex),
+        onOpenLibrary: () => _select(_libraryIndex),
+      ),
+      // The library has its own navigator, so opening an album or playlist
+      // keeps the navigation and mini-player on screen.
+      Navigator(
+        key: _libraryNavigator,
+        onGenerateRoute: (_) =>
+            MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
+      ),
+      const SettingsScreen(),
+      const SearchScreen(),
+    ];
+
+    final pages = NotificationListener<ScrollNotification>(
+      onNotification: (notification) =>
+          canFoldTabs && _chrome.handleScroll(notification),
+      child: FadeTransition(
+        opacity: CurvedAnimation(parent: _pageFade, curve: Curves.easeOut),
+        // IndexedStack keeps each destination's scroll position and state.
+        child: IndexedStack(
+          index: _index,
+          children: [
+            for (final (index, page) in destinations.indexed)
+              // Animations on hidden destinations are paused.
+              TickerMode(enabled: index == _index, child: page),
+          ],
+        ),
       ),
     );
 
-    if (WindowClass.of(context) == WindowClass.compact) {
-      return Scaffold(
+    final Widget scaffold;
+    if (useRail) {
+      scaffold = Scaffold(
+        body: NocBackdrop(
+          child: Row(
+            children: [
+              SafeArea(
+                right: false,
+                child: NavigationRail(
+                  backgroundColor: Colors.transparent,
+                  indicatorColor: palette.accent.withValues(alpha: 0.22),
+                  labelType: NavigationRailLabelType.all,
+                  selectedIndex: _index,
+                  onDestinationSelected: _select,
+                  destinations: [
+                    for (final destination in _destinations)
+                      NavigationRailDestination(
+                        icon: Icon(destination.icon),
+                        selectedIcon: Icon(destination.selectedIcon),
+                        label: Text(destination.label),
+                      ),
+                  ],
+                ),
+              ),
+              VerticalDivider(width: 1, color: palette.glassBorder),
+              Expanded(
+                child: Column(
+                  children: [
+                    Expanded(child: pages),
+                    SafeArea(
+                      top: false,
+                      minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+                      // Capped so the player doesn't stretch across a tablet.
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: kMaxContentWidth,
+                        ),
+                        child: const MiniPlayer(),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      scaffold = Scaffold(
         // Content scrolls underneath the floating glass chrome.
         extendBody: true,
         body: NocBackdrop(child: pages),
@@ -176,84 +290,37 @@ class _AppShellState extends ConsumerState<AppShell>
             ),
           ),
           child: SafeArea(
-            minimum: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const MiniPlayer(),
-                const SizedBox(height: 8),
-                GlassPanel(
-                  chrome: true,
-                  padding: EdgeInsets.zero,
-                  radius: 24,
-                  child: NavigationBar(
-                    height: 64,
-                    backgroundColor: Colors.transparent,
-                    elevation: 0,
-                    indicatorColor: palette.accent.withValues(alpha: 0.22),
+            minimum: const EdgeInsets.fromLTRB(14, 0, 14, 10),
+            child: Align(
+              alignment: Alignment.bottomCenter,
+              heightFactor: 1,
+              // On tablets the bar stays phone-sized and centred.
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 560),
+                child: ValueListenableBuilder<bool>(
+                  valueListenable: _chrome,
+                  builder: (context, collapsed, _) => NocBottomBar(
+                    collapsed: canFoldTabs && collapsed,
+                    destinations: _destinations,
                     selectedIndex: _index,
-                    onDestinationSelected: _select,
-                    destinations: [
-                      for (final destination in _destinations)
-                        NavigationDestination(
-                          icon: Icon(destination.icon),
-                          selectedIcon: Icon(destination.selectedIcon),
-                          label: destination.label,
-                        ),
-                    ],
+                    onSelected: _select,
+                    badgedIndex: scanning ? _libraryIndex : null,
                   ),
                 ),
-              ],
+              ),
             ),
           ),
         ),
       );
     }
 
-    return Scaffold(
-      body: NocBackdrop(
-        child: Row(
-          children: [
-            SafeArea(
-              right: false,
-              child: NavigationRail(
-                backgroundColor: Colors.transparent,
-                indicatorColor: palette.accent.withValues(alpha: 0.22),
-                labelType: NavigationRailLabelType.all,
-                selectedIndex: _index,
-                onDestinationSelected: _select,
-                destinations: [
-                  for (final destination in _destinations)
-                    NavigationRailDestination(
-                      icon: Icon(destination.icon),
-                      selectedIcon: Icon(destination.selectedIcon),
-                      label: Text(destination.label),
-                    ),
-                ],
-              ),
-            ),
-            VerticalDivider(width: 1, color: palette.glassBorder),
-            Expanded(
-              child: Column(
-                children: [
-                  Expanded(child: pages),
-                  SafeArea(
-                    top: false,
-                    minimum: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-                    // Capped so the player doesn't stretch across a tablet.
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: kMaxContentWidth,
-                      ),
-                      child: const MiniPlayer(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+    // Back is handled here rather than popping the app's only route.
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _handleBack();
+      },
+      child: scaffold,
     );
   }
 }

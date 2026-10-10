@@ -5,8 +5,13 @@ import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import '../../../data/models/track.dart';
+import 'codec_sniffer.dart';
 import 'discovered_file.dart';
 import 'mp4_inspector.dart';
+
+/// Bump this whenever the reader learns to describe files better. The next
+/// scan then re-reads every file an older version described.
+const kTrackReaderVersion = 2;
 
 /// Reads the tags and embedded artwork of [files] and returns one [Track] per
 /// file. Does blocking file IO, so call it from a background isolate.
@@ -51,7 +56,9 @@ Track readTrack(DiscoveredFile file, String artworkDir) {
     genre: _text(tags?.genres.firstOrNull),
     duration: duration,
     sizeBytes: file.sizeBytes,
-    codec: mp4?.audioCodec ?? extension,
+    // For MP4 containers the codec comes from inside the file; for FLAC and
+    // WAV the contents must confirm what the extension claims.
+    codec: mp4?.audioCodec ?? sniffCodec(file.path, extension),
     sampleRate: _positive(tags?.sampleRate),
     bitDepth: extension == 'flac' ? _flacBitDepth(tags) : null,
     // The tag library's own bitrate field means something different for

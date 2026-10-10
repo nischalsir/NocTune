@@ -59,10 +59,14 @@ class LibraryStats {
     required this.albumCount,
     required this.artistCount,
     required this.totalDuration,
+    this.playCount = 0,
   });
 
   final int trackCount;
   final int albumCount;
   final int artistCount;
   final Duration totalDuration;
+
+  /// How many times tracks have been played in this app, in total.
+  final int playCount;
 }

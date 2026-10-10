@@ -5,8 +5,10 @@ String codecLabel(String? codec) => switch (codec) {
   null => 'Unknown format',
   'flac' => 'FLAC',
   'alac' => 'Apple Lossless',
+  'pcm' => 'WAV',
   'wav' => 'WAV',
-  'aac' || 'm4a' => 'AAC',
+  'aac' => 'AAC',
+  'm4a' || 'mp4' => 'MPEG-4 audio',
   'mp3' => 'MP3',
   'opus' => 'Opus',
   'ogg' => 'Ogg Vorbis',
@@ -17,9 +19,30 @@ String codecLabel(String? codec) => switch (codec) {
   _ => codec.toUpperCase(),
 };
 
-/// Whether the codec stores audio without loss.
+/// Whether the codec is one that stores audio without loss. The scanner only
+/// records these ids after checking the file's contents: `flac` from the
+/// stream marker, `alac` from inside the MP4 container, `pcm` from the
+/// WAV header. A bare `wav` or `m4a` is unverified and is not lossless.
 bool isLossless(String? codec) =>
-    codec == 'flac' || codec == 'alac' || codec == 'wav';
+    codec == 'flac' || codec == 'alac' || codec == 'pcm';
+
+/// Whether the track is Dolby Atmos content: Dolby Digital Plus carrying the
+/// Atmos (JOC) extension, as flagged inside the file.
+bool isAtmosContent(String? codec) => codec == 'eac3-joc';
+
+/// The format badges to show for the current track.
+///
+/// LOSSLESS depends only on the file. Dolby Atmos needs both Atmos content
+/// and [deviceDecodesAtmos], the device reporting a decoder for that exact
+/// format; without one the player falls back to plain surround or fails, so
+/// the badge would be a claim nobody can back up.
+({bool lossless, bool atmos}) formatBadges(
+  String? codec, {
+  required bool deviceDecodesAtmos,
+}) => (
+  lossless: isLossless(codec),
+  atmos: isAtmosContent(codec) && deviceDecodesAtmos,
+);
 
 /// Lossless audio above CD resolution.
 bool isHiRes(Track track) =>

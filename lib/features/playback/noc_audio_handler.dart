@@ -183,6 +183,15 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  /// Stops playback and empties the queue, which also dismisses the
+  /// mini-player. Used when the user swipes the player away.
+  Future<void> clearQueue() async {
+    queue.add(const []);
+    mediaItem.add(null);
+    await _player.clearAudioSources();
+    await stop();
+  }
+
   /// Moves a queue entry from [from] to [to].
   Future<void> moveQueueItem(int from, int to) async {
     final items = [...queue.value];

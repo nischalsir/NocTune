@@ -34,7 +34,7 @@ enum TrackGroup {
 }
 
 /// What a previous scan recorded about a file, used to skip unchanged files.
-typedef FileFingerprint = ({int modifiedMs, int sizeBytes});
+typedef FileFingerprint = ({int modifiedMs, int sizeBytes, int readerVersion});
 
 /// Reads and writes the local library: tracks, favourites, play history and
 /// playlists. Original audio files are never touched.
@@ -51,11 +51,13 @@ class LibraryRepository {
 
   /// Inserts new tracks and refreshes the file metadata of known ones,
   /// leaving favourites, play counts and the date added alone.
-  Future<void> upsertTracks(List<Track> tracks) async {
+  ///
+  /// [readerVersion] records which version of the tag reader produced them.
+  Future<void> upsertTracks(List<Track> tracks, {int readerVersion = 1}) async {
     if (tracks.isEmpty) return;
     final batch = _db.batch();
     for (final track in tracks) {
-      final row = track.toMetadataRow();
+      final row = {...track.toMetadataRow(), 'reader_version': readerVersion};
       // Insert-or-ignore then update, rather than SQL UPSERT, because the
       // system SQLite on Android 10 and older predates UPSERT.
       batch.insert('tracks', {
@@ -72,13 +74,14 @@ class LibraryRepository {
   Future<Map<String, FileFingerprint>> fingerprints() async {
     final rows = await _db.query(
       'tracks',
-      columns: ['uri', 'date_modified', 'size_bytes'],
+      columns: ['uri', 'date_modified', 'size_bytes', 'reader_version'],
     );
     return {
       for (final row in rows)
         row['uri']! as String: (
           modifiedMs: row['date_modified']! as int,
           sizeBytes: row['size_bytes']! as int,
+          readerVersion: row['reader_version']! as int,
         ),
     };
   }
@@ -152,7 +155,7 @@ class LibraryRepository {
   );
 
   /// The tracks played most often, most played first.
-  Future<List<Track>> mostPlayed({int limit = 5}) => _queryTracks(
+  Future<List<Track>> mostPlayed({int limit = 20}) => _queryTracks(
     where: 'play_count > 0',
     orderBy: 'play_count DESC, last_played_at DESC',
     limit: limit,
@@ -185,13 +188,15 @@ class LibraryRepository {
     final row = (await _db.rawQuery(
       'SELECT COUNT(*) AS tracks, COUNT(DISTINCT album) AS albums, '
       'COUNT(DISTINCT artist) AS artists, '
-      'COALESCE(SUM(duration_ms), 0) AS duration_ms FROM tracks',
+      'COALESCE(SUM(duration_ms), 0) AS duration_ms, '
+      'COALESCE(SUM(play_count), 0) AS plays FROM tracks',
     )).single;
     return LibraryStats(
       trackCount: row['tracks']! as int,
       albumCount: row['albums']! as int,
       artistCount: row['artists']! as int,
       totalDuration: Duration(milliseconds: row['duration_ms']! as int),
+      playCount: row['plays']! as int,
     );
   }
 
@@ -245,6 +250,32 @@ class LibraryRepository {
       }
     }
     return sets;
+  }
+
+  // ---- Imported lyrics ----
+
+  /// Lyrics the user imported for a track, or null if there are none.
+  Future<String?> importedLyrics(int trackId) async {
+    final rows = await _db.query(
+      'lyrics',
+      columns: ['content'],
+      where: 'track_id = ?',
+      whereArgs: [trackId],
+    );
+    return rows.firstOrNull?['content'] as String?;
+  }
+
+  Future<void> setImportedLyrics(int trackId, String content) async {
+    await _db.insert('lyrics', {
+      'track_id': trackId,
+      'content': content,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    _changes.add(null);
+  }
+
+  Future<void> removeImportedLyrics(int trackId) async {
+    await _db.delete('lyrics', where: 'track_id = ?', whereArgs: [trackId]);
+    _changes.add(null);
   }
 
   // ---- Playlists ----

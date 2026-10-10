@@ -10,12 +10,70 @@ import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/pressable.dart';
 import 'noc_audio_handler.dart';
 
-/// The round accent-coloured play/pause button, ringed like a dashboard dial.
-/// The icon swaps with a quick scale-and-fade rather than snapping.
-class PlayPauseButton extends ConsumerWidget {
-  const PlayPauseButton({super.key, this.size = 72});
+/// A rounded-square ("squircle") button, the control shape used across the
+/// player. [filled] ones carry the accent; the rest are quiet tonal surfaces.
+class SquircleButton extends StatelessWidget {
+  const SquircleButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.width = 48,
+    this.height = 48,
+    this.iconSize = 24,
+    this.filled = false,
+    this.selected = false,
+  });
 
-  final double size;
+  final IconData icon;
+
+  /// Spoken by screen readers and used as the tooltip.
+  final String label;
+  final VoidCallback onTap;
+  final double width;
+  final double height;
+  final double iconSize;
+  final bool filled;
+
+  /// Draws the icon in the accent colour, for toggles that are on.
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    return Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Pressable(
+        semanticLabel: label,
+        onTap: onTap,
+        child: Container(
+          width: width,
+          height: height,
+          decoration: BoxDecoration(
+            color: filled ? palette.accent : palette.glass,
+            borderRadius: BorderRadius.circular(min(width, height) * 0.36),
+          ),
+          child: Icon(
+            icon,
+            size: iconSize,
+            color: filled
+                ? palette.onAccent
+                : (selected ? palette.accent : palette.textPrimary),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The accent play/pause squircle. The icon swaps with a quick scale-and-fade
+/// rather than snapping.
+class PlayPauseButton extends ConsumerWidget {
+  const PlayPauseButton({super.key, this.width = 84, this.height = 84});
+
+  final double width;
+  final double height;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -32,35 +90,25 @@ class PlayPauseButton extends ConsumerWidget {
         playing ? handler.pause() : handler.play();
       },
       child: Container(
-        width: size,
-        height: size,
-        padding: EdgeInsets.all(size * 0.07),
+        width: width,
+        height: height,
         decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(
-            color: palette.accent.withValues(alpha: 0.45),
-            width: 1.5,
-          ),
+          color: palette.accent,
+          borderRadius: BorderRadius.circular(min(width, height) * 0.36),
         ),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            color: palette.accent,
-            shape: BoxShape.circle,
+        child: AnimatedSwitcher(
+          duration: reduceMotion
+              ? Duration.zero
+              : const Duration(milliseconds: 160),
+          transitionBuilder: (child, animation) => ScaleTransition(
+            scale: Tween<double>(begin: 0.6, end: 1).animate(animation),
+            child: FadeTransition(opacity: animation, child: child),
           ),
-          child: AnimatedSwitcher(
-            duration: reduceMotion
-                ? Duration.zero
-                : const Duration(milliseconds: 160),
-            transitionBuilder: (child, animation) => ScaleTransition(
-              scale: Tween<double>(begin: 0.6, end: 1).animate(animation),
-              child: FadeTransition(opacity: animation, child: child),
-            ),
-            child: Icon(
-              playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-              key: ValueKey(playing),
-              size: size * 0.5,
-              color: palette.onAccent,
-            ),
+          child: Icon(
+            playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            key: ValueKey(playing),
+            size: min(width, height) * 0.5,
+            color: palette.onAccent,
           ),
         ),
       ),
@@ -68,84 +116,114 @@ class PlayPauseButton extends ConsumerWidget {
   }
 }
 
-/// Shuffle, previous, play/pause, next and repeat.
-class TransportControls extends ConsumerWidget {
-  const TransportControls({super.key, this.dense = false});
+/// Previous, play/pause and next as three squircles, the middle one largest.
+class PrimaryTransport extends ConsumerWidget {
+  const PrimaryTransport({super.key, this.dense = false});
 
-  /// Smaller buttons packed together, for the player bar on wide screens.
+  /// Smaller buttons, for the player bar on wide screens.
   final bool dense;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(playbackStateProvider).value;
-    final shuffling =
-        (state?.shuffleMode ?? AudioServiceShuffleMode.none) !=
-        AudioServiceShuffleMode.none;
-    final repeat = state?.repeatMode ?? AudioServiceRepeatMode.none;
-    final palette = context.noc;
     NocAudioHandler handler() => ref.read(audioHandlerProvider);
-    final skipSize = dense ? 28.0 : 38.0;
-
+    final side = dense ? 44.0 : 66.0;
+    final gap = dense ? 10.0 : 18.0;
     return Row(
-      mainAxisSize: dense ? MainAxisSize.min : MainAxisSize.max,
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        IconButton(
-          tooltip: shuffling ? 'Shuffle is on' : 'Shuffle is off',
-          isSelected: shuffling,
-          color: shuffling ? palette.accent : palette.textSecondary,
-          onPressed: () => handler().setShuffleMode(
-            shuffling
-                ? AudioServiceShuffleMode.none
-                : AudioServiceShuffleMode.all,
-          ),
-          icon: const Icon(Icons.shuffle_rounded),
+        SquircleButton(
+          icon: Icons.skip_previous_rounded,
+          label: 'Previous',
+          width: side,
+          height: side,
+          iconSize: dense ? 24 : 32,
+          onTap: () => handler().skipToPrevious(),
         ),
-        IconButton(
-          tooltip: 'Previous',
-          iconSize: skipSize,
-          onPressed: () => handler().skipToPrevious(),
-          icon: const Icon(Icons.skip_previous_rounded),
-        ),
-        Padding(
-          padding: EdgeInsets.symmetric(horizontal: dense ? 6 : 0),
-          child: PlayPauseButton(size: dense ? 48 : 72),
-        ),
-        IconButton(
-          tooltip: 'Next',
-          iconSize: skipSize,
-          onPressed: () => handler().skipToNext(),
-          icon: const Icon(Icons.skip_next_rounded),
-        ),
-        IconButton(
-          tooltip: switch (repeat) {
-            AudioServiceRepeatMode.none => 'Repeat is off',
-            AudioServiceRepeatMode.one => 'Repeating this track',
-            _ => 'Repeating the queue',
-          },
-          isSelected: repeat != AudioServiceRepeatMode.none,
-          color: repeat == AudioServiceRepeatMode.none
-              ? palette.textSecondary
-              : palette.accent,
-          // Cycles off → whole queue → this track → off.
-          onPressed: () => handler().setRepeatMode(switch (repeat) {
-            AudioServiceRepeatMode.none => AudioServiceRepeatMode.all,
-            AudioServiceRepeatMode.one => AudioServiceRepeatMode.none,
-            _ => AudioServiceRepeatMode.one,
-          }),
-          icon: Icon(
-            repeat == AudioServiceRepeatMode.one
-                ? Icons.repeat_one_rounded
-                : Icons.repeat_rounded,
-          ),
+        SizedBox(width: gap),
+        PlayPauseButton(width: dense ? 52 : 88, height: dense ? 48 : 84),
+        SizedBox(width: gap),
+        SquircleButton(
+          icon: Icons.skip_next_rounded,
+          label: 'Next',
+          width: side,
+          height: side,
+          iconSize: dense ? 24 : 32,
+          onTap: () => handler().skipToNext(),
         ),
       ],
     );
   }
 }
 
-/// The scrubber. While a finger is on it the thumb follows the finger, and
-/// the player only seeks on release.
+/// Toggles shuffle. Reports its state in its label so it is clear when on.
+class ShuffleButton extends ConsumerWidget {
+  const ShuffleButton({super.key, this.height = 52});
+
+  final double height;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final shuffling = ref.watch(
+      playbackStateProvider.select(
+        (state) =>
+            (state.value?.shuffleMode ?? AudioServiceShuffleMode.none) !=
+            AudioServiceShuffleMode.none,
+      ),
+    );
+    return SquircleButton(
+      icon: Icons.shuffle_rounded,
+      label: shuffling ? 'Shuffle is on' : 'Shuffle is off',
+      width: double.infinity,
+      height: height,
+      selected: shuffling,
+      onTap: () => ref
+          .read(audioHandlerProvider)
+          .setShuffleMode(
+            shuffling
+                ? AudioServiceShuffleMode.none
+                : AudioServiceShuffleMode.all,
+          ),
+    );
+  }
+}
+
+/// Cycles repeat: off → whole queue → this track → off.
+class RepeatButton extends ConsumerWidget {
+  const RepeatButton({super.key, this.height = 52});
+
+  final double height;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final repeat = ref.watch(
+      playbackStateProvider.select(
+        (state) => state.value?.repeatMode ?? AudioServiceRepeatMode.none,
+      ),
+    );
+    return SquircleButton(
+      icon: repeat == AudioServiceRepeatMode.one
+          ? Icons.repeat_one_rounded
+          : Icons.repeat_rounded,
+      label: switch (repeat) {
+        AudioServiceRepeatMode.none => 'Repeat is off',
+        AudioServiceRepeatMode.one => 'Repeating this track',
+        _ => 'Repeating the queue',
+      },
+      width: double.infinity,
+      height: height,
+      selected: repeat != AudioServiceRepeatMode.none,
+      onTap: () =>
+          ref.read(audioHandlerProvider).setRepeatMode(switch (repeat) {
+            AudioServiceRepeatMode.none => AudioServiceRepeatMode.all,
+            AudioServiceRepeatMode.one => AudioServiceRepeatMode.none,
+            _ => AudioServiceRepeatMode.one,
+          }),
+    );
+  }
+}
+
+/// The scrubber: a thick track with a bar-shaped handle. While a finger is on
+/// it the handle follows the finger, and the player only seeks on release.
 class SeekBar extends ConsumerStatefulWidget {
   const SeekBar({super.key, required this.duration, this.inline = false});
 
@@ -168,21 +246,33 @@ class _SeekBarState extends ConsumerState<SeekBar> {
     final shownMs = (_dragMs ?? position.inMilliseconds.toDouble())
         .clamp(0.0, max(totalMs, 0.0))
         .toDouble();
+    final palette = context.noc;
     final times = Theme.of(context).textTheme.bodySmall
         ?.copyWith(fontFeatures: const [FontFeature.tabularFigures()]);
     final elapsed = Text(
       formatDuration(Duration(milliseconds: shownMs.round())),
       style: times,
     );
-    final total = Text(
-      totalMs > 0 ? formatDuration(widget.duration) : '–:––',
+    // Counts down what is left, like the reference player.
+    final remaining = Text(
+      totalMs > 0
+          ? '-${formatDuration(Duration(milliseconds: (totalMs - shownMs).round()))}'
+          : '–:––',
       style: times,
     );
     final slider = SliderTheme(
       data: SliderTheme.of(context).copyWith(
-        overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+        trackHeight: widget.inline ? 8 : 14,
+        activeTrackColor: palette.accent,
+        inactiveTrackColor: palette.glass,
+        thumbColor: palette.accent,
+        overlayShape: SliderComponentShape.noOverlay,
       ),
       child: Slider(
+        // The current Material slider: thick track, gap and bar handle.
+        // ignore: deprecated_member_use
+        year2023: false,
+        padding: EdgeInsets.symmetric(vertical: widget.inline ? 10 : 14),
         max: totalMs > 0 ? totalMs : 1,
         value: totalMs > 0 ? shownMs : 0,
         // Disabled until the length is known.
@@ -204,20 +294,19 @@ class _SeekBarState extends ConsumerState<SeekBar> {
       return Row(
         children: [
           elapsed,
+          const SizedBox(width: 10),
           Expanded(child: slider),
-          total,
+          const SizedBox(width: 10),
+          remaining,
         ],
       );
     }
     return Column(
       children: [
         slider,
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [elapsed, total],
-          ),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [elapsed, remaining],
         ),
       ],
     );

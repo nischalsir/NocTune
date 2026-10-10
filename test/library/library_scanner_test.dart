@@ -95,7 +95,8 @@ void main() {
 
       final track = (await repository.tracks()).single;
       expect(track.title, 'Silence');
-      expect(track.codec, 'wav');
+      // Confirmed as uncompressed PCM from the header, not from the name.
+      expect(track.codec, 'pcm');
       expect(track.sampleRate, 8000);
       expect(track.duration.inSeconds, 2);
       expect(track.folder, music.path);
@@ -110,6 +111,8 @@ void main() {
       expect(summary.scanned, 1);
       final track = (await repository.tracks()).single;
       expect(track.title, 'Broken');
+      // Its contents are not FLAC, so it is not recorded as FLAC.
+      expect(track.codec, isNull);
       expect(track.duration, Duration.zero);
       expect(track.artPath, isNull);
     });
@@ -160,6 +163,18 @@ void main() {
 
       expect(summary.scanned, 0);
       expect(summary.total, 1);
+    });
+
+    test('re-reads known files after the reader is improved', () async {
+      write('a.wav', _wav());
+      await scanner().scan();
+      // As left behind by an older version of the app.
+      await db.update('tracks', {'reader_version': 1, 'codec': 'wav'});
+
+      final summary = await scanner().scan();
+
+      expect(summary.scanned, 1);
+      expect((await repository.tracks()).single.codec, 'pcm');
     });
 
     test('re-reads a file that was modified', () async {

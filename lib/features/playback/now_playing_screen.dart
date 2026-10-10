@@ -7,10 +7,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../core/audio_format.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/pressable.dart';
+import '../../data/models/track.dart';
+import '../library/track_menu.dart';
+import '../lyrics/lyrics_view.dart';
+import 'format_badges.dart';
 import 'now_playing_route.dart';
 import 'queue_sheet.dart';
 import 'transport_controls.dart';
@@ -21,12 +25,22 @@ Future<void> showNowPlaying(BuildContext context) => Navigator.of(
   rootNavigator: true,
 ).push(NowPlayingRoute(child: const NowPlayingScreen()));
 
-/// The immersive player: artwork, track details, seeking and transport.
-class NowPlayingScreen extends ConsumerWidget {
+/// The immersive player. Its layout follows LastWave's player: squircle
+/// header buttons, a large rounded cover, the title over an artist chip, a
+/// thick scrubber, three squircle transport buttons and a row of secondary
+/// controls. The cover area turns into the lyrics view and back.
+class NowPlayingScreen extends ConsumerStatefulWidget {
   const NowPlayingScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NowPlayingScreen> createState() => _NowPlayingScreenState();
+}
+
+class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
+  bool _showLyrics = false;
+
+  @override
+  Widget build(BuildContext context) {
     final item = ref.watch(currentMediaItemProvider).value;
     final palette = context.noc;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
@@ -50,7 +64,10 @@ class NowPlayingScreen extends ConsumerWidget {
             child: item == null
                 ? const Column(
                     children: [
-                      _Header(),
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(20, 4, 20, 0),
+                        child: _Header(item: null),
+                      ),
                       Expanded(
                         child: EmptyState(
                           icon: Icons.music_off_outlined,
@@ -60,7 +77,12 @@ class NowPlayingScreen extends ConsumerWidget {
                       ),
                     ],
                   )
-                : _PlayerLayout(item: item),
+                : _PlayerLayout(
+                    item: item,
+                    showLyrics: _showLyrics,
+                    onToggleLyrics: () =>
+                        setState(() => _showLyrics = !_showLyrics),
+                  ),
           ),
         ],
       ),
@@ -102,8 +124,8 @@ class _ArtworkWash extends StatelessWidget {
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: [
-                palette.background.withValues(alpha: 0.55),
-                palette.background.withValues(alpha: 0.92),
+                palette.background.withValues(alpha: 0.62),
+                palette.background.withValues(alpha: 0.95),
               ],
             ),
           ),
@@ -113,31 +135,88 @@ class _ArtworkWash extends StatelessWidget {
   }
 }
 
-class _PlayerLayout extends StatelessWidget {
-  const _PlayerLayout({required this.item});
+class _PlayerLayout extends ConsumerWidget {
+  const _PlayerLayout({
+    required this.item,
+    required this.showLyrics,
+    required this.onToggleLyrics,
+  });
 
   final MediaItem item;
+  final bool showLyrics;
+  final VoidCallback onToggleLyrics;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    // The library's record of this track, ignored while it still belongs to
+    // the previous one.
+    final currentId = ref.watch(currentTrackIdProvider);
+    final loaded = ref.watch(currentTrackProvider).value;
+    final track = loaded != null && loaded.id == currentId ? loaded : null;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+
+    // Cover or lyrics, cross-fading in the same space.
+    Widget stage(double width, double height) => SizedBox(
+      width: width,
+      height: height,
+      child: AnimatedSwitcher(
+        duration: reduceMotion
+            ? Duration.zero
+            : const Duration(milliseconds: 320),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        transitionBuilder: (child, animation) => FadeTransition(
+          opacity: animation,
+          child: ScaleTransition(
+            scale: Tween<double>(begin: 0.96, end: 1).animate(animation),
+            child: child,
+          ),
+        ),
+        child: showLyrics && track != null
+            ? LyricsView(key: const ValueKey('lyrics'), track: track)
+            : Center(
+                key: const ValueKey('cover'),
+                child: _HeroArtwork(
+                  path: item.artUri?.toFilePath(),
+                  size: min(width, height),
+                ),
+              ),
+      ),
+    );
+
+    final details = _Details(
+      item: item,
+      track: track,
+      showLyrics: showLyrics,
+      onToggleLyrics: onToggleLyrics,
+    );
+
     return LayoutBuilder(
       builder: (context, box) {
-        final artPath = item.artUri?.toFilePath();
-        // Short and wide (a phone on its side): artwork beside the controls.
+        // Short and wide (a phone on its side): cover beside the controls.
         if (box.maxHeight < 520 && box.maxWidth > box.maxHeight) {
-          final artSize = box.maxHeight - 48;
+          final side = box.maxHeight - 24;
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
             child: Row(
               children: [
-                _HeroArtwork(path: artPath, size: artSize),
-                const SizedBox(width: 28),
+                stage(showLyrics ? box.maxWidth * 0.42 : side, side),
+                const SizedBox(width: 24),
                 Expanded(
                   child: SingleChildScrollView(
                     child: Column(
                       children: [
-                        const _Header(),
-                        _Controls(item: item),
+                        _Header(item: item, track: track),
+                        const SizedBox(height: 8),
+                        details,
+                        const SizedBox(height: 6),
+                        SeekBar(
+                          duration: item.duration ?? Duration.zero,
+                          inline: true,
+                        ),
+                        const FormatBadges(),
+                        const SizedBox(height: 6),
+                        const PrimaryTransport(dense: true),
                       ],
                     ),
                   ),
@@ -147,15 +226,15 @@ class _PlayerLayout extends StatelessWidget {
           );
         }
 
-        // Artwork takes whatever height the controls leave, within limits, so
-        // the same layout fits a small phone and a tablet.
-        final textScale = MediaQuery.textScalerOf(context).scale(1);
-        final reserved = 250 + 110 * textScale;
         final side = box.maxWidth < 360 ? 16.0 : 24.0;
-        final artSize = min(
-          box.maxWidth - 56,
-          box.maxHeight - reserved,
-        ).clamp(140.0, 460.0);
+        final textScale = MediaQuery.textScalerOf(context).scale(1);
+        final contentWidth = min(box.maxWidth, 560.0) - side * 2;
+        // With lyrics open the secondary row steps aside to give them room.
+        final reserved = (showLyrics ? 330 : 420) + 70 * textScale;
+        final stageHeight = (box.maxHeight - reserved).clamp(
+          150.0,
+          showLyrics ? 900.0 : contentWidth,
+        );
         return SingleChildScrollView(
           child: ConstrainedBox(
             constraints: BoxConstraints(minHeight: box.maxHeight),
@@ -163,17 +242,33 @@ class _PlayerLayout extends StatelessWidget {
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 560),
                 child: Padding(
-                  // The five transport buttons need the room on narrow phones.
-                  padding: EdgeInsets.fromLTRB(side, 4, side, 16),
+                  padding: EdgeInsets.fromLTRB(side, 4, side, 14),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const _Header(),
+                      _Header(item: item, track: track),
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: _HeroArtwork(path: artPath, size: artSize),
+                        child: stage(contentWidth, stageHeight),
                       ),
-                      _Controls(item: item),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          details,
+                          const SizedBox(height: 10),
+                          SeekBar(duration: item.duration ?? Duration.zero),
+                          const SizedBox(height: 6),
+                          // Directly above Play/Pause, as the label for what
+                          // that button plays.
+                          const FormatBadges(),
+                          const SizedBox(height: 10),
+                          const PrimaryTransport(),
+                          if (!showLyrics) ...[
+                            const SizedBox(height: 18),
+                            const _SecondaryRow(),
+                          ],
+                        ],
+                      ),
                     ],
                   ),
                 ),
@@ -186,30 +281,48 @@ class _PlayerLayout extends StatelessWidget {
   }
 }
 
-class _Header extends StatelessWidget {
-  const _Header();
+class _Header extends ConsumerWidget {
+  const _Header({required this.item, this.track});
+
+  final MediaItem? item;
+  final Track? track;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final text = Theme.of(context).textTheme;
+    final track = this.track;
     return Row(
       children: [
-        IconButton(
-          tooltip: 'Close player',
-          onPressed: () => Navigator.of(context).pop(),
-          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
+        SquircleButton(
+          icon: Icons.keyboard_arrow_down_rounded,
+          label: 'Close player',
+          iconSize: 28,
+          onTap: () => Navigator.of(context).pop(),
         ),
         Expanded(
-          child: Text(
-            'NOW PLAYING',
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.labelSmall,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text('NOW PLAYING', style: text.labelSmall),
+              if (item?.album case final album?)
+                Text(
+                  album,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.bodySmall,
+                ),
+            ],
           ),
         ),
-        IconButton(
-          tooltip: 'Queue',
-          onPressed: () => showQueueSheet(context),
-          icon: const Icon(Icons.queue_music_rounded),
-        ),
+        // Keeps the title centred when there is no track to act on.
+        if (track == null)
+          const SizedBox(width: 48)
+        else
+          SquircleButton(
+            icon: Icons.more_vert_rounded,
+            label: 'More for this track',
+            onTap: () => showTrackMenu(context, ref, track),
+          ),
       ],
     );
   }
@@ -224,6 +337,8 @@ class _HeroArtwork extends ConsumerWidget {
   final String? path;
   final double size;
 
+  static const _radius = 34.0;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playing = ref.watch(
@@ -236,7 +351,7 @@ class _HeroArtwork extends ConsumerWidget {
       curve: Curves.easeOutCubic,
       child: DecoratedBox(
         decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(_radius),
           boxShadow: const [
             BoxShadow(
               color: Color(0x66000000),
@@ -255,7 +370,7 @@ class _HeroArtwork extends ConsumerWidget {
               key: ValueKey(path),
               path: path,
               size: size,
-              radius: 22,
+              radius: _radius,
             ),
           ),
         ),
@@ -264,85 +379,142 @@ class _HeroArtwork extends ConsumerWidget {
   }
 }
 
-class _Controls extends ConsumerWidget {
-  const _Controls({required this.item});
+/// Title over the artist chip, with favourite and lyrics beside them.
+class _Details extends ConsumerWidget {
+  const _Details({
+    required this.item,
+    required this.track,
+    required this.showLyrics,
+    required this.onToggleLyrics,
+  });
 
   final MediaItem item;
+  final Track? track;
+  final bool showLyrics;
+  final VoidCallback onToggleLyrics;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final track = ref.watch(currentTrackProvider).value;
     final palette = context.noc;
     final text = Theme.of(context).textTheme;
-    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    final track = this.track;
 
-    return Column(
-      mainAxisSize: MainAxisSize.min,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        Row(
-          children: [
-            Expanded(
-              // Title and artist fade over to the next track's.
-              child: AnimatedSwitcher(
-                duration: reduceMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 250),
-                layoutBuilder: (current, previous) => Stack(
-                  alignment: Alignment.centerLeft,
-                  children: [...previous, ?current],
-                ),
-                child: Column(
-                  key: ValueKey(item.id),
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      item.title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.headlineSmall,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      [item.artist, item.album].nonNulls.join(' · '),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: text.bodyMedium,
-                    ),
-                  ],
-                ),
-              ),
+        Expanded(
+          // Title and artist fade over to the next track's.
+          child: AnimatedSwitcher(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 250),
+            layoutBuilder: (current, previous) => Stack(
+              alignment: Alignment.centerLeft,
+              children: [...previous, ?current],
             ),
-            if (track != null)
-              IconButton(
-                tooltip: track.isFavorite
-                    ? 'Remove from favourites'
-                    : 'Add to favourites',
-                onPressed: () => ref
-                    .read(libraryRepositoryProvider)
-                    .setFavorite(track.id, favorite: !track.isFavorite),
-                color: track.isFavorite ? palette.accent : null,
-                icon: Icon(
-                  track.isFavorite
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
+            child: Column(
+              key: ValueKey(item.id),
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  item.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.headlineSmall,
                 ),
-              ),
-          ],
-        ),
-        if (track != null) ...[
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              qualityLabel(track).toUpperCase(),
-              style: text.labelSmall?.copyWith(color: palette.textTertiary),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 5,
+                  ),
+                  decoration: BoxDecoration(
+                    color: palette.glass,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    item.artist ?? 'Unknown artist',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.titleSmall?.copyWith(
+                      color: palette.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
+        ),
+        if (track != null) ...[
+          const SizedBox(width: 10),
+          SquircleButton(
+            icon: track.isFavorite
+                ? Icons.favorite_rounded
+                : Icons.favorite_border_rounded,
+            label: track.isFavorite
+                ? 'Remove from favourites'
+                : 'Add to favourites',
+            selected: track.isFavorite,
+            onTap: () => ref
+                .read(libraryRepositoryProvider)
+                .setFavorite(track.id, favorite: !track.isFavorite),
+          ),
+          const SizedBox(width: 8),
+          SquircleButton(
+            icon: Icons.lyrics_rounded,
+            label: showLyrics ? 'Hide lyrics' : 'Show lyrics',
+            selected: showLyrics,
+            onTap: onToggleLyrics,
+          ),
         ],
-        const SizedBox(height: 8),
-        SeekBar(duration: item.duration ?? Duration.zero),
-        const SizedBox(height: 4),
-        const TransportControls(),
+      ],
+    );
+  }
+}
+
+/// Shuffle, queue and repeat, as three tonal pills.
+class _SecondaryRow extends StatelessWidget {
+  const _SecondaryRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    return Row(
+      children: [
+        const Expanded(child: ShuffleButton()),
+        const SizedBox(width: 10),
+        Expanded(
+          flex: 2,
+          child: Pressable(
+            semanticLabel: 'Queue',
+            onTap: () => showQueueSheet(context),
+            child: Container(
+              height: 52,
+              decoration: BoxDecoration(
+                color: palette.glass,
+                borderRadius: BorderRadius.circular(19),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.queue_music_rounded, color: palette.textPrimary),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      'Queue',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        const Expanded(child: RepeatButton()),
       ],
     );
   }

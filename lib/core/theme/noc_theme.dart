@@ -40,13 +40,13 @@ ThemeData buildNocTheme(
     splashFactory: InkSparkle.splashFactory,
     iconTheme: IconThemeData(color: palette.textPrimary),
     dividerTheme: DividerThemeData(color: palette.glassBorder, space: 1),
+    // Shapes are left to the slider itself, which draws the current
+    // Material track and bar-shaped handle.
     sliderTheme: SliderThemeData(
-      trackHeight: 3,
       activeTrackColor: palette.accent,
       inactiveTrackColor: palette.textTertiary.withValues(alpha: 0.35),
-      thumbColor: palette.textPrimary,
+      thumbColor: palette.accent,
       overlayColor: palette.accent.withValues(alpha: 0.16),
-      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
     ),
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,

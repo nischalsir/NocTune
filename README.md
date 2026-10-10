@@ -106,4 +106,26 @@ lib/
 android/app/src/main/kotlin/…  MediaStore and artwork channels
 ```
 
+## Previewing screens
+
+To look at the main screens without a device, render them to PNG files with
+sample data:
+
+```powershell
+flutter test tool/preview_screens.dart --dart-define=OUT=C:\some\folder
+```
+
+## Format labels and lyrics
+
+- **LOSSLESS** is shown only when the file's contents confirm a lossless
+  format: the FLAC stream marker, Apple Lossless inside an MP4 container, or
+  uncompressed PCM in a WAV header. An extension alone is never enough.
+- **Dolby Atmos** is shown only when the file is flagged as Atmos (Dolby
+  Digital Plus with the JOC extension) *and* the device reports a decoder for
+  that format. There is no Atmos switch, and nothing is labelled Atmos on iOS,
+  where the app cannot check.
+- **Lyrics** come from the device only: a file you import for a track, an
+  `.lrc` file beside it, or lyrics embedded in its tags. Time-synced lyrics
+  follow playback; plain lyrics are shown as text.
+
 ## Developed by Nischal Pandey.

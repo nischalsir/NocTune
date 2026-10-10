@@ -6,6 +6,7 @@ import '../../core/widgets/glass_panel.dart';
 import '../library/duplicates_screen.dart';
 import '../library/scan/scan_banner.dart';
 import '../library/scan/scan_controller.dart';
+import '../playback/audio_capabilities.dart';
 import '../startup/startup_prompts.dart';
 import 'settings_controller.dart';
 
@@ -19,6 +20,7 @@ class SettingsScreen extends ConsumerWidget {
     final controller = ref.read(settingsProvider.notifier);
     final text = Theme.of(context).textTheme;
     final version = ref.watch(installedVersionProvider).value;
+    final atmosDecoder = ref.watch(deviceDecodesAtmosProvider).value;
     final updatesConfigured =
         ref.watch(updateServiceProvider).value?.isConfigured ?? false;
 
@@ -104,6 +106,31 @@ class SettingsScreen extends ConsumerWidget {
                 ),
               ),
               const ScanBanner(),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _Section(
+            title: 'AUDIO',
+            children: [
+              Text('Dolby Atmos', style: text.titleSmall),
+              const SizedBox(height: 4),
+              Text(switch (atmosDecoder) {
+                true =>
+                  'This device reports a Dolby Atmos decoder. Tracks that '
+                      'are Atmos recordings are decoded by it and labelled '
+                      'in the player.',
+                false =>
+                  'This device reports no Dolby Atmos decoder, so no track '
+                      'is labelled as Atmos.',
+                null => 'Checking what this device can decode…',
+              }, style: text.bodyMedium),
+              const SizedBox(height: 8),
+              Text(
+                'NocTune plays files as they are and applies no sound '
+                'processing of its own. There is no Atmos switch: a track '
+                'either is an Atmos recording or it is not.',
+                style: text.bodyMedium,
+              ),
             ],
           ),
           const SizedBox(height: 16),

@@ -6,10 +6,14 @@ import 'package:noctune/app/providers.dart';
 import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/data/models/track.dart';
+import 'package:noctune/features/lyrics/lyrics.dart';
+import 'package:noctune/features/lyrics/lyrics_source.dart';
+import 'package:noctune/features/playback/audio_capabilities.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
 import 'package:noctune/features/playback/now_playing_screen.dart';
 import 'package:noctune/features/playback/playback_mapping.dart';
 import 'package:noctune/features/playback/queue_sheet.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeHandler extends Fake implements NocAudioHandler {
   final calls = <String>[];
@@ -45,21 +49,31 @@ class _FakeHandler extends Fake implements NocAudioHandler {
   Future<void> removeQueueItemAt(int index) async => calls.add('remove $index');
 }
 
-final _track = Track(
-  id: 7,
-  uri: '/music/Aashish.flac',
-  fileName: 'Aashish.flac',
+Track _trackWith({
+  int id = 7,
+  String title = 'Aashish',
+  String? codec = 'flac',
+  Duration duration = const Duration(minutes: 4),
+}) => Track(
+  id: id,
+  uri: '/music/$title.flac',
+  fileName: '$title.flac',
   folder: '/music',
-  title: 'Aashish',
+  title: title,
   artist: 'Bipul Chettri',
   album: 'Maya',
-  duration: const Duration(minutes: 4),
-  codec: 'flac',
+  duration: duration,
+  codec: codec,
   sampleRate: 44100,
   bitDepth: 16,
   bitrate: 1011000,
   dateAdded: DateTime(2026),
   dateModified: DateTime(2026),
+);
+
+final _syncedLyrics = LoadedLyrics(
+  parseLyrics('[00:10.00]First line\n[01:00.00]Second line\n[02:00.00]Third')!,
+  LyricsOrigin.embedded,
 );
 
 Future<_FakeHandler> _pump(
@@ -68,24 +82,34 @@ Future<_FakeHandler> _pump(
   Widget child = const NowPlayingScreen(),
   PlaybackState? state,
   Track? track,
+  Track? libraryRecord,
   bool nothingLoaded = false,
+  bool atmosDecoder = false,
+  LoadedLyrics? lyrics,
   List<MediaItem>? queue,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.reset);
+  SharedPreferences.setMockInitialValues({});
+  final preferences = await SharedPreferences.getInstance();
   final handler = _FakeHandler();
-  final current = track ?? _track;
+  final current = track ?? _trackWith();
   final item = mediaItemFromTrack(current);
 
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
+        sharedPreferencesProvider.overrideWithValue(preferences),
         audioHandlerProvider.overrideWithValue(handler),
         currentMediaItemProvider.overrideWith(
           (ref) => Stream.value(nothingLoaded ? null : item),
         ),
-        currentTrackProvider.overrideWith((ref) => current),
+        // What the library says about the "current" track; a test can make
+        // it lag behind, as it briefly does when a track changes.
+        currentTrackProvider.overrideWith((ref) => libraryRecord ?? current),
+        deviceDecodesAtmosProvider.overrideWith((ref) => atmosDecoder),
+        lyricsProvider.overrideWith((ref, key) => lyrics),
         playbackStateProvider.overrideWith(
           (ref) => Stream.value(state ?? PlaybackState()),
         ),
@@ -105,16 +129,16 @@ Future<_FakeHandler> _pump(
 }
 
 void main() {
-  testWidgets('shows the track, its audio quality and the position', (
+  testWidgets('shows the track, its album and the time played and left', (
     tester,
   ) async {
     await _pump(tester);
 
     expect(find.text('Aashish'), findsOneWidget);
-    expect(find.text('Bipul Chettri · Maya'), findsOneWidget);
-    expect(find.text('FLAC · 16-BIT / 44.1 KHZ · 1,011 KBPS'), findsOneWidget);
+    expect(find.text('Bipul Chettri'), findsOneWidget);
+    expect(find.text('Maya'), findsOneWidget);
     expect(find.text('1:01'), findsOneWidget);
-    expect(find.text('4:00'), findsOneWidget);
+    expect(find.text('-2:59'), findsOneWidget);
   });
 
   testWidgets('transport buttons drive the player', (tester) async {
@@ -163,20 +187,9 @@ void main() {
   });
 
   testWidgets('a track of unknown length cannot be scrubbed', (tester) async {
-    final unmeasured = Track(
-      id: 9,
-      uri: '/music/Cinema.m4a',
-      fileName: 'Cinema.m4a',
-      folder: '/music',
-      title: 'Cinema',
-      codec: 'eac3-joc',
-      dateAdded: DateTime(2026),
-      dateModified: DateTime(2026),
-    );
-    await _pump(tester, track: unmeasured);
+    await _pump(tester, track: _trackWith(duration: Duration.zero));
 
     expect(find.text('–:––'), findsOneWidget);
-    expect(find.text('DOLBY ATMOS'), findsOneWidget);
     expect(tester.widget<Slider>(find.byType(Slider)).onChanged, isNull);
   });
 
@@ -191,20 +204,192 @@ void main() {
     expect(find.text('Nothing is playing'), findsOneWidget);
   });
 
+  group('format badges', () {
+    testWidgets('verified FLAC is LOSSLESS and never Atmos', (tester) async {
+      await _pump(tester, atmosDecoder: true);
+
+      expect(find.text('LOSSLESS'), findsOneWidget);
+      expect(find.text('Dolby Atmos'), findsNothing);
+    });
+
+    testWidgets('lossy audio shows no badge', (tester) async {
+      for (final codec in ['aac', 'mp3', 'opus']) {
+        await _pump(tester, track: _trackWith(codec: codec));
+
+        expect(find.text('LOSSLESS'), findsNothing, reason: codec);
+        expect(find.text('Dolby Atmos'), findsNothing, reason: codec);
+        await tester.pumpWidget(const SizedBox());
+      }
+    });
+
+    testWidgets('unknown or unverified formats show no badge', (tester) async {
+      for (final codec in [null, 'wav', 'm4a']) {
+        await _pump(tester, track: _trackWith(codec: codec));
+
+        expect(find.text('LOSSLESS'), findsNothing, reason: '$codec');
+        await tester.pumpWidget(const SizedBox());
+      }
+    });
+
+    testWidgets('Atmos content on a device that decodes it is labelled', (
+      tester,
+    ) async {
+      await _pump(
+        tester,
+        track: _trackWith(codec: 'eac3-joc'),
+        atmosDecoder: true,
+      );
+
+      expect(find.text('Dolby Atmos'), findsOneWidget);
+      expect(find.text('LOSSLESS'), findsNothing);
+    });
+
+    testWidgets('Atmos content without a decoder is not labelled', (
+      tester,
+    ) async {
+      await _pump(tester, track: _trackWith(codec: 'eac3-joc'));
+
+      expect(find.text('Dolby Atmos'), findsNothing);
+    });
+
+    testWidgets("a previous track's format is never shown for the next", (
+      tester,
+    ) async {
+      // The player has moved to an AAC track, but the library lookup still
+      // holds the FLAC track that was playing a moment ago.
+      await _pump(
+        tester,
+        track: _trackWith(id: 8, title: 'Next', codec: 'aac'),
+        libraryRecord: _trackWith(),
+      );
+
+      expect(find.text('Next'), findsOneWidget);
+      expect(find.text('LOSSLESS'), findsNothing);
+    });
+
+    testWidgets('sit directly above the Play button', (tester) async {
+      await _pump(tester);
+
+      final badge = tester.getRect(find.text('LOSSLESS'));
+      final play = tester.getRect(find.bySemanticsLabel('Play'));
+      final scrubber = tester.getRect(find.byType(Slider));
+
+      expect(badge.top, greaterThan(scrubber.bottom));
+      expect(badge.bottom, lessThanOrEqualTo(play.top));
+      expect((badge.center.dx - play.center.dx).abs(), lessThan(2));
+    });
+
+    testWidgets('the controls do not move when the badge disappears', (
+      tester,
+    ) async {
+      await _pump(tester);
+      final withBadge = tester.getRect(find.bySemanticsLabel('Play'));
+      await tester.pumpWidget(const SizedBox());
+
+      await _pump(tester, track: _trackWith(codec: 'mp3'));
+      final withoutBadge = tester.getRect(find.bySemanticsLabel('Play'));
+
+      expect(withoutBadge, withBadge);
+    });
+  });
+
+  group('lyrics', () {
+    Future<_FakeHandler> open(WidgetTester tester, LoadedLyrics? lyrics) async {
+      final handler = await _pump(tester, lyrics: lyrics);
+      await tester.tap(find.byTooltip('Show lyrics'));
+      await tester.pumpAndSettle();
+      return handler;
+    }
+
+    testWidgets('open in place of the cover and close again', (tester) async {
+      await open(tester, _syncedLyrics);
+
+      expect(find.text('Second line'), findsOneWidget);
+      // The transport stays available while lyrics are showing.
+      expect(find.bySemanticsLabel('Play'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Hide lyrics'));
+      await tester.pumpAndSettle();
+      expect(find.text('Second line'), findsNothing);
+    });
+
+    testWidgets('highlight the line at the playback position', (tester) async {
+      await open(tester, _syncedLyrics);
+
+      // Position is 1:01, inside the second line.
+      double alpha(String line) =>
+          tester.widget<Text>(find.text(line)).style?.color?.a ??
+          DefaultTextStyle.of(tester.element(find.text(line))).style.color!.a;
+
+      expect(alpha('Second line'), 1);
+      expect(alpha('First line'), lessThan(0.5));
+      expect(alpha('Third'), lessThan(0.5));
+    });
+
+    testWidgets('tapping a line seeks to it', (tester) async {
+      final handler = await open(tester, _syncedLyrics);
+
+      await tester.tap(find.text('Third'));
+      await tester.pumpAndSettle();
+
+      expect(handler.calls, ['seek 120']);
+    });
+
+    testWidgets('plain lyrics are shown without pretending to be synced', (
+      tester,
+    ) async {
+      await open(
+        tester,
+        LoadedLyrics(
+          parseLyrics('Just words\nNo times')!,
+          LyricsOrigin.imported,
+        ),
+      );
+
+      expect(find.text('Just words'), findsOneWidget);
+      expect(find.textContaining('NOT TIME-SYNCED'), findsOneWidget);
+    });
+
+    testWidgets('a track without lyrics offers a local import', (tester) async {
+      await open(tester, null);
+
+      expect(find.text('No lyrics available'), findsOneWidget);
+      expect(find.text('Import lyrics file'), findsOneWidget);
+    });
+
+    testWidgets('text size can be stepped up and down', (tester) async {
+      await open(tester, _syncedLyrics);
+      double size() =>
+          DefaultTextStyle.of(tester.element(find.text('Second line')))
+              .style
+              .fontSize!;
+      final before = size();
+
+      await tester.tap(find.byTooltip('Larger text'));
+      await tester.pumpAndSettle();
+
+      expect(size(), greaterThan(before));
+    });
+  });
+
   for (final (name, size, scale) in [
     ('a small phone', const Size(320, 568), 1.0),
     ('a small phone with large text', const Size(320, 568), 2.0),
     ('a phone in landscape', const Size(844, 390), 1.0),
+    ('a tablet in portrait', const Size(800, 1200), 1.0),
     ('a tablet in landscape', const Size(1280, 800), 1.0),
   ]) {
     testWidgets('lays out without overflow on $name', (tester) async {
       tester.platformDispatcher.textScaleFactorTestValue = scale;
       addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
 
-      await _pump(tester, size: size);
-
+      await _pump(tester, size: size, lyrics: _syncedLyrics);
       expect(tester.takeException(), isNull);
       expect(find.text('Aashish'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Show lyrics'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
     });
   }
 

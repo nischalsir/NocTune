@@ -14,3 +14,9 @@ String formatLongDuration(Duration duration) {
   if (hours == 0) return '$minutes min';
   return '$hours h $minutes min';
 }
+
+/// Formats a whole number with thousands separators, e.g. `19,588`.
+String formatCount(int value) => '$value'.replaceAllMapped(
+  RegExp(r'(\d)(?=(\d{3})+$)'),
+  (match) => '${match[1]},',
+);

@@ -13,5 +13,7 @@ class MainActivity : AudioServiceActivity() {
             .setMethodCallHandler(MediaStoreChannel(applicationContext))
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "noctune/artwork")
             .setMethodCallHandler(ArtworkChannel())
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "noctune/audio_capabilities")
+            .setMethodCallHandler(AudioCapabilitiesChannel())
     }
 }

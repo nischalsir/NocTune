@@ -82,7 +82,11 @@ class LibraryScanner {
     final changed = [
       for (final file in discovered.values)
         if (known[file.path] !=
-            (modifiedMs: file.modifiedMs, sizeBytes: file.sizeBytes))
+            (
+              modifiedMs: file.modifiedMs,
+              sizeBytes: file.sizeBytes,
+              readerVersion: kTrackReaderVersion,
+            ))
           file,
     ];
 
@@ -97,7 +101,7 @@ class LibraryScanner {
       );
       final tracks = await Isolate.run(() => readTracks(batch, artworkDir));
       await _settleArtwork();
-      await repository.upsertTracks(tracks);
+      await repository.upsertTracks(tracks, readerVersion: kTrackReaderVersion);
       processed += batch.length;
       onProgress?.call(ScanProgress(processed, changed.length));
     }

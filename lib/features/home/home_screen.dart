@@ -1,25 +1,38 @@
-import 'dart:io';
-
+import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
-import '../../core/audio_format.dart';
 import '../../core/format.dart';
-import '../../core/layout/window_class.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
-import '../../core/widgets/glass_panel.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/track.dart';
 import '../library/scan/add_music_actions.dart';
 import '../library/scan/scan_banner.dart';
+import '../library/track_menu.dart';
 
-/// The dashboard: a cinematic featured track over a row of glass cards, the
-/// composition of the design reference with music in place of racing.
-class HomeScreen extends ConsumerWidget {
+/// Which tracks the home list shows.
+enum FeedList {
+  recent('Recent', Icons.schedule_rounded, 'Nothing played yet'),
+  mostPlayed('Most played', Icons.trending_up_rounded, 'Nothing played yet'),
+  added('Recently added', Icons.fiber_new_rounded, 'No tracks yet'),
+  favourites('Favourites', Icons.favorite_rounded, 'No favourites yet');
+
+  const FeedList(this.label, this.icon, this.emptyText);
+
+  final String label;
+  final IconData icon;
+  final String emptyText;
+}
+
+/// The home feed. Its composition follows LastWave's home screen: a rounded
+/// header, a row of summary pills, a statistics card with one headline
+/// number over three tiles, and a switchable track list. Every number and
+/// row comes from the library on this device.
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({
     super.key,
     required this.onOpenSearch,
@@ -30,351 +43,143 @@ class HomeScreen extends ConsumerWidget {
   final VoidCallback onOpenLibrary;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final recentlyPlayed = ref.watch(recentlyPlayedProvider).value ?? const [];
-    final mostPlayed = ref.watch(mostPlayedProvider).value ?? const [];
-    final recentlyAdded = ref.watch(recentlyAddedProvider);
-    final stats = ref.watch(libraryStatsProvider).value;
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
 
-    return recentlyAdded.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, _) => EmptyState(
-        icon: Icons.error_outline_rounded,
-        title: "Couldn't load your library",
-        message: '$error',
-      ),
-      data: (added) {
-        if (added.isEmpty) {
-          return SafeArea(
-            child: Column(
-              children: [
-                const ScanBanner(),
-                Expanded(
-                  child: EmptyState(
-                    icon: Icons.graphic_eq_rounded,
-                    title: 'Welcome to NocTune',
-                    message:
-                        Theme.of(context).platform == TargetPlatform.android
-                        ? 'Scan this device to build your library. Your '
-                              'music stays on the device.'
-                        : 'Import audio files, or copy them into the NocTune '
-                              'folder in the Files app, to build your library.',
-                    action: const AddMusicActions(),
-                  ),
-                ),
-              ],
-            ),
-          );
-        }
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  FeedList _list = FeedList.recent;
 
-        void play(List<Track> tracks, int index) => ref
-            .read(audioHandlerProvider)
-            .playTracks(tracks, initialIndex: index);
+  @override
+  Widget build(BuildContext context) {
+    final stats = ref.watch(libraryStatsProvider);
+    final tracks = ref.watch(switch (_list) {
+      FeedList.recent => recentlyPlayedProvider,
+      FeedList.mostPlayed => mostPlayedProvider,
+      FeedList.added => recentlyAddedProvider,
+      FeedList.favourites => favoritesProvider,
+    });
+    final currentId = ref.watch(currentTrackIdProvider);
+    final palette = context.noc;
+    final bottomInset = MediaQuery.paddingOf(context).bottom;
 
-        final featured = recentlyPlayed.firstOrNull ?? added.first;
-        final cards = <Widget>[
-          if (mostPlayed.isNotEmpty)
-            _DashCard(
-              title: 'Most Played',
-              footer: 'View full library',
-              onFooter: onOpenLibrary,
-              child: Column(
-                children: [
-                  for (final (index, track) in mostPlayed.take(4).indexed)
-                    _RankRow(
-                      rank: index + 1,
-                      track: track,
-                      onTap: () => play(mostPlayed, index),
-                    ),
-                ],
-              ),
-            ),
-          if (recentlyPlayed.isNotEmpty)
-            _DashCard(
-              title: 'Recently Played',
-              footer: 'View full library',
-              onFooter: onOpenLibrary,
-              child: Column(
-                children: [
-                  for (final (index, track) in recentlyPlayed.take(3).indexed)
-                    _ThumbRow(
-                      track: track,
-                      onTap: () => play(recentlyPlayed, index),
-                    ),
-                ],
-              ),
-            ),
-          _DashCard(
-            title: 'Recently Added',
-            footer: 'View all tracks',
-            onFooter: onOpenLibrary,
-            child: Column(
-              children: [
-                for (final (index, track) in added.take(3).indexed)
-                  _ThumbRow(track: track, onTap: () => play(added, index)),
-              ],
-            ),
-          ),
-          if (stats != null) _LibraryCard(stats: stats),
-        ];
-
-        return CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: _Hero(
-                track: featured,
-                eyebrow: recentlyPlayed.isEmpty
-                    ? 'RECENTLY ADDED'
-                    : 'JUMP BACK IN',
-                onOpenSearch: onOpenSearch,
-                onPlay: () => play([featured], 0),
-              ),
-            ),
-            const SliverToBoxAdapter(child: ScanBanner()),
-            SliverToBoxAdapter(child: _CardGrid(cards: cards)),
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: MediaQuery.paddingOf(context).bottom + 24,
-              ),
-            ),
-          ],
-        );
+    final header = _Header(
+      onOpenSearch: widget.onOpenSearch,
+      onShuffleAll: () async {
+        final all = await ref.read(allTracksProvider.future);
+        if (all.isEmpty) return;
+        final handler = ref.read(audioHandlerProvider);
+        await handler.playTracks(all);
+        await handler.setShuffleMode(AudioServiceShuffleMode.all);
       },
     );
-  }
-}
 
-/// Lays the cards out one per row on phones and side by side, at equal
-/// height, on wider windows.
-class _CardGrid extends StatelessWidget {
-  const _CardGrid({required this.cards});
-
-  final List<Widget> cards;
-
-  static const _gap = 14.0;
-
-  @override
-  Widget build(BuildContext context) {
-    final columns = switch (WindowClass.of(context)) {
-      WindowClass.compact => 1,
-      WindowClass.medium => 2,
-      WindowClass.expanded => 3,
-    };
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: kMaxContentWidth),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-          child: Column(
-            children: [
-              for (var start = 0; start < cards.length; start += columns)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: _gap),
-                  child: columns == 1
-                      ? cards[start]
-                      : IntrinsicHeight(
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              for (var i = start; i < start + columns; i++) ...[
-                                if (i > start) const SizedBox(width: _gap),
-                                Expanded(
-                                  child: i < cards.length
-                                      ? cards[i]
-                                      : const SizedBox.shrink(),
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                ),
-            ],
+    final summary = stats.value;
+    if (stats.isLoading && summary == null) {
+      return Column(
+        children: [
+          header,
+          const Expanded(child: Center(child: CircularProgressIndicator())),
+        ],
+      );
+    }
+    if (summary == null || summary.trackCount == 0) {
+      return Column(
+        children: [
+          header,
+          const ScanBanner(),
+          Expanded(
+            child: EmptyState(
+              icon: Icons.graphic_eq_rounded,
+              title: 'Welcome to NocTune',
+              message: Theme.of(context).platform == TargetPlatform.android
+                  ? 'Scan this device to build your library. Your music '
+                        'stays on the device.'
+                  : 'Import audio files, or copy them into the NocTune '
+                        'folder in the Files app, to build your library.',
+              action: const AddMusicActions(),
+            ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Cinematic header. On phones the artwork fills it and the type sits over a
-/// dark scrim at the bottom; on wide windows the type is on the left and the
-/// artwork bleeds in from the right, as in the design reference. The scrim is
-/// dark in both themes, so the type on it is always white.
-class _Hero extends StatelessWidget {
-  const _Hero({
-    required this.track,
-    required this.eyebrow,
-    required this.onOpenSearch,
-    required this.onPlay,
-  });
-
-  final Track track;
-  final String eyebrow;
-  final VoidCallback onOpenSearch;
-  final VoidCallback onPlay;
-
-  static const _ink = Color(0xFF07080C);
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final size = MediaQuery.sizeOf(context);
-    final wide = WindowClass.of(context) == WindowClass.expanded;
-    final minHeight = (size.height * (wide ? 0.56 : 0.54)).clamp(340.0, 520.0);
-    final artPath = track.artPath;
-    final pixelRatio = MediaQuery.devicePixelRatioOf(context);
-
-    Widget? art;
-    if (artPath != null) {
-      art = Image.file(
-        File(artPath),
-        fit: BoxFit.cover,
-        alignment: Alignment.topCenter,
-        // Decoded at display size, not the cover's full resolution.
-        cacheWidth: (size.width * (wide ? 0.62 : 1) * pixelRatio).round(),
-        gaplessPlayback: true,
-        excludeFromSemantics: true,
-        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        ],
       );
     }
 
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(28)),
-      child: ColoredBox(
-        color: _ink,
-        child: Stack(
-          fit: StackFit.passthrough,
-          children: [
-            if (art != null && wide)
-              Positioned(
-                top: 0,
-                bottom: 0,
-                right: 0,
-                width: size.width * 0.62,
-                // The artwork dissolves into the dark on its left edge.
-                child: ShaderMask(
-                  blendMode: BlendMode.dstIn,
-                  shaderCallback: (bounds) => const LinearGradient(
-                    colors: [Colors.transparent, Colors.white],
-                    stops: [0, 0.5],
-                  ).createShader(bounds),
-                  child: art,
-                ),
-              )
-            else if (art != null)
-              Positioned.fill(child: art),
-            const Positioned.fill(
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0x99000000),
-                      Color(0x26000000),
-                      Color(0xB807080C),
-                      Color(0xF207080C),
-                    ],
-                    stops: [0, 0.3, 0.64, 1],
-                  ),
-                ),
+    final rows = tracks.value ?? const <Track>[];
+    // Favourites can be long; the feed shows the first of them and the
+    // library holds the rest.
+    final shown = rows.take(30).toList();
+
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(child: header),
+            SliverToBoxAdapter(child: _SummaryPills(stats: summary)),
+            const SliverToBoxAdapter(child: ScanBanner()),
+            SliverToBoxAdapter(
+              child: _StatsCard(
+                stats: summary,
+                onOpenLibrary: widget.onOpenLibrary,
               ),
             ),
-            // A minimum rather than a fixed height: with large accessibility
-            // text the hero grows instead of clipping the title.
-            ConstrainedBox(
-              constraints: BoxConstraints(minHeight: minHeight),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 26),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            flex: 3,
-                            child: Align(
-                              alignment: Alignment.centerLeft,
-                              child: _SearchPill(onTap: onOpenSearch),
-                            ),
-                          ),
-                          const SizedBox(width: 16),
-                          // Shrinks rather than crowding out the search field
-                          // when the text size is very large.
-                          Flexible(
-                            flex: 2,
-                            child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                'NOCTUNE',
-                                style: text.labelLarge?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 3,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 560),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 40),
-                            Text(
-                              eyebrow,
-                              style: text.labelSmall?.copyWith(
-                                color: Colors.white70,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              track.title.toUpperCase(),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.displaySmall?.copyWith(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w900,
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              track.displayArtist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.titleMedium?.copyWith(
-                                color: Colors.white,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              '${track.displayAlbum}\n${qualityLabel(track)}',
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.bodyMedium?.copyWith(
-                                color: Colors.white60,
-                              ),
-                            ),
-                            const SizedBox(height: 18),
-                            _PlayPill(
-                              label: 'Play now',
-                              semanticLabel: 'Play ${track.title}',
-                              onTap: onPlay,
-                            ),
-                          ],
+            // One card holding the list heading and its rows. Rows are built
+            // lazily as they scroll into view.
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+              sliver: DecoratedSliver(
+                decoration: BoxDecoration(
+                  color: palette.glass,
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                sliver: SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(8, 14, 8, 10),
+                  sliver: SliverMainAxisGroup(
+                    slivers: [
+                      SliverToBoxAdapter(
+                        child: _ListHeading(
+                          selected: _list,
+                          onSelected: (list) => setState(() => _list = list),
                         ),
                       ),
+                      if (shown.isEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.all(28),
+                            child: Text(
+                              tracks.isLoading ? 'Loading…' : _list.emptyText,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodyMedium,
+                            ),
+                          ),
+                        )
+                      else
+                        SliverList.builder(
+                          itemCount: shown.length,
+                          itemBuilder: (context, index) {
+                            final track = shown[index];
+                            return _FeedRow(
+                              track: track,
+                              isCurrent: track.id == currentId,
+                              onTap: () => ref
+                                  .read(audioHandlerProvider)
+                                  .playTracks(shown, initialIndex: index),
+                              onMenu: () => showTrackMenu(context, ref, track),
+                            );
+                          },
+                        ),
+                      if (rows.length > shown.length)
+                        SliverToBoxAdapter(
+                          child: TextButton(
+                            onPressed: widget.onOpenLibrary,
+                            child: Text('View all ${rows.length} in Library'),
+                          ),
+                        ),
                     ],
                   ),
                 ),
               ),
             ),
+            SliverToBoxAdapter(child: SizedBox(height: bottomInset + 24)),
           ],
         ),
       ),
@@ -382,36 +187,52 @@ class _Hero extends StatelessWidget {
   }
 }
 
-/// The glass search field at the top of the hero. It is a shortcut: tapping
-/// it opens the Search destination.
-class _SearchPill extends StatelessWidget {
-  const _SearchPill({required this.onTap});
+/// The rounded header panel: the app's name and two round actions.
+class _Header extends StatelessWidget {
+  const _Header({required this.onOpenSearch, required this.onShuffleAll});
 
-  final VoidCallback onTap;
+  final VoidCallback onOpenSearch;
+  final VoidCallback onShuffleAll;
 
   @override
   Widget build(BuildContext context) {
-    return Pressable(
-      semanticLabel: 'Search your library',
-      onTap: onTap,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 320),
-        child: GlassPanel(
-          radius: 24,
-          blur: 16,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+    final palette = context.noc;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(34)),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [palette.glassSolid, palette.background],
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 14, 16, 22),
           child: Row(
             children: [
-              const Icon(Icons.search_rounded, size: 20, color: Colors.white70),
-              const SizedBox(width: 10),
-              Flexible(
-                child: Text(
-                  'Search tracks, artists, albums…',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodyMedium
-                      ?.copyWith(color: Colors.white70),
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'NocTune',
+                    style: Theme.of(context).textTheme.displaySmall
+                        ?.copyWith(fontSize: 34),
+                  ),
                 ),
+              ),
+              _RoundAction(
+                icon: Icons.shuffle_rounded,
+                label: 'Shuffle all tracks',
+                onTap: onShuffleAll,
+              ),
+              const SizedBox(width: 10),
+              _RoundAction(
+                icon: Icons.search_rounded,
+                label: 'Search',
+                onTap: onOpenSearch,
               ),
             ],
           ),
@@ -421,280 +242,363 @@ class _SearchPill extends StatelessWidget {
   }
 }
 
-/// The accent call-to-action pill with a trailing arrow.
-class _PlayPill extends StatelessWidget {
-  const _PlayPill({
+class _RoundAction extends StatelessWidget {
+  const _RoundAction({
+    required this.icon,
     required this.label,
-    required this.semanticLabel,
     required this.onTap,
   });
 
+  final IconData icon;
   final String label;
-  final String semanticLabel;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.noc;
-    return Pressable(
-      semanticLabel: semanticLabel,
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(20, 12, 16, 12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(28),
-          gradient: LinearGradient(
-            colors: [
-              Color.lerp(palette.accent, Colors.black, 0.35)!,
-              palette.accent,
-            ],
+    return Tooltip(
+      message: label,
+      excludeFromSemantics: true,
+      child: Pressable(
+        semanticLabel: label,
+        onTap: onTap,
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: palette.background.withValues(alpha: 0.7),
+            shape: BoxShape.circle,
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Flexible(
-              child: Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.labelLarge
-                    ?.copyWith(color: palette.onAccent),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Icon(
-              Icons.arrow_forward_rounded,
-              size: 18,
-              color: palette.onAccent,
-            ),
-          ],
+          child: Icon(icon, color: palette.textPrimary),
         ),
       ),
     );
   }
 }
 
-/// A glass dashboard card: a title, its content, and an accent link at the
-/// bottom.
-class _DashCard extends StatelessWidget {
-  const _DashCard({
-    required this.title,
-    required this.child,
-    this.footer,
-    this.onFooter,
-  });
+/// Two pills under the header: where the music is, and how much there is.
+class _SummaryPills extends StatelessWidget {
+  const _SummaryPills({required this.stats});
 
-  final String title;
-  final Widget child;
-  final String? footer;
-  final VoidCallback? onFooter;
+  final LibraryStats stats;
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return GlassPanel(
-      // Sits on the plain page background, so there is nothing to blur.
-      blur: 0,
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        runSpacing: 8,
+        spacing: 8,
         children: [
-          Text(title, style: text.titleMedium),
-          const SizedBox(height: 10),
-          child,
-          if (footer != null)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton(
-                onPressed: onFooter,
-                style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero,
-                  foregroundColor: context.noc.accent,
-                ),
-                child: Text(footer!),
-              ),
-            )
-          else
-            const SizedBox(height: 8),
+          const _Pill(text: 'On this device'),
+          _Pill(
+            icon: Icons.headphones_rounded,
+            text: formatLongDuration(stats.totalDuration),
+          ),
         ],
       ),
     );
   }
 }
 
-/// A numbered row for the Most Played card. The leader is highlighted.
-class _RankRow extends StatelessWidget {
-  const _RankRow({
-    required this.rank,
+class _Pill extends StatelessWidget {
+  const _Pill({required this.text, this.icon});
+
+  final String text;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      decoration: BoxDecoration(
+        color: palette.glass,
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 18, color: palette.textPrimary),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The statistics card: plays as the headline number, then tracks, artists
+/// and albums as three tiles.
+class _StatsCard extends StatelessWidget {
+  const _StatsCard({required this.stats, required this.onOpenLibrary});
+
+  final LibraryStats stats;
+  final VoidCallback onOpenLibrary;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: palette.glass,
+          borderRadius: BorderRadius.circular(34),
+        ),
+        child: Column(
+          children: [
+            Pressable(
+              semanticLabel: '${stats.playCount} plays. Open your library.',
+              onTap: onOpenLibrary,
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(24, 18, 16, 18),
+                decoration: BoxDecoration(
+                  color: palette.accent.withValues(alpha: 0.26),
+                  borderRadius: BorderRadius.circular(26),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        children: [
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              formatCount(stats.playCount),
+                              style: text.displaySmall?.copyWith(fontSize: 42),
+                            ),
+                          ),
+                          Text(
+                            stats.playCount == 1 ? 'Play' : 'Plays',
+                            style: text.titleSmall?.copyWith(
+                              color: palette.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      width: 46,
+                      height: 46,
+                      decoration: BoxDecoration(
+                        color: palette.accent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.arrow_forward_rounded,
+                        color: palette.onAccent,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                _StatTile(value: stats.trackCount, label: 'Tracks'),
+                const SizedBox(width: 10),
+                _StatTile(value: stats.artistCount, label: 'Artists'),
+                const SizedBox(width: 10),
+                _StatTile(value: stats.albumCount, label: 'Albums'),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatTile extends StatelessWidget {
+  const _StatTile({required this.value, required this.label});
+
+  final int value;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final text = Theme.of(context).textTheme;
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 6),
+        decoration: BoxDecoration(
+          color: palette.background.withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(22),
+        ),
+        child: Column(
+          children: [
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Text(formatCount(value), style: text.titleLarge),
+            ),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: text.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// "List" with a pill that switches what the list shows.
+class _ListHeading extends StatelessWidget {
+  const _ListHeading({required this.selected, required this.onSelected});
+
+  final FeedList selected;
+  final ValueChanged<FeedList> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final text = Theme.of(context).textTheme;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(14, 4, 6, 10),
+      child: Row(
+        children: [
+          Expanded(child: Text('List', style: text.headlineSmall)),
+          PopupMenuButton<FeedList>(
+            tooltip: 'Choose what the list shows',
+            onSelected: onSelected,
+            itemBuilder: (context) => [
+              for (final list in FeedList.values)
+                CheckedPopupMenuItem(
+                  value: list,
+                  checked: list == selected,
+                  child: Text(list.label),
+                ),
+            ],
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 9, 10, 9),
+              decoration: BoxDecoration(
+                color: palette.background.withValues(alpha: 0.6),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(selected.icon, size: 18, color: palette.textSecondary),
+                  const SizedBox(width: 8),
+                  Text(selected.label, style: text.titleSmall),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    color: palette.textSecondary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A feed row: cover, title and artist, a "Now Playing" pill on the current
+/// track, and the track's menu.
+class _FeedRow extends StatelessWidget {
+  const _FeedRow({
     required this.track,
+    required this.isCurrent,
     required this.onTap,
+    required this.onMenu,
   });
 
-  final int rank;
   final Track track;
+  final bool isCurrent;
   final VoidCallback onTap;
+  final VoidCallback onMenu;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.noc;
     final text = Theme.of(context).textTheme;
     return Material(
-      color: rank == 1 ? palette.glass : Colors.transparent,
-      borderRadius: BorderRadius.circular(10),
+      color: isCurrent
+          ? palette.accent.withValues(alpha: 0.24)
+          : Colors.transparent,
+      borderRadius: BorderRadius.circular(22),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          padding: const EdgeInsets.fromLTRB(8, 7, 6, 7),
           child: Row(
             children: [
-              SizedBox(
-                width: 20,
-                child: Text('$rank', style: text.labelMedium),
-              ),
-              Artwork(path: track.artPath, size: 30, radius: 6),
-              const SizedBox(width: 10),
+              Artwork(path: track.artPath, size: 54, radius: 14),
+              const SizedBox(width: 14),
               Expanded(
-                child: Text(
-                  track.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: text.titleSmall,
+                flex: 4,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      track.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.titleMedium,
+                    ),
+                    Text(
+                      track.displayArtist,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodyMedium,
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                '${track.playCount} '
-                '${track.playCount == 1 ? 'PLAY' : 'PLAYS'}',
-                style: text.labelMedium?.copyWith(color: palette.textPrimary),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// A thumbnail row: cover with a play glyph, title and artist.
-class _ThumbRow extends StatelessWidget {
-  const _ThumbRow({required this.track, required this.onTap});
-
-  final Track track;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(10),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Row(
-          children: [
-            Stack(
-              alignment: Alignment.center,
-              children: [
-                Artwork(path: track.artPath, size: 46, radius: 8),
-                const DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: Color(0x80000000),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Padding(
-                    padding: EdgeInsets.all(2),
-                    child: Icon(
-                      Icons.play_arrow_rounded,
-                      size: 16,
-                      color: Colors.white,
+              if (isCurrent) ...[
+                const SizedBox(width: 8),
+                // Gives way to the title rather than overflowing when text
+                // is very large.
+                Flexible(
+                  flex: 3,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 9,
+                      vertical: 5,
+                    ),
+                    decoration: BoxDecoration(
+                      color: palette.accent,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      'Now Playing',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.labelMedium?.copyWith(
+                        color: palette.onAccent,
+                      ),
                     ),
                   ),
                 ),
               ],
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    track.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: text.titleSmall,
-                  ),
-                  Text(
-                    track.displayArtist,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: text.bodySmall,
-                  ),
-                ],
+              IconButton(
+                tooltip: 'More for ${track.title}',
+                onPressed: onMenu,
+                icon: const Icon(Icons.more_vert_rounded),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// Library totals, closing on the listening time in bold with an accent
-/// caption beneath it.
-class _LibraryCard extends StatelessWidget {
-  const _LibraryCard({required this.stats});
-
-  final LibraryStats stats;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return _DashCard(
-      title: 'Your Library',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              _Stat(value: '${stats.trackCount}', label: 'Tracks'),
-              _Stat(value: '${stats.albumCount}', label: 'Albums'),
-              _Stat(value: '${stats.artistCount}', label: 'Artists'),
             ],
           ),
-          const SizedBox(height: 16),
-          Text(
-            formatLongDuration(stats.totalDuration).toUpperCase(),
-            style: text.titleMedium,
-          ),
-          Text(
-            'Of music, all on this device',
-            style: text.bodyMedium?.copyWith(color: context.noc.accent),
-          ),
-          const SizedBox(height: 8),
-        ],
-      ),
-    );
-  }
-}
-
-class _Stat extends StatelessWidget {
-  const _Stat({required this.value, required this.label});
-
-  final String value;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(value, style: text.headlineSmall),
-          Text(label, style: text.bodySmall),
-        ],
+        ),
       ),
     );
   }
