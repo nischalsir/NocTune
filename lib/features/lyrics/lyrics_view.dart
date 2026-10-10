@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -13,6 +14,7 @@ import '../playback/noc_audio_handler.dart';
 import '../playback/player_glass_button.dart';
 import '../playback/player_seek_bar.dart';
 import '../settings/settings_controller.dart';
+import 'lyric_fill.dart';
 import 'lyrics.dart';
 import 'lyrics_offset.dart';
 import 'lyrics_source.dart';
@@ -372,21 +374,44 @@ class _SyncedLyrics extends ConsumerStatefulWidget {
   ConsumerState<_SyncedLyrics> createState() => _SyncedLyricsState();
 }
 
-class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
+class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
+    with SingleTickerProviderStateMixin {
   // How long the list leaves the user alone after they scroll it.
   static const _handsOff = Duration(milliseconds: 2200);
+  // The furthest the clock runs ahead of the last position it was told.
+  static const _maxCoast = Duration(milliseconds: 300);
 
   late List<GlobalKey> _keys = _makeKeys();
   DateTime _userScrolledAt = DateTime.fromMillisecondsSinceEpoch(0);
   bool _dragging = false;
 
+  // The playback position for the word fill, on every frame. The player
+  // reports it twenty times a second; between reports this runs on from the
+  // last one, so the fill moves at the screen's own refresh rate.
+  final _clock = ValueNotifier(Duration.zero);
+  late final _frames = createTicker((_) => _tick());
+  final _sinceReport = Stopwatch();
+  Duration _reported = Duration.zero;
+  int _offsetMs = 0;
+  bool _playing = false;
+
   List<GlobalKey> _makeKeys() => [
     for (var i = 0; i < widget.lyrics.lines.length; i++) GlobalKey(),
   ];
 
+  void _tick() {
+    final coast = _playing ? _sinceReport.elapsed : Duration.zero;
+    _clock.value =
+        _reported +
+        (coast > _maxCoast ? _maxCoast : coast) +
+        Duration(milliseconds: _offsetMs);
+  }
+
   @override
   void initState() {
     super.initState();
+    _reported = ref.read(lyricsPositionProvider).value ?? Duration.zero;
+    _sinceReport.start();
     // Opens on the line being sung rather than at the top.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -408,6 +433,13 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
     }
   }
 
+  @override
+  void dispose() {
+    _frames.dispose();
+    _clock.dispose();
+    super.dispose();
+  }
+
   /// The line being sung at [position], shifted by the track's saved
   /// timing correction.
   int _indexAt(AsyncValue<Duration> position, int offsetMs) =>
@@ -415,8 +447,8 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
         (position.value ?? Duration.zero) + Duration(milliseconds: offsetMs),
       );
 
-  /// Scrolls the active line to a third of the way down, unless the user
-  /// has just been scrolling.
+  /// Glides the active line to a third of the way down, unless the user has
+  /// just been scrolling.
   void _follow(int index, {bool animate = true}) {
     if (index < 0 || index >= _keys.length) return;
     if (DateTime.now().difference(_userScrolledAt) < _handsOff) return;
@@ -428,8 +460,9 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
         alignment: 1 / 3,
         duration: !animate || MediaQuery.disableAnimationsOf(context)
             ? Duration.zero
-            : const Duration(milliseconds: 420),
-        curve: Curves.easeOutCubic,
+            : const Duration(milliseconds: 760),
+        // Leaves quickly and takes its time arriving, with no bounce.
+        curve: const Cubic(0.22, 1, 0.36, 1),
       );
     });
   }
@@ -461,10 +494,29 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
     final playing = ref.watch(
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
-    ref.listen(
-      lyricsPositionProvider.select((p) => _indexAt(p, offset)),
-      (_, index) => _follow(index),
-    );
+    ref
+      ..listen(
+        lyricsPositionProvider.select((p) => _indexAt(p, offset)),
+        (_, index) => _follow(index),
+      )
+      ..listen(lyricsPositionProvider, (_, position) {
+        _reported = position.value ?? _reported;
+        _sinceReport
+          ..reset()
+          ..start();
+        _tick();
+      });
+
+    // With reduced motion the line lights up at once instead of filling.
+    final sweep = !MediaQuery.disableAnimationsOf(context);
+    _offsetMs = offset;
+    _playing = playing;
+    if (sweep && playing) {
+      if (!_frames.isActive) _frames.start();
+    } else if (_frames.isActive) {
+      _frames.stop();
+    }
+    _tick();
 
     final style = FlexType.custom(
       size: 30 * widget.scale,
@@ -487,7 +539,9 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                'LINE SYNC • ${widget.origin.label}',
+                // Says which kind of timing the file really has.
+                '${widget.lyrics.wordSynced ? 'WORD SYNC' : 'LINE SYNC'} '
+                '• ${widget.origin.label}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: FlexType.labelSmall.copyWith(
@@ -529,6 +583,23 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
                                 relative: active < 0 ? null : index - active,
                                 playing: playing,
                                 browsing: _dragging,
+                                // The line being sung fills as it goes; the
+                                // one just sung keeps its fill while it
+                                // fades back.
+                                fill:
+                                    sweep &&
+                                        active >= 0 &&
+                                        (index == active || index == active - 1)
+                                    ? (
+                                        units: lyricUnits(
+                                          line,
+                                          nextLineAt: index + 1 < lines.length
+                                              ? lines[index + 1].time
+                                              : null,
+                                        ),
+                                        position: _clock,
+                                      )
+                                    : null,
                                 onTap: line.time == null
                                     ? null
                                     : () => ref
@@ -550,13 +621,16 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics> {
   }
 }
 
+/// What a row needs to fill word by word.
+typedef _Fill = ({List<LyricUnit> units, ValueListenable<Duration> position});
+
 /// One lyric line. How it looks depends on where it is relative to the line
-/// being sung: that one is enlarged, bright and sharp with a soft glow; the
-/// further away a line is, the dimmer and softer it gets.
+/// being sung: that one is enlarged and sharp and lights up word by word;
+/// the further away a line is, the dimmer and softer it gets.
 ///
 /// Its size on the page never changes, so the lines around it don't move
 /// when it becomes active: the enlargement, the lift and the blur are all
-/// painted effects.
+/// painted effects, and they ease in and out rather than snapping.
 class _LyricRow extends StatefulWidget {
   const _LyricRow({
     required this.text,
@@ -565,6 +639,7 @@ class _LyricRow extends StatefulWidget {
     required this.relative,
     required this.playing,
     required this.browsing,
+    required this.fill,
     required this.onTap,
   });
 
@@ -580,6 +655,10 @@ class _LyricRow extends StatefulWidget {
   /// Whether the user is scrolling the list, which brings every line back
   /// into focus.
   final bool browsing;
+
+  /// Set for the active line and the one before it; null lights the active
+  /// line all at once.
+  final _Fill? fill;
   final VoidCallback? onTap;
 
   @override
@@ -590,9 +669,10 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
   // Lines further than this from the active one are off screen while the
   // list is following, so they are not given a blur layer.
   static const _blurReach = 8;
+  // An unhurried ease with no overshoot, shared by the row's changes.
+  static const _ease = Cubic(0.22, 1, 0.36, 1);
 
   // Made only for lines that actually animate.
-  AnimationController? _onset;
   AnimationController? _trail;
   double _trailFrom = 0;
   Curve _trailCurve = Curves.linear;
@@ -604,31 +684,17 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
     if (relative == oldWidget.relative) return;
     final animate = widget.playing && !MediaQuery.disableAnimationsOf(context);
 
-    // The pulse a line gives as it becomes the active one.
-    if (relative == 0 && animate) {
-      (_onset ??= AnimationController(
-        vsync: this,
-        duration: const Duration(milliseconds: 480),
-      )).forward(from: 0);
-    } else {
-      _onset?.value = 0;
-    }
-
-    // Lines at and below the new active one lag, then spring up in turn.
+    // Lines at and below the new active one lag, then settle in turn.
     if (animate &&
         !widget.browsing &&
         relative != null &&
         relative >= 0 &&
         relative <= 6 &&
         oldWidget.relative != null) {
-      _trailFrom = 10.0 + relative * 4;
-      const settle = 620;
-      final wait = relative * 38;
-      _trailCurve = Interval(
-        wait / (wait + settle),
-        1,
-        curve: const _Spring(ratio: 0.72, stiffness: 180, seconds: 0.62),
-      );
+      _trailFrom = 8.0 + relative * 3;
+      const settle = 820;
+      final wait = relative * 45;
+      _trailCurve = Interval(wait / (wait + settle), 1, curve: _ease);
       (_trail ??= AnimationController(vsync: this))
         ..duration = Duration(milliseconds: wait + settle)
         ..forward(from: 0);
@@ -639,7 +705,6 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
 
   @override
   void dispose() {
-    _onset?.dispose();
     _trail?.dispose();
     super.dispose();
   }
@@ -656,39 +721,68 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
     final start = AlignmentDirectional.centerStart.resolve(
       Directionality.of(context),
     );
+    final fill = widget.fill;
+    final shown = widget.text.trim().isEmpty ? '♪' : widget.text;
 
     final scale = isActive ? _activeScale : (distance == 1 ? 0.99 : 0.965);
-    // Dimming is done in the text colour, not with a layer per line.
+    // Dimming is done in the text colour, not with a layer per line. While
+    // it fills, the active line's unsung words wait at a readable grey.
     final opacity = isActive
-        ? 1.0
+        ? (fill == null ? 1.0 : 0.42)
         : 0.44 * (distance == 1 ? 0.58 : (isPast ? 0.38 : 0.30));
     final blur =
         isActive || widget.browsing || relative == null || distance > _blurReach
         ? 0.0
         : math.min(distance, 4) * 1.6;
     final shift = isActive ? -3.5 : (isPast ? -1.5 : 3.5);
-    final onset = _onset;
     final trail = _trail;
+    final glow = [
+      Shadow(color: Colors.white.withValues(alpha: 0.50), blurRadius: 8),
+    ];
 
-    final text = AnimatedDefaultTextStyle(
-      duration: timed(320),
-      curve: Curves.fastOutSlowIn,
-      style: widget.style.copyWith(
-        color: Colors.white.withValues(alpha: opacity),
-        shadows: [
-          Shadow(
-            color: Colors.white.withValues(alpha: isActive ? 0.50 : 0),
-            blurRadius: 8,
+    final text = Stack(
+      children: [
+        AnimatedDefaultTextStyle(
+          duration: timed(620),
+          curve: _ease,
+          style: widget.style.copyWith(
+            color: Colors.white.withValues(alpha: opacity),
+            shadows: fill == null && isActive ? glow : const [],
           ),
-        ],
-      ),
-      child: Text(widget.text.trim().isEmpty ? '♪' : widget.text),
+          child: Text(shown),
+        ),
+        if (fill != null)
+          // The lit words, fading away once the line has been sung.
+          Positioned.fill(
+            child: IgnorePointer(
+              child: ExcludeSemantics(
+                child: AnimatedOpacity(
+                  opacity: isActive ? 1 : 0,
+                  duration: timed(620),
+                  curve: _ease,
+                  child: Align(
+                    alignment: AlignmentDirectional.topStart,
+                    child: LyricFill(
+                      text: shown,
+                      style: widget.style.copyWith(
+                        color: Colors.white,
+                        shadows: glow,
+                      ),
+                      units: fill.units,
+                      position: fill.position,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
     );
 
     final row = TweenAnimationBuilder<double>(
       tween: Tween(end: blur),
-      duration: timed(380),
-      curve: Curves.fastOutSlowIn,
+      duration: timed(620),
+      curve: _ease,
       builder: (context, radius, child) => ImageFiltered(
         enabled: radius > 0.2,
         // A blur radius, expressed as the sigma the filter wants.
@@ -701,35 +795,26 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
       ),
       child: TweenAnimationBuilder<double>(
         tween: Tween(end: shift),
-        duration: timed(520),
-        curve: const _Spring(ratio: 0.82, stiffness: 400, seconds: 0.52),
-        builder: (context, dy, child) => AnimatedBuilder(
-          animation: Listenable.merge([?onset, ?trail]),
-          builder: (context, child) {
-            final lag = trail == null
-                ? 0.0
-                : _trailFrom * (1 - _trailCurve.transform(trail.value));
-            final wave = onset != null && onset.isAnimating
-                ? math.sin(
-                    math.pi * Curves.fastOutSlowIn.transform(onset.value),
-                  )
-                : 0.0;
-            return Transform.translate(
-              offset: Offset(0, dy + lag),
-              child: Transform.scale(
-                scale: 1 + 0.020 * wave,
-                alignment: start,
+        duration: timed(760),
+        curve: _ease,
+        builder: (context, dy, child) => trail == null
+            ? Transform.translate(offset: Offset(0, dy), child: child)
+            : AnimatedBuilder(
+                animation: trail,
+                builder: (context, child) => Transform.translate(
+                  offset: Offset(
+                    0,
+                    dy + _trailFrom * (1 - _trailCurve.transform(trail.value)),
+                  ),
+                  child: child,
+                ),
                 child: child,
               ),
-            );
-          },
-          child: child,
-        ),
         child: AnimatedScale(
           scale: scale,
           alignment: start,
-          duration: timed(600),
-          curve: const _Spring(ratio: 0.62, stiffness: 260, seconds: 0.6),
+          duration: timed(760),
+          curve: _ease,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             child: Align(
@@ -756,38 +841,6 @@ class _LyricRowState extends State<_LyricRow> with TickerProviderStateMixin {
     );
   }
 }
-
-/// The response of a spring released away from rest, as an animation curve:
-/// it can run past the target and settle back.
-class _Spring extends Curve {
-  const _Spring({
-    required this.ratio,
-    required this.stiffness,
-    required this.seconds,
-  });
-
-  /// Damping ratio: below 1 it overshoots.
-  final double ratio;
-  final double stiffness;
-
-  /// How long the curve is given to settle.
-  final double seconds;
-
-  @override
-  double transformInternal(double t) {
-    final time = t * seconds;
-    final natural = math.sqrt(stiffness);
-    if (ratio >= 1) {
-      return 1 - math.exp(-natural * time) * (1 + natural * time);
-    }
-    final damped = natural * math.sqrt(1 - ratio * ratio);
-    return 1 -
-        math.exp(-ratio * natural * time) *
-            (math.cos(damped * time) +
-                ratio * natural / damped * math.sin(damped * time));
-  }
-}
-
 // ---- Controls ----
 
 /// Text size for the lyrics, with a way back to the default.

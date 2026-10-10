@@ -6,6 +6,7 @@ import 'package:noctune/app/providers.dart';
 import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/data/models/track.dart';
+import 'package:noctune/features/lyrics/lyric_fill.dart';
 import 'package:noctune/features/lyrics/lyrics.dart';
 import 'package:noctune/features/lyrics/lyrics_source.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
@@ -432,14 +433,55 @@ void main() {
       expect(find.byTooltip('Play'), findsOneWidget);
     });
 
-    testWidgets('highlight the line at the playback position', (tester) async {
+    testWidgets('light up the line at the playback position, word by word', (
+      tester,
+    ) async {
+      await open(tester, _syncedLyrics);
+
+      // The line being sung is the brightest and is the one being filled.
+      expect(
+        alpha(tester, 'Second line'),
+        greaterThan(alpha(tester, 'First line')),
+      );
+      expect(alpha(tester, 'Second line'), greaterThan(alpha(tester, 'Third')));
+      final filling = tester.widgetList<LyricFill>(find.byType(LyricFill));
+      expect(filling.map((fill) => fill.text), contains('Second line'));
+      expect(filling.map((fill) => fill.text), isNot(contains('Third')));
+      // It says what kind of timing the file has.
+      expect(find.textContaining('LINE SYNC'), findsOneWidget);
+    });
+
+    testWidgets('files that time each word are labelled as such', (
+      tester,
+    ) async {
+      await open(
+        tester,
+        LoadedLyrics(
+          parseLyrics(
+            '[00:10.00]<00:10.00>First <00:11.00>line\n'
+            '[01:00.00]<01:00.00>Second <01:01.50>line\n[02:00.00]Third',
+          )!,
+          LyricsOrigin.sidecar,
+        ),
+      );
+
+      expect(find.textContaining('WORD SYNC'), findsOneWidget);
+      expect(find.textContaining('LINE SYNC'), findsNothing);
+    });
+
+    testWidgets('with reduced motion the line lights up at once', (
+      tester,
+    ) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
       await open(tester, _syncedLyrics);
 
       expect(alpha(tester, 'Second line'), 1);
-      expect(alpha(tester, 'First line'), lessThan(0.5));
-      expect(alpha(tester, 'Third'), lessThan(0.5));
+      expect(find.byType(LyricFill), findsNothing);
     });
-
     testWidgets('tapping a line seeks to it', (tester) async {
       final handler = await open(tester, _syncedLyrics);
 
@@ -535,7 +577,7 @@ void main() {
           LyricsOrigin.sidecar,
         ),
       );
-      expect(alpha(tester, 'Early'), 1);
+      expect(alpha(tester, 'Early'), greaterThan(alpha(tester, 'Late')));
 
       await tester.tap(find.byTooltip('Lyrics sync offset'));
       await tester.pumpAndSettle();
@@ -545,8 +587,7 @@ void main() {
       await tester.tap(find.text('Done'));
       await tester.pumpAndSettle();
 
-      expect(alpha(tester, 'Late'), 1);
-      expect(alpha(tester, 'Early'), lessThan(0.5));
+      expect(alpha(tester, 'Late'), greaterThan(alpha(tester, 'Early')));
       expect(handler.calls, isEmpty);
       final preferences = await SharedPreferences.getInstance();
       expect(

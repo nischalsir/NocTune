@@ -233,4 +233,54 @@ void main() {
       expect(lyrics.indexAt(const Duration(seconds: 5)), -1);
     });
   });
+
+  group('word timing', () {
+    test('word stamps become the times of the words', () {
+      final lyrics = parseLyrics(
+        '[00:10.00]<00:10.00>One <00:10.40>two <00:11.30>three<00:11.90>\n'
+        '[00:20.00]Plain line',
+      )!;
+      final first = lyrics.lines.first;
+
+      expect(first.text, 'One two three');
+      expect(first.words.map((w) => w.text.trim()), ['One', 'two', 'three']);
+      expect(
+        first.words[1].time,
+        const Duration(seconds: 10, milliseconds: 400),
+      );
+      expect(first.end, const Duration(seconds: 11, milliseconds: 900));
+      expect(lyrics.wordSynced, isTrue);
+      expect(lyrics.lines.last.words, isEmpty);
+    });
+
+    test('the offset tag moves word times with their line', () {
+      final line = parseLyrics(
+        '[offset:500]\n[00:10.00]<00:10.00>One <00:11.00>two',
+      )!.lines.single;
+
+      expect(line.time, const Duration(seconds: 9, milliseconds: 500));
+      expect(
+        line.words.last.time,
+        const Duration(seconds: 10, milliseconds: 500),
+      );
+    });
+
+    test('ordinary files are not word-synced', () {
+      expect(parseLyrics('[00:10.00]One two three')!.wordSynced, isFalse);
+    });
+
+    test('word times are dropped when they no longer describe the row', () {
+      // Two texts at one moment, and a line stamped for two moments.
+      final merged = parseLyrics(
+        '[00:10.00]<00:10.00>One <00:10.40>two\n[00:10.00]Uno dos',
+      )!;
+      final repeated = parseLyrics(
+        '[00:10.00][00:50.00]<00:10.00>One <00:10.40>two',
+      )!;
+
+      expect(merged.lines.single.words, isEmpty);
+      expect(repeated.lines.every((line) => line.words.isEmpty), isTrue);
+      expect(repeated.lines.first.text, 'One two');
+    });
+  });
 }

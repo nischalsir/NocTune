@@ -3,7 +3,9 @@
 // Changes for NocTune: imports, app-specific hooks, and the height of the
 // mini-player row (58 instead of 48, so the cover has room around it), and
 // the folded bar's right-hand button is named after the last destination
-// rather than always "Search".
+// rather than always "Search". Folding no longer wipes the tabs away from the
+// top: they fade out where they are while the two icons travel to the sides,
+// and the fold takes a little longer.
 
 import 'dart:math' as math;
 
@@ -97,7 +99,7 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
     with SingleTickerProviderStateMixin {
   late final _controller = AnimationController(
     vsync: this,
-    duration: const Duration(milliseconds: 380),
+    duration: const Duration(milliseconds: 460),
     value: widget.collapsed ? 1 : 0,
   );
   late final _collapse = CurvedAnimation(
@@ -339,19 +341,26 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
                           // Retain tab state, but drop its backdrop layers only
                           // after the last visible frame of the fold.
                           offstage: amount == 1,
-                          child: ClipRect(
-                            clipBehavior: amount == 0
-                                ? Clip.none
-                                : Clip.hardEdge,
-                            child: Align(
-                              alignment: Alignment.bottomCenter,
-                              heightFactor: 1 - amount,
-                              child: IgnorePointer(
-                                ignoring: amount > 0.5,
-                                child: ExcludeSemantics(
-                                  excluding: amount > 0.5,
-                                  child: amount == 0 ? fullTabs : foldingTabs,
-                                ),
+                          // NocTune: the row gives up its height so the
+                          // mini-player can come down, but the tabs are not
+                          // cut off as it does. They stay where they are and
+                          // fade, gone a little past the half-way point.
+                          child: Align(
+                            alignment: Alignment.bottomCenter,
+                            heightFactor: 1 - amount,
+                            child: IgnorePointer(
+                              ignoring: amount > 0.5,
+                              child: ExcludeSemantics(
+                                excluding: amount > 0.5,
+                                child: amount == 0
+                                    ? fullTabs
+                                    : Opacity(
+                                        opacity: (1 - amount / 0.6).clamp(
+                                          0.0,
+                                          1.0,
+                                        ),
+                                        child: foldingTabs,
+                                      ),
                               ),
                             ),
                           ),

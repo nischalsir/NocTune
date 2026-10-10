@@ -1,6 +1,7 @@
 // Copied from SpotiFLAC-Mobile (https://github.com/zarzet/SpotiFLAC-Mobile),
 // Copyright (c) 2026 zarzet, MIT licence. See LICENSE in this folder.
-// Changes for NocTune are limited to imports and app-specific hooks.
+// Changes for NocTune: imports, app-specific hooks, and the selection lens
+// of the tab bar, which is switched off.
 
 import 'dart:ui' show ImageFilter;
 
@@ -534,8 +535,10 @@ class MornyeTabBar extends StatelessWidget {
       child: MornyeSelectionPill(
         selectionColor: scheme.primary,
         maskItemForeground: false,
-        liquidInteraction:
-            floating && MornyeTheme.glassClarityOf(context) > 0.2,
+        // NocTune: the lens that follows the selected tab is switched off.
+        // On the phone it sat off-centre as a second, larger outline around
+        // the selection and swelled further when touched.
+        liquidInteraction: false,
         labels: [for (final destination in destinations) destination.label],
         selectedIndex: selectedIndex,
         onChanged: onSelected,
