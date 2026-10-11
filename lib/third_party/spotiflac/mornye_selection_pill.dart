@@ -2,7 +2,8 @@
 // Copyright (c) 2026 zarzet, MIT licence. See LICENSE in this folder.
 // Changes for NocTune: imports, app-specific hooks, and the hand-over between
 // the flat pill and the glass lens: the pill marks the selection at rest, the
-// lens carries it while it moves, and the two are never shown together.
+// lens carries it while it moves, and the two are never shown together. The
+// selection travels and the lens lifts on springs rather than plain eases.
 
 import 'dart:async';
 import 'dart:math' as math;
@@ -12,14 +13,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 
+import '../../core/motion.dart';
 import 'mornye_liquid_backdrop.dart';
 
 Future<ui.FragmentProgram>? _selectionMaskProgram;
 const _heldWidthGrowth = 0.28;
 const _heldHeightGrowth = 0.24;
 const _pillRadius = 32.0;
-// NocTune: how long the selection takes to move to a tab.
-const _travelTime = Duration(milliseconds: 220);
+// NocTune: the selection moves to a tab on a spring that passes it by a
+// touch and settles. After a slide, the glass that carries it stays for
+// [_settleTime] while it arrives.
+const _travelTime = Duration(milliseconds: 420);
+const _travelCurve = SpringCurve(frequency: 18, damping: 0.78, seconds: 0.42);
+const _settleTime = Duration(milliseconds: 260);
 
 /// Selection with a transient lens over the fixed-size foreground while held.
 /// It refracts both the bar's backdrop and its icons, rendered only once.
@@ -72,6 +78,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
   Timer? _settleTimer;
   late final AnimationController _pressController;
   late final CurvedAnimation _pressAnimation;
+  late final CurvedAnimation _liftAnimation;
   ui.FragmentProgram? _maskProgram;
 
   @override
@@ -93,6 +100,14 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     )..addListener(() => setState(() {}));
+    // NocTune: the lens's size follows the same press on curves that pass
+    // their end a little, so it springs up under the finger and settles
+    // back when it is let go.
+    _liftAnimation = CurvedAnimation(
+      parent: _pressController,
+      curve: Curves.easeOutBack,
+      reverseCurve: Curves.easeInBack,
+    );
     if (widget.selectionColor != null) unawaited(_loadMaskProgram());
   }
 
@@ -112,6 +127,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
   void dispose() {
     _settleTimer?.cancel();
     _pressAnimation.dispose();
+    _liftAnimation.dispose();
     _pressController.dispose();
     super.dispose();
   }
@@ -155,7 +171,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
       _pressController.reverse();
       return;
     }
-    _settleTimer = Timer(_travelTime, () {
+    _settleTimer = Timer(_settleTime, () {
       if (mounted && !_pressed) _pressController.reverse();
     });
   }
@@ -192,6 +208,8 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
     final scheme = Theme.of(context).colorScheme;
     final lensEnabled = _lensEnabled;
     final pressProgress = lensEnabled ? _pressAnimation.value : 0.0;
+    // NocTune: how far the lens has grown, which may pass 1 or dip under 0.
+    final lift = lensEnabled ? _liftAnimation.value : 0.0;
     // NocTune: how much of the flat pill shows. None while the glass is up.
     final rest = 1 - pressProgress;
     final content = Listener(
@@ -274,8 +292,8 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
                             _dragAlignment != null ||
                                 MediaQuery.disableAnimationsOf(context)
                             ? Duration.zero
-                            : const Duration(milliseconds: 220),
-                        curve: Curves.easeOutCubic,
+                            : _travelTime,
+                        curve: _travelCurve,
                         alignment: AlignmentDirectional(
                           _dragAlignment ??
                               (count == 1
@@ -320,7 +338,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
                 _foreground(
                   selected,
                   count,
-                  pressProgress,
+                  lift,
                   Row(
                     key: _foregroundKey,
                     children: [
@@ -359,7 +377,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
                 // The lens must sample the foreground as well as the page.
                 // Below the icons it would look like a rim on a flat backdrop.
                 if (lensEnabled && selected >= 0 && selected < count)
-                  _interactionLens(selected, count, pressProgress),
+                  _interactionLens(selected, count, pressProgress, lift),
               ],
             ),
           ),
@@ -381,12 +399,7 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
         : child;
   }
 
-  Widget _foreground(
-    int selected,
-    int count,
-    double pressProgress,
-    Widget child,
-  ) {
+  Widget _foreground(int selected, int count, double lift, Widget child) {
     final color = widget.selectionColor;
     if (color == null) return child;
     return TweenAnimationBuilder<double>(
@@ -398,16 +411,16 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
       duration:
           _dragAlignment != null || MediaQuery.disableAnimationsOf(context)
           ? Duration.zero
-          : const Duration(milliseconds: 220),
-      curve: Curves.easeOutCubic,
+          : _travelTime,
+      curve: _travelCurve,
       builder: (context, alignment, child) => _SelectionForegroundScope(
         rowKey: _foregroundKey,
         alignment: Directionality.of(context) == TextDirection.rtl
             ? -alignment
             : alignment,
         count: count,
-        scaleX: 1 + _heldWidthGrowth * pressProgress,
-        scaleY: 1 + _heldHeightGrowth * pressProgress,
+        scaleX: 1 + _heldWidthGrowth * lift,
+        scaleY: 1 + _heldHeightGrowth * lift,
         program: _maskProgram,
         color: selected >= 0 && selected < count
             ? color
@@ -422,13 +435,12 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
     int selected,
     int count,
     double progress,
+    double lift,
   ) => Positioned.fill(
     child: IgnorePointer(
       child: AnimatedAlign(
-        duration: _dragAlignment != null
-            ? Duration.zero
-            : const Duration(milliseconds: 220),
-        curve: Curves.easeOutCubic,
+        duration: _dragAlignment != null ? Duration.zero : _travelTime,
+        curve: _travelCurve,
         alignment: AlignmentDirectional(
           _dragAlignment ?? (count == 1 ? 0 : -1 + 2 * selected / (count - 1)),
           0,
@@ -437,8 +449,8 @@ class _MornyeSelectionPillState extends State<MornyeSelectionPill>
           widthFactor: 1 / count,
           heightFactor: 1,
           child: Transform.scale(
-            scaleX: 1 + _heldWidthGrowth * progress,
-            scaleY: 1 + _heldHeightGrowth * progress,
+            scaleX: 1 + _heldWidthGrowth * lift,
+            scaleY: 1 + _heldHeightGrowth * lift,
             child: ClipRRect(
               borderRadius: BorderRadius.circular(_pillRadius),
               child: LiquidGlassBatch.exclude(

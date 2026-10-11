@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoSwitch;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -169,6 +170,64 @@ void main() {
     final scale = container.read(settingsProvider).lyricsScale;
     expect(scale, greaterThan(1));
     expect(preferences.getDouble('lyrics_scale'), scale);
+  });
+
+  testWidgets('the theme can be chosen by sliding across its selector', (
+    tester,
+  ) async {
+    await _pump(tester);
+    final preferences = await SharedPreferences.getInstance();
+
+    // From System, across Light, let go on Dark.
+    final finger = await tester.startGesture(
+      tester.getCenter(find.text('System')),
+    );
+    for (var i = 0; i < 6; i++) {
+      await finger.moveBy(
+        Offset(
+          (tester.getCenter(find.text('Dark')).dx -
+                  tester.getCenter(find.text('System')).dx) /
+              6,
+          0,
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+    }
+    await finger.up();
+    await tester.pumpAndSettle();
+
+    expect(preferences.getString('theme_mode'), 'dark');
+  });
+
+  testWidgets('a switch can be flipped by itself or by its row', (
+    tester,
+  ) async {
+    final (_, container) = await _pump(tester);
+    await _reveal(tester, find.text('Wave seek bar'));
+    final toggle = find.descendant(
+      of: find.ancestor(
+        of: find.text('Wave seek bar'),
+        matching: find.byType(ListTile),
+      ),
+      matching: find.byType(CupertinoSwitch),
+    );
+    expect(tester.widget<CupertinoSwitch>(toggle).value, isTrue);
+
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(container.read(settingsProvider).waveSeekBar, isFalse);
+    expect(tester.widget<CupertinoSwitch>(toggle).value, isFalse);
+
+    await tester.tap(find.text('Wave seek bar'));
+    await tester.pumpAndSettle();
+    expect(container.read(settingsProvider).waveSeekBar, isTrue);
+
+    // Read out as one switch with its title.
+    final handle = tester.ensureSemantics();
+    final row = tester.getSemantics(find.text('Wave seek bar'));
+    expect(row.label, startsWith('Wave seek bar'));
+    expect(row, isSemantics(hasToggledState: true, isToggled: true));
+    handle.dispose();
   });
 
   testWidgets('no update row when update checks are not set up', (

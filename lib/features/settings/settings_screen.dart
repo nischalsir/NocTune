@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoSwitch;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/noc_dialog.dart';
+import '../../third_party/spotiflac/mornye_chrome.dart';
 import '../library/duplicates_screen.dart';
 import '../library/scan/scan_banner.dart';
 import '../library/scan/scan_controller.dart';
@@ -166,34 +168,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   _Block(
                     icon: Icons.brightness_6_rounded,
                     title: 'Theme',
-                    child: SegmentedButton<ThemeMode>(
-                      segments: const [
-                        ButtonSegment(
-                          value: ThemeMode.system,
-                          label: Text('System'),
-                        ),
-                        ButtonSegment(
-                          value: ThemeMode.light,
-                          label: Text('Light'),
-                        ),
-                        ButtonSegment(
-                          value: ThemeMode.dark,
-                          label: Text('Dark'),
-                        ),
-                      ],
-                      selected: {settings.themeMode},
-                      showSelectedIcon: false,
-                      onSelectionChanged: (modes) =>
-                          controller.setThemeMode(modes.single),
+                    // The same glass selector as the navigation bar: it can
+                    // be tapped or slid across.
+                    child: MornyeSegmentedControl(
+                      labels: const ['System', 'Light', 'Dark'],
+                      selectedIndex: const [
+                        ThemeMode.system,
+                        ThemeMode.light,
+                        ThemeMode.dark,
+                      ].indexOf(settings.themeMode),
+                      onChanged: (index) => controller.setThemeMode(
+                        const [
+                          ThemeMode.system,
+                          ThemeMode.light,
+                          ThemeMode.dark,
+                        ][index],
+                      ),
                     ),
                   ),
-                  SwitchListTile(
-                    secondary: const _TileIcon(Icons.image_rounded),
-                    title: const Text('Match the cover art'),
-                    subtitle: const Text(
-                      'The accent follows the artwork of the track that '
-                      'is playing',
-                    ),
+                  _SwitchTile(
+                    icon: Icons.image_rounded,
+                    title: 'Match the cover art',
+                    subtitle:
+                        'The accent follows the artwork of the track that '
+                        'is playing',
                     value: settings.accentFromCover,
                     onChanged: controller.setAccentFromCover,
                   ),
@@ -258,12 +256,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ],
                     ),
                   ),
-                  SwitchListTile(
-                    secondary: const _TileIcon(Icons.unfold_less_rounded),
-                    title: const Text('Fold the navigation bar'),
-                    subtitle: const Text(
-                      'Tucks the tabs away while you scroll down a page',
-                    ),
+                  _SwitchTile(
+                    icon: Icons.unfold_less_rounded,
+                    title: 'Fold the navigation bar',
+                    subtitle:
+                        'Tucks the tabs away while you scroll down a page',
                     value: settings.foldNavigationOnScroll,
                     onChanged: controller.setFoldNavigationOnScroll,
                   ),
@@ -273,13 +270,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _Group(
                 title: 'Playback',
                 children: [
-                  SwitchListTile(
-                    secondary: const _TileIcon(Icons.waves_rounded),
-                    title: const Text('Wave seek bar'),
-                    subtitle: const Text(
-                      'The seek bar in the player moves like a wave while '
-                      'music plays. Off, it is a plain thick bar.',
-                    ),
+                  _SwitchTile(
+                    icon: Icons.waves_rounded,
+                    title: 'Wave seek bar',
+                    subtitle:
+                        'The seek bar in the player moves like a wave while '
+                        'music plays. Off, it is a plain thick bar.',
                     value: settings.waveSeekBar,
                     onChanged: controller.setWaveSeekBar,
                   ),
@@ -543,6 +539,42 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 }
 
 /// A titled card holding related settings, its rows separated by hairlines.
+/// A setting that is on or off. Its switch moves the way an iOS one does:
+/// the thumb stretches under the finger and can be dragged across.
+class _SwitchTile extends StatelessWidget {
+  const _SwitchTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.value,
+    required this.onChanged,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    // Read out as one switch with its title, not a row and a switch.
+    return MergeSemantics(
+      child: ListTile(
+        leading: _TileIcon(icon),
+        title: Text(title),
+        subtitle: Text(subtitle),
+        onTap: () => onChanged(!value),
+        trailing: CupertinoSwitch(
+          value: value,
+          onChanged: onChanged,
+          activeTrackColor: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+  }
+}
+
 class _Group extends StatelessWidget {
   const _Group({required this.title, required this.children});
 

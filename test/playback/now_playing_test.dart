@@ -412,8 +412,15 @@ void main() {
     }
 
     // Position is 1:01 in every test here.
-    double alpha(WidgetTester tester, String line) =>
-        DefaultTextStyle.of(tester.element(find.text(line))).style.color!.a;
+    // How bright a line is drawn: its colour, dimmed by whatever fades it.
+    double alpha(WidgetTester tester, String line) => tester
+        .widgetList<Opacity>(
+          find.ancestor(of: find.text(line), matching: find.byType(Opacity)),
+        )
+        .fold(
+          tester.widget<Text>(find.text(line)).style!.color!.a,
+          (shown, fade) => shown * fade.opacity,
+        );
 
     testWidgets('take over the player and hand it back', (tester) async {
       await open(tester, _syncedLyrics);
@@ -530,29 +537,107 @@ void main() {
 
       const frame = Duration(milliseconds: 16);
 
-      testWidgets('no line moves in a single step', (tester) async {
-        final position = await play(tester);
-        List<double> tops() => [
-          for (var line = 4; line <= 11; line++)
-            tester.getTopLeft(find.text('Line $line')).dy,
-        ];
+      // Where each of lines 4 to 11 is drawn. While a line is changing how
+      // sharp it is, two pictures of it are on screen; either will do.
+      List<double> tops(WidgetTester tester) => [
+        for (var line = 4; line <= 11; line++)
+          tester.getTopLeft(find.text('Line $line').first).dy,
+      ];
 
-        final start = tops();
+      testWidgets('no line moves in a single step, or backwards', (
+        tester,
+      ) async {
+        final position = await play(tester);
+
+        final start = tops(tester);
         var before = start;
         var largest = 0.0;
+        var furthestBack = 0.0;
         position.add(const Duration(seconds: 71));
-        for (var i = 0; i < 90; i++) {
+        for (var i = 0; i < 110; i++) {
           await tester.pump(frame);
-          final now = tops();
+          final now = tops(tester);
           for (var line = 0; line < now.length; line++) {
             largest = math.max(largest, (now[line] - before[line]).abs());
+            furthestBack = math.max(furthestBack, now[line] - before[line]);
           }
           before = now;
         }
 
-        // The list has glided up a row, and nothing jumped on the way.
-        expect(start[3] - before[3], greaterThan(40));
-        expect(largest, lessThan(5));
+        // Every line has gone up a row. None jumped on the way, and none
+        // was pushed down first.
+        for (var line = 0; line < start.length; line++) {
+          expect(start[line] - before[line], greaterThan(60));
+        }
+        expect(largest, lessThan(9));
+        expect(furthestBack, lessThan(1.5));
+      });
+
+      testWidgets('the lines below trail behind and catch up', (tester) async {
+        final position = await play(tester);
+        final start = tops(tester);
+        // Lines 7 (the one about to be sung) and 11, four below it.
+        double risen(int line) => start[line - 4] - tops(tester)[line - 4];
+
+        position.add(const Duration(seconds: 71));
+        await tester.pump(frame);
+        await tester.pump(const Duration(milliseconds: 200));
+        expect(risen(11), lessThan(risen(7) - 8));
+        // Each line further down is further behind.
+        expect(risen(11), lessThan(risen(10)));
+        expect(risen(10), lessThan(risen(9)));
+
+        await tester.pump(const Duration(seconds: 2));
+        expect(risen(11), closeTo(risen(8), 1));
+      });
+
+      testWidgets('lines away from the one being sung are out of focus', (
+        tester,
+      ) async {
+        await play(tester);
+        // A blur, as opposed to the stretch a scrolling list can be given.
+        Finder soft(int line) => find.ancestor(
+          of: find.text('Line $line'),
+          matching: find.byWidgetPredicate(
+            (widget) =>
+                widget is ImageFiltered &&
+                '${widget.imageFilter}'.contains('blur'),
+          ),
+        );
+        String blur(int line) =>
+            '${tester.widget<ImageFiltered>(soft(line)).imageFilter}';
+
+        expect(soft(6), findsNothing);
+        expect(soft(5), findsOneWidget);
+        expect(soft(7), findsOneWidget);
+        // The further away, the softer.
+        expect(blur(9), isNot(blur(7)));
+        // Blurred once and kept as a picture, not blurred on every frame.
+        expect(
+          find.ancestor(
+            of: find.text('Line 9'),
+            matching: find.byType(SnapshotWidget),
+          ),
+          findsOneWidget,
+        );
+
+        // Moving the list by hand brings the lines into focus to be read.
+        final finger = await tester.startGesture(
+          tester.getCenter(find.text('Line 8')),
+        );
+        await finger.moveBy(const Offset(0, -30));
+        await tester.pump(frame);
+        await finger.moveBy(const Offset(0, -30));
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(soft(7), findsNothing);
+        expect(soft(9), findsNothing);
+
+        // Let go, and they go back out of focus.
+        await finger.up();
+        await tester.pump(frame);
+        await tester.pump(const Duration(seconds: 2));
+        await tester.pump(const Duration(milliseconds: 600));
+        expect(soft(7), findsOneWidget);
       });
 
       testWidgets('a line that arrives mid-glide does not stop the list', (
@@ -563,7 +648,7 @@ void main() {
 
         position.add(const Duration(seconds: 71));
         await tester.pump(frame);
-        await tester.pump(const Duration(milliseconds: 400));
+        await tester.pump(const Duration(milliseconds: 104));
         var at = scroll.pixels;
         await tester.pump(frame);
         final before = scroll.pixels - at;
@@ -578,11 +663,11 @@ void main() {
         }
 
         expect(before, greaterThan(1));
-        // It carries on at much the same speed instead of starting again
+        // It carries on from the speed it had instead of starting again
         // from rest.
         for (final step in steps) {
           expect(step, greaterThan(before * 0.6));
-          expect(step, lessThan(before * 1.6));
+          expect(step, lessThan(before * 2.2));
         }
       });
 
@@ -590,12 +675,16 @@ void main() {
         tester,
       ) async {
         final position = await play(tester);
+        // A line changing how sharp it is has two pictures of itself on
+        // screen for a moment; they share the one scale.
         FilterQuality? resizing(int line) => tester
             .widget<AnimatedScale>(
-              find.ancestor(
-                of: find.text('Line $line'),
-                matching: find.byType(AnimatedScale),
-              ),
+              find
+                  .ancestor(
+                    of: find.text('Line $line').first,
+                    matching: find.byType(AnimatedScale),
+                  )
+                  .first,
             )
             .filterQuality;
         expect(resizing(6), isNull);
@@ -672,9 +761,7 @@ void main() {
     ) async {
       await open(tester, _syncedLyrics);
       double size() =>
-          DefaultTextStyle.of(tester.element(find.text('Second line')))
-              .style
-              .fontSize!;
+          tester.widget<Text>(find.text('Second line')).style!.fontSize!;
       final before = size();
 
       await tester.tap(find.byTooltip('Adjust lyrics text size'));

@@ -1,13 +1,17 @@
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderAbstractViewport;
+import 'package:flutter/scheduler.dart' show SchedulerPhase;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/device_profile.dart';
 import '../../app/providers.dart';
 import '../../core/format.dart';
+import '../../core/motion.dart';
 import '../../core/theme/flex_type.dart';
 import '../../data/models/track.dart';
 import '../playback/noc_audio_handler.dart';
@@ -355,24 +359,37 @@ const _maxSystemTextScale = 1.3;
 /// How much the line being sung is enlarged.
 const _activeScale = 1.085;
 
-/// An ease for the list's glide to a new line: it sets off at [slope] times
-/// its average speed and comes to rest at the end. With no slope that is a
-/// plain ease in and out. With one, it carries on at the speed the list was
-/// already moving, so a line that arrives mid-glide doesn't stop the list
-/// and start it again.
-class _Glide extends Curve {
-  const _Glide(this.slope);
+// How the list and its lines move when the line being sung changes.
+//
+// The list is carried to the new line by a spring that never overshoots:
+// quick away, about half way after 150 ms, at rest within 600 ms. The lines
+// below the new one are on softer springs, softer the further down they are,
+// so they trail behind the list and catch up one after another. Nothing is
+// ever moved in a single step.
+const _followFrequency = 11.4;
+const _followTime = Duration(milliseconds: 1000);
+// A line change's trailing has died away by now.
+const _trailTime = Duration(milliseconds: 1400);
+// The most of a move that lines trail by, so a long jump doesn't fling them.
+const _trailMost = 160.0;
 
-  /// From 0 to 3; beyond that the curve would overshoot.
-  final double slope;
+/// The spring of a line [below] the one being sung: the same as the list's
+/// for the line right under it, softer from there down.
+double _trailFrequency(int below) =>
+    math.max(6.0, _followFrequency - 1.45 * (below - 1));
 
-  @override
-  double transformInternal(double t) =>
-      ((slope - 2) * t + (3 - 2 * slope)) * t * t + slope * t;
+/// A line change the list is following: when it began, how much further the
+/// list was sent, and which line it went to.
+typedef _Step = ({Duration at, double distance, int active});
 
-  /// How fast the curve is rising at [t], as a multiple of its average.
-  double speedAt(double t) =>
-      (3 * (slope - 2) * t + 2 * (3 - 2 * slope)) * t + slope;
+/// Tells the lines that trail to redraw, frame by frame.
+class _Frames extends ChangeNotifier {
+  Duration time = Duration.zero;
+
+  void show(Duration frame) {
+    time = frame;
+    notifyListeners();
+  }
 }
 
 /// Timestamped lyrics that follow playback.
@@ -406,13 +423,21 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
   static const _handsOff = Duration(milliseconds: 2200);
   // The furthest the clock runs ahead of the last position it was told.
   static const _maxCoast = Duration(milliseconds: 300);
-  // How long the list takes to bring a new line into place.
-  static const _glideTime = Duration(milliseconds: 900);
 
-  // The glide under way, kept so the next one can set off at its speed.
-  ({Duration at, double distance, _Glide curve})? _glide;
-  // The frame callback that will start the next glide, if one is waiting.
+  // The spring carrying the list, kept so the next one can set off at the
+  // speed this one has.
+  ({Duration at, double distance, SpringCurve curve})? _glide;
+  // The frame callback that will start the next one, if one is waiting.
   int? _followFrame;
+  // Where the list was last sent.
+  double? _sentTo;
+  // The line changes whose trailing lines are still catching up.
+  final _steps = <_Step>[];
+  final _trail = _Frames();
+
+  /// True while the user moves the list by hand. The lines come into focus
+  /// so they can be read.
+  final _browsing = ValueNotifier(false);
 
   late List<GlobalKey> _keys = _makeKeys();
   DateTime _userScrolledAt = DateTime.fromMillisecondsSinceEpoch(0);
@@ -424,11 +449,12 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
   // reports it twenty times a second; between reports this runs on from the
   // last one, so the fill moves at the screen's own refresh rate.
   final _clock = ValueNotifier(Duration.zero);
-  late final _frames = createTicker((_) => _tick());
+  late final _frames = createTicker((_) => _onFrame());
   final _sinceReport = Stopwatch();
   Duration _reported = Duration.zero;
   int _offsetMs = 0;
   bool _playing = false;
+  bool _sweeping = false;
 
   List<GlobalKey> _makeKeys() => [
     for (var i = 0; i < widget.lyrics.lines.length; i++) GlobalKey(),
@@ -440,6 +466,22 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
         _reported +
         (coast > _maxCoast ? _maxCoast : coast) +
         Duration(milliseconds: _offsetMs);
+  }
+
+  void _onFrame() {
+    _tick();
+    if (_steps.isEmpty) return;
+    final now = WidgetsBinding.instance.currentFrameTimeStamp;
+    _steps.removeWhere((step) => now - step.at > _trailTime);
+    _trail.show(now);
+    _syncFrames();
+  }
+
+  /// Frames are needed while the fill sweeps and while lines trail.
+  void _syncFrames() {
+    final needed = (_sweeping && _playing) || _steps.isNotEmpty;
+    if (needed == _frames.isActive) return;
+    needed ? _frames.start() : _frames.stop();
   }
 
   @override
@@ -465,6 +507,8 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
   void dispose() {
     _cancelFollow();
     _frames.dispose();
+    _trail.dispose();
+    _browsing.dispose();
     _clock.dispose();
     _active.dispose();
     super.dispose();
@@ -483,16 +527,31 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
     _follow(index);
   }
 
-  /// How fast the list is still gliding at [now], in pixels a second.
+  /// How fast the list is still moving at [now], in pixels a second.
   double _glideSpeed(Duration now) {
     final glide = _glide;
     if (glide == null) return 0;
-    final t = (now - glide.at).inMicroseconds / _glideTime.inMicroseconds;
+    final t = (now - glide.at).inMicroseconds / _followTime.inMicroseconds;
     if (t < 0 || t >= 1) return 0;
-    return glide.distance *
-        glide.curve.speedAt(t) *
-        Duration.microsecondsPerSecond /
-        _glideTime.inMicroseconds;
+    return glide.distance * glide.curve.speedAt(t);
+  }
+
+  /// How far below its place line [index] is drawn at the moment, while it
+  /// catches up with the list.
+  double _trailOf(int index) {
+    var offset = 0.0;
+    for (final step in _steps) {
+      final below = index - step.active;
+      if (below < 2) continue;
+      final seconds =
+          (_trail.time - step.at).inMicroseconds /
+          Duration.microsecondsPerSecond;
+      offset +=
+          step.distance *
+          (springSettle(_followFrequency, seconds) -
+              springSettle(_trailFrequency(below), seconds));
+    }
+    return offset;
   }
 
   void _cancelFollow() {
@@ -503,14 +562,24 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
     _followFrame = null;
   }
 
-  /// Glides the active line to a third of the way down, unless the user has
+  /// Leaves the list where it is: nothing in flight, nothing trailing.
+  void _letGo() {
+    _glide = null;
+    _sentTo = null;
+    if (_steps.isEmpty) return;
+    _steps.clear();
+    _trail.show(_trail.time);
+    _syncFrames();
+  }
+
+  /// Brings the active line to a third of the way down, unless the user has
   /// just been scrolling.
   void _follow(int index, {bool animate = true}) {
     if (index < 0 || index >= _keys.length) return;
     if (DateTime.now().difference(_userScrolledAt) < _handsOff) return;
     _cancelFollow();
     // Started at the top of the next frame, where an animation gets under
-    // way in that same frame. Started after a frame, a glide that replaces
+    // way in that same frame. Started after a frame, a move that replaces
     // one still running would stand still for a frame first.
     _followFrame = WidgetsBinding.instance.scheduleFrameCallback((now) {
       _followFrame = null;
@@ -524,21 +593,32 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
           .clamp(position.minScrollExtent, position.maxScrollExtent)
           .toDouble();
       if (!animate || MediaQuery.disableAnimationsOf(context)) {
-        _glide = null;
+        _letGo();
+        _sentTo = to;
         position.jumpTo(to);
         return;
       }
       final distance = to - position.pixels;
+      final further = to - (_sentTo ?? position.pixels);
+      _sentTo = to;
       if (distance.abs() < 0.5) return;
-      // Leaves gently and takes its time arriving, with no bounce. If the
-      // list is still on its way to the line before, it keeps its speed.
-      final seconds =
-          _glideTime.inMicroseconds / Duration.microsecondsPerSecond;
-      final curve = _Glide(
-        (_glideSpeed(now) * seconds / distance).clamp(0.0, 3.0),
+      // If the list is still on its way to the line before, it is not
+      // stopped and started again: the spring is let go at the speed the
+      // list already has.
+      final curve = SpringCurve(
+        frequency: _followFrequency,
+        seconds: _followTime.inMicroseconds / Duration.microsecondsPerSecond,
+        velocity: _glideSpeed(now) / distance,
       );
       _glide = (at: now, distance: distance, curve: curve);
-      position.animateTo(to, duration: _glideTime, curve: curve);
+      _steps.add((
+        at: now,
+        distance: further.clamp(-_trailMost, _trailMost).toDouble(),
+        active: index,
+      ));
+      _trail.time = now;
+      _syncFrames();
+      position.animateTo(to, duration: _followTime, curve: curve);
     });
   }
 
@@ -550,9 +630,26 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
     };
     if (byHand) {
       _userScrolledAt = DateTime.now();
-      _glide = null;
+      _letGo();
+      _setBrowsing(true);
+    } else if (notification is ScrollEndNotification) {
+      _setBrowsing(false);
     }
     return false;
+  }
+
+  void _setBrowsing(bool browsing) {
+    if (_browsing.value == browsing) return;
+    // A scroll can end while the page is being laid out, when nothing may
+    // be rebuilt: the lines are told once that frame is done.
+    if (WidgetsBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _browsing.value = browsing;
+      });
+    } else {
+      _browsing.value = browsing;
+    }
   }
 
   @override
@@ -561,6 +658,8 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
     final playing = ref.watch(
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
+    // Out-of-focus lines are left out on devices short of memory.
+    final soften = ref.watch(deviceTierProvider) != DeviceTier.low;
     ref
       ..listen(lyricsPositionProvider, (_, position) {
         _reported = position.value ?? _reported;
@@ -579,11 +678,8 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
     // With reduced motion the line lights up at once instead of filling.
     final sweep = !MediaQuery.disableAnimationsOf(context);
     _playing = playing;
-    if (sweep && playing) {
-      if (!_frames.isActive) _frames.start();
-    } else if (_frames.isActive) {
-      _frames.stop();
-    }
+    _sweeping = sweep;
+    _syncFrames();
 
     final style = FlexType.custom(
       size: 30 * widget.scale,
@@ -655,6 +751,10 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
                                   active: _active,
                                   clock: _clock,
                                   sweep: sweep,
+                                  soften: soften,
+                                  browsing: _browsing,
+                                  trail: _trail,
+                                  trailOf: _trailOf,
                                   onTap: line.time == null
                                       ? null
                                       : () => ref
@@ -679,12 +779,12 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
 
 /// One lyric line. How it looks depends on where it is relative to the line
 /// being sung: that one is enlarged and lights up word by word; the further
-/// away a line is, the dimmer it gets.
+/// away a line is, the dimmer and the more out of focus it gets.
 ///
 /// Its size on the page never changes, so the lines around it don't move
 /// when it becomes active. Everything that changes is a transform or a
-/// colour, eased from where it is, which the screen can redraw on every
-/// frame. Nothing changes in a single step.
+/// brightness, moved from where it is by a spring or an ease, which the
+/// screen can redraw on every frame. Nothing changes in a single step.
 class _LyricRow extends StatefulWidget {
   const _LyricRow({
     required this.index,
@@ -695,6 +795,10 @@ class _LyricRow extends StatefulWidget {
     required this.active,
     required this.clock,
     required this.sweep,
+    required this.soften,
+    required this.browsing,
+    required this.trail,
+    required this.trailOf,
     required this.onTap,
   });
 
@@ -712,6 +816,16 @@ class _LyricRow extends StatefulWidget {
 
   /// Whether the active line fills word by word, or lights up at once.
   final bool sweep;
+
+  /// Whether lines away from the active one go out of focus.
+  final bool soften;
+
+  /// Whether the user is moving the list by hand.
+  final ValueListenable<bool> browsing;
+
+  /// Redraws the line while it trails behind the list, by [trailOf].
+  final Listenable trail;
+  final double Function(int index) trailOf;
   final VoidCallback? onTap;
 
   @override
@@ -720,9 +834,23 @@ class _LyricRow extends StatefulWidget {
 
 class _LyricRowState extends State<_LyricRow> {
   // Beyond this many lines from the active one, every line looks the same.
-  static const _reach = 7;
-  // An unhurried ease with no overshoot, shared by the row's changes.
-  static const _ease = Cubic(0.25, 0.9, 0.3, 1);
+  static const _reach = 10;
+  // The line grows with a little overshoot and settles; its small step up or
+  // down settles without one.
+  static const _grow = SpringCurve(
+    frequency: 16.1,
+    damping: 0.62,
+    seconds: 0.7,
+  );
+  static const _step = SpringCurve(
+    frequency: 14.1,
+    damping: 0.82,
+    seconds: 0.6,
+  );
+  static const _fade = Curves.fastOutSlowIn;
+  static const _padding = EdgeInsets.symmetric(horizontal: 12, vertical: 7);
+  // For lines that trail nothing: a listenable that never calls.
+  static const _still = AlwaysStoppedAnimation<double>(0);
 
   /// Lines from the active one, limited to [_reach] either way: negative
   /// above, positive below. Null before the first line is reached.
@@ -749,6 +877,7 @@ class _LyricRowState extends State<_LyricRow> {
     super.initState();
     _relative = _relativeNow();
     widget.active.addListener(_onActiveChanged);
+    widget.browsing.addListener(_onBrowsingChanged);
   }
 
   @override
@@ -757,6 +886,10 @@ class _LyricRowState extends State<_LyricRow> {
     if (oldWidget.active != widget.active) {
       oldWidget.active.removeListener(_onActiveChanged);
       widget.active.addListener(_onActiveChanged);
+    }
+    if (oldWidget.browsing != widget.browsing) {
+      oldWidget.browsing.removeListener(_onBrowsingChanged);
+      widget.browsing.addListener(_onBrowsingChanged);
     }
   }
 
@@ -772,9 +905,18 @@ class _LyricRowState extends State<_LyricRow> {
     });
   }
 
+  void _onBrowsingChanged() {
+    // Only lines near enough to be out of focus have anything to change.
+    final relative = _relative;
+    if (relative != null && relative != 0 && relative.abs() < _reach) {
+      setState(() {});
+    }
+  }
+
   @override
   void dispose() {
     widget.active.removeListener(_onActiveChanged);
+    widget.browsing.removeListener(_onBrowsingChanged);
     super.dispose();
   }
 
@@ -797,26 +939,35 @@ class _LyricRowState extends State<_LyricRow> {
     final filling = widget.sweep && (relative == 0 || relative == -1);
 
     final scale = _scaleAt(relative);
-    // Dimming is done in the text colour, not with a layer per line. While
-    // it fills, the active line's unsung words wait at a readable grey.
-    final opacity = isActive
+    // While it fills, the active line's unsung words wait at a readable
+    // grey.
+    final brightness = isActive
         ? (widget.sweep ? 0.42 : 1.0)
         : 0.44 * (distance == 1 ? 0.58 : (isPast ? 0.38 : 0.30));
+    // Depth of field: the further from the line being sung, the softer.
+    // Lines come back into focus while the user is browsing, and lines too
+    // far away to be on screen are never blurred at all.
+    final softness =
+        !widget.soften ||
+            widget.browsing.value ||
+            relative == null ||
+            distance >= _reach
+        ? 0
+        : math.min(distance, 4);
     final shift = isActive ? -3.5 : (isPast ? -1.5 : 3.5);
-    final glow = [
-      Shadow(color: Colors.white.withValues(alpha: 0.50), blurRadius: 8),
-    ];
+    // Lines at and just below the active one may be trailing.
+    final trailing = relative != null && relative >= 0 && relative < _reach;
 
     final words = Stack(
       children: [
-        AnimatedDefaultTextStyle(
-          duration: timed(700),
-          curve: _ease,
-          style: widget.style.copyWith(
-            color: Colors.white.withValues(alpha: opacity),
-            shadows: !widget.sweep && isActive ? glow : const [],
-          ),
-          child: Text(shown),
+        _LyricText(
+          text: shown,
+          style: widget.style,
+          padding: _padding,
+          softness: softness,
+          brightness: brightness,
+          glow: !widget.sweep && isActive,
+          animate: !reduceMotion,
         ),
         if (filling)
           // The lit words, fading away once the line has been sung.
@@ -825,23 +976,26 @@ class _LyricRowState extends State<_LyricRow> {
               child: ExcludeSemantics(
                 child: AnimatedOpacity(
                   opacity: isActive ? 1 : 0,
-                  duration: timed(700),
-                  curve: _ease,
-                  child: Align(
-                    alignment: AlignmentDirectional.topStart,
-                    // Repaints on every frame, and only itself.
-                    child: RepaintBoundary(
-                      child: LyricFill(
-                        text: shown,
-                        style: widget.style.copyWith(
-                          color: Colors.white,
-                          shadows: glow,
+                  duration: timed(320),
+                  curve: _fade,
+                  child: Padding(
+                    padding: _padding,
+                    child: Align(
+                      alignment: AlignmentDirectional.topStart,
+                      // Repaints on every frame, and only itself.
+                      child: RepaintBoundary(
+                        child: LyricFill(
+                          text: shown,
+                          style: widget.style.copyWith(
+                            color: Colors.white,
+                            shadows: _LyricTextState.glow,
+                          ),
+                          units: lyricUnits(
+                            widget.line,
+                            nextLineAt: widget.nextLineAt,
+                          ),
+                          position: widget.clock,
                         ),
-                        units: lyricUnits(
-                          widget.line,
-                          nextLineAt: widget.nextLineAt,
-                        ),
-                        position: widget.clock,
                       ),
                     ),
                   ),
@@ -854,15 +1008,21 @@ class _LyricRowState extends State<_LyricRow> {
 
     final row = TweenAnimationBuilder<double>(
       tween: Tween(end: shift),
-      duration: timed(900),
-      curve: _ease,
-      builder: (context, dy, child) =>
-          Transform.translate(offset: Offset(0, dy), child: child),
+      duration: timed(600),
+      curve: _step,
+      builder: (context, dy, child) => ListenableBuilder(
+        listenable: trailing ? widget.trail : _still,
+        builder: (context, child) => Transform.translate(
+          offset: Offset(0, dy + (trailing ? widget.trailOf(widget.index) : 0)),
+          child: child,
+        ),
+        child: child,
+      ),
       child: AnimatedScale(
         scale: scale,
         alignment: start,
-        duration: timed(900),
-        curve: _ease,
+        duration: timed(700),
+        curve: _grow,
         // While it changes size the line is scaled as a picture. Drawing the
         // text itself at a new size on every frame makes the letters jitter
         // and has every glyph drawn afresh each time. At rest it is text
@@ -873,14 +1033,13 @@ class _LyricRowState extends State<_LyricRow> {
         },
         // Its own layer, so moving or resizing the line redraws nothing.
         child: RepaintBoundary(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            child: Align(
-              alignment: AlignmentDirectional.centerStart,
-              child: ConstrainedBox(
-                constraints: BoxConstraints(maxWidth: widget.textWidth),
-                child: words,
+          child: Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxWidth: widget.textWidth + _padding.horizontal,
               ),
+              child: words,
             ),
           ),
         ),
@@ -899,6 +1058,222 @@ class _LyricRowState extends State<_LyricRow> {
     );
   }
 }
+
+/// A lyric line's text, at a given brightness and sharpness.
+///
+/// Lines away from the one being sung are out of focus. Blurring text on
+/// every frame is costly, so a soft line is blurred once and kept as a
+/// picture ([_SoftText]). When its softness changes, the new picture comes
+/// up over the old one and only then does the old one go, so the two never
+/// add up to a line brighter or dimmer than it should be.
+class _LyricText extends StatefulWidget {
+  const _LyricText({
+    required this.text,
+    required this.style,
+    required this.padding,
+    required this.softness,
+    required this.brightness,
+    required this.glow,
+    required this.animate,
+  });
+
+  final String text;
+  final TextStyle style;
+  final EdgeInsets padding;
+
+  /// 0 is sharp; each step up is further out of focus.
+  final int softness;
+  final double brightness;
+
+  /// A soft halo around sharp text.
+  final bool glow;
+  final bool animate;
+
+  @override
+  State<_LyricText> createState() => _LyricTextState();
+}
+
+class _LyricTextState extends State<_LyricText>
+    with SingleTickerProviderStateMixin {
+  static const glow = [Shadow(color: Color(0x80FFFFFF), blurRadius: 8)];
+
+  late final _mix = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 380),
+    value: 1,
+  );
+  late final _arriving = CurvedAnimation(
+    parent: _mix,
+    curve: const Interval(0, 0.5, curve: Curves.fastOutSlowIn),
+  );
+  late final _stillThere = CurvedAnimation(
+    parent: _mix,
+    curve: const Interval(0.5, 1, curve: Curves.fastOutSlowIn),
+  );
+  late final _leaving = ReverseAnimation(_stillThere);
+
+  /// The softness being left, while the old and new pictures are mixed.
+  int? _from;
+
+  @override
+  void initState() {
+    super.initState();
+    _mix.addStatusListener((status) {
+      if (status == AnimationStatus.completed && _from != null) {
+        setState(() => _from = null);
+      }
+    });
+  }
+
+  @override
+  void didUpdateWidget(_LyricText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.softness == widget.softness) return;
+    if (widget.animate) {
+      _from = oldWidget.softness;
+      _mix.forward(from: 0);
+    } else {
+      _from = null;
+      _mix.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _arriving.dispose();
+    _stillThere.dispose();
+    _mix.dispose();
+    super.dispose();
+  }
+
+  Widget _layer(int softness, double white) => softness == 0
+      ? Padding(
+          padding: widget.padding,
+          child: Text(
+            widget.text,
+            style: widget.style.copyWith(
+              color: Colors.white.withValues(alpha: white),
+              shadows: widget.glow ? glow : null,
+            ),
+          ),
+        )
+      : _SoftText(
+          text: widget.text,
+          style: widget.style,
+          padding: widget.padding,
+          sigma: 0.92 * softness + 0.17,
+        );
+
+  @override
+  Widget build(BuildContext context) {
+    final from = _from;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(end: widget.brightness),
+      duration: widget.animate
+          ? const Duration(milliseconds: 320)
+          : Duration.zero,
+      curve: Curves.fastOutSlowIn,
+      builder: (context, brightness, _) {
+        // One sharp layer carries its brightness in its colour, which costs
+        // nothing. Anything else is drawn in white and dimmed as a whole.
+        final inColour = from == null && widget.softness == 0;
+        return Opacity(
+          opacity: inColour ? 1 : brightness,
+          child: Stack(
+            children: [
+              if (from != null)
+                FadeTransition(
+                  key: ValueKey(from),
+                  opacity: _leaving,
+                  child: ExcludeSemantics(child: _layer(from, 1)),
+                ),
+              FadeTransition(
+                key: ValueKey(widget.softness),
+                opacity: from == null ? kAlwaysCompleteAnimation : _arriving,
+                child: _layer(widget.softness, inColour ? brightness : 1),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// Text out of focus: blurred once and kept as a picture, which is drawn
+/// again only when the text, its style or its size changes.
+class _SoftText extends StatefulWidget {
+  const _SoftText({
+    required this.text,
+    required this.style,
+    required this.padding,
+    required this.sigma,
+  });
+
+  final String text;
+  final TextStyle style;
+
+  /// Room around the text for the blur to spread into.
+  final EdgeInsets padding;
+  final double sigma;
+
+  @override
+  State<_SoftText> createState() => _SoftTextState();
+}
+
+class _SoftTextState extends State<_SoftText> {
+  final _picture = SnapshotController(allowSnapshotting: true);
+
+  @override
+  void didUpdateWidget(_SoftText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.text != widget.text ||
+        oldWidget.style != widget.style ||
+        oldWidget.padding != widget.padding ||
+        oldWidget.sigma != widget.sigma) {
+      _picture.clear();
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The text size or the reading direction changed.
+    _picture.clear();
+  }
+
+  @override
+  void dispose() {
+    _picture.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Read here so that a change to either draws the picture again.
+    MediaQuery.textScalerOf(context);
+    Directionality.of(context);
+    return SnapshotWidget(
+      controller: _picture,
+      autoresize: true,
+      child: ImageFiltered(
+        imageFilter: ImageFilter.blur(
+          sigmaX: widget.sigma,
+          sigmaY: widget.sigma,
+          tileMode: TileMode.decal,
+        ),
+        child: Padding(
+          padding: widget.padding,
+          child: Text(
+            widget.text,
+            style: widget.style.copyWith(color: Colors.white),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ---- Controls ----
 
 /// Text size for the lyrics, with a way back to the default.
