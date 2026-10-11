@@ -9,6 +9,37 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.7.1 (build 12) - 2026-10-11
+
+Fixes what running 1.7.0 on the owner's phone showed. The cause was found
+by timing frames on that phone with test builds, not by guessing.
+
+### Fixed
+
+- With music playing, Home took more than the phone's whole frame time,
+  which slowed the system's own animations over the app: the notification
+  shade and the control centre moved as if the screen ran at a fraction of
+  its 120 Hz. While music plays, the bars in the "Now playing" pill redraw
+  the screen on every frame, and every one of those frames blurred the
+  artwork again behind the search field and behind the pill. On the phone,
+  18 to 31 frames in a hundred ran late; without those two blurs, 2 to 4,
+  fewer than in 1.5.0. The pills now paint their glass without blurring
+  what is behind them, and look the same over the dark scrim they sit on.
+  The navigation bar that came in 1.6.0 added one more glass pass to each
+  frame, which is what pushed an already heavy screen over the limit; with
+  the blurs gone it costs nothing that can be measured, and it stays.
+
+### Changed
+
+- The active tab in the navigation bar takes the app's accent colour,
+  which follows the cover art while "Match the cover art" is on, in place
+  of a red of its own.
+
+### Tests
+
+- Home's hero is checked to hold no backdrop blur while its bars move,
+  and the bar's active colour is checked against the accent.
+
 ## 1.7.0 (build 11) - 2026-10-11
 
 Published as a normal release at the owner's request. Version 1.6.0 was run
