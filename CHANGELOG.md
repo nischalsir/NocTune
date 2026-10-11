@@ -9,6 +9,43 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.5.0 (build 9) - 2026-10-11
+
+Published as a normal release at the owner's request; not yet run on a
+phone. The lyric motion was tuned against a screen recording the owner
+supplied of the motion wanted, measured line by line and frame by frame.
+
+### Changed
+
+- Lyrics, moving to the next line: the list is carried there by a spring
+  instead of a 900 ms glide. It is quick away, about half way after 150 ms
+  and at rest within 600 ms, and it never overshoots. A line that arrives
+  while the list is still moving sets the spring off at the speed the list
+  already has.
+- Lyrics: the lines below the new one trail behind the list and catch up
+  one after another, the further down the later. They are never pushed
+  down first: each simply rises on a softer spring.
+- Lyrics: a line now brightens or dims in 320 ms (it was 700), and grows or
+  shrinks on a spring with a slight overshoot.
+- Lyrics: lines away from the one being sung are out of focus again, more
+  so the further away. Each is blurred once and kept as a picture, and a
+  change of focus fades one picture over another, so no blur is worked out
+  on each frame. The lines come into focus while the list is moved by
+  hand. Devices short of memory keep every line sharp.
+- The word-by-word fill is as it was.
+- Bottom bar: the selection travels to a tab on a spring that passes it by
+  a touch and settles, and the glass lens springs up under the finger and
+  settles back when let go.
+- Settings: the theme is chosen with the same glass selector as the
+  navigation bar, by a tap or by sliding across it. The switches are
+  iOS-style: the thumb stretches under the finger and can be dragged.
+
+### Tests
+
+- A line change is checked frame by frame: no line moves more than a few
+  pixels between frames, none moves backwards, the lower lines trail and
+  then catch up, and a line arriving mid-move does not stop the list.
+
 ## 1.4.1 (build 8) - 2026-10-11
 
 Published as a normal release at the owner's request; not yet run on a
