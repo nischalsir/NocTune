@@ -10,10 +10,33 @@ import 'package:noctune/data/models/playlist.dart';
 import 'package:noctune/data/models/track.dart';
 import 'package:noctune/data/repositories/library_repository.dart';
 import 'package:noctune/features/library/collection_screen.dart';
+import 'package:noctune/features/library/covers.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-// The playlist page asks for the repository; these tests never write to it.
-class _FakeRepository extends Fake implements LibraryRepository {}
+// Stands in for the library's storage and records what it was asked to do.
+class _FakeRepository extends Fake implements LibraryRepository {
+  final calls = <String>[];
+
+  @override
+  Future<void> setPlaylistCover(int playlistId, String? path) async =>
+      calls.add('cover $playlistId $path');
+
+  @override
+  Future<void> addTracksToPlaylist(int playlistId, List<int> trackIds) async =>
+      calls.add('add $playlistId $trackIds');
+}
+
+// Hands back a fixed picture in place of the system's picker.
+class _FakeCovers extends Fake implements CoverStore {
+  final discarded = <String?>[];
+
+  @override
+  Future<String?> pick() async => '/covers/mine.jpg';
+
+  @override
+  Future<void> discard(String? path) async => discarded.add(path);
+}
 
 class _FakeHandler extends Fake implements NocAudioHandler {
   final calls = <String>[];
@@ -56,10 +79,15 @@ void main() {
     _track(4, 'Four', art: '/art/a.jpg'),
   ];
 
+  late _FakeRepository repository;
+  late _FakeCovers covers;
+
   Future<_FakeHandler> pump(
     WidgetTester tester, {
     required Widget page,
     List<Track> tracks = const [],
+    List<Track> library = const [],
+    Playlist? saved,
     Size size = const Size(390, 844),
     Brightness brightness = Brightness.dark,
   }) async {
@@ -67,15 +95,23 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     final handler = _FakeHandler();
+    repository = _FakeRepository();
+    covers = _FakeCovers();
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           audioHandlerProvider.overrideWithValue(handler),
-          libraryRepositoryProvider.overrideWithValue(_FakeRepository()),
+          libraryRepositoryProvider.overrideWithValue(repository),
+          sharedPreferencesProvider.overrideWithValue(preferences),
+          coverStoreProvider.overrideWithValue(covers),
+          allTracksProvider.overrideWith((ref) => library),
+          favoritesProvider.overrideWith((ref) => tracks),
           currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
           groupTracksProvider.overrideWith((ref, key) => tracks),
           playlistTracksProvider.overrideWith((ref, id) => tracks),
-          playlistsProvider.overrideWith((ref) => [_playlist]),
+          playlistsProvider.overrideWith((ref) => [saved ?? _playlist]),
         ],
         child: MaterialApp(
           theme: buildNocTheme(brightness, NocAccent.red),
@@ -155,6 +191,148 @@ void main() {
     await pump(tester, page: albumPage, tracks: [album[0], album[3]]);
 
     expect(fan(), findsOneWidget);
+  });
+
+  testWidgets('with two covers nothing leans out on one side alone', (
+    tester,
+  ) async {
+    await pump(tester, page: albumPage, tracks: [album[0], album[1]]);
+
+    expect(fan(), findsOneWidget);
+    expect(tester.widget<Artwork>(fan()).path, '/art/a.jpg');
+  });
+
+  group('favourites', () {
+    testWidgets('open as a page like an album', (tester) async {
+      final handler = await pump(
+        tester,
+        page: const FavouritesScreen(),
+        tracks: album,
+      );
+
+      expect(find.text('Favourites'), findsOneWidget);
+      expect(find.text('4 tracks · 1 h 11 min'), findsOneWidget);
+      await tester.tap(find.text('Shuffle'));
+      await tester.pumpAndSettle();
+      expect(handler.calls, ['play One of 4', 'shuffle all']);
+    });
+
+    testWidgets('take a cover the user picks, in front of the others', (
+      tester,
+    ) async {
+      await pump(tester, page: const FavouritesScreen(), tracks: album);
+      expect(tester.widget<Artwork>(fan().last).path, '/art/a.jpg');
+
+      await tester.tap(find.byTooltip('Favourites options'));
+      await tester.pumpAndSettle();
+      // There is nothing to remove until a cover has been chosen.
+      expect(find.text('Remove cover'), findsNothing);
+      await tester.tap(find.text('Change cover'));
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<Artwork>(fan().last).path, '/covers/mine.jpg');
+      final preferences = await SharedPreferences.getInstance();
+      expect(preferences.getString('favourites_cover'), '/covers/mine.jpg');
+
+      await tester.tap(find.byTooltip('Favourites options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove cover'));
+      await tester.pumpAndSettle();
+
+      expect(tester.widget<Artwork>(fan().last).path, '/art/a.jpg');
+      expect(preferences.getString('favourites_cover'), isNull);
+      // The picture that was replaced is not left behind.
+      expect(covers.discarded, [null, '/covers/mine.jpg']);
+    });
+  });
+
+  group('a playlist', () {
+    testWidgets('is given a cover from its menu', (tester) async {
+      await pump(tester, page: playlistPage, tracks: album);
+
+      await tester.tap(find.byTooltip('Playlist options'));
+      await tester.pumpAndSettle();
+      expect(find.text('Remove cover'), findsNothing);
+      await tester.tap(find.text('Change cover'));
+      await tester.pumpAndSettle();
+
+      expect(repository.calls, ['cover 4 /covers/mine.jpg']);
+    });
+
+    testWidgets('shows its own cover in front and can drop it', (tester) async {
+      await pump(
+        tester,
+        page: playlistPage,
+        tracks: album,
+        saved: Playlist(
+          id: 4,
+          name: 'Night drive',
+          createdAt: DateTime(2026),
+          trackCount: 4,
+          coverPath: '/covers/old.jpg',
+        ),
+      );
+      expect(tester.widget<Artwork>(fan().last).path, '/covers/old.jpg');
+
+      await tester.tap(find.byTooltip('Playlist options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove cover'));
+      await tester.pumpAndSettle();
+
+      expect(repository.calls, ['cover 4 null']);
+      expect(covers.discarded, ['/covers/old.jpg']);
+    });
+
+    testWidgets('is filled by ticking tracks from the library', (tester) async {
+      final library = [
+        ...album,
+        _track(5, 'Five'),
+        _track(6, 'Six'),
+        _track(7, 'Seven'),
+      ];
+      await pump(tester, page: playlistPage, tracks: album, library: library);
+
+      await tester.tap(find.byTooltip('Playlist options'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Add tracks'));
+      await tester.pumpAndSettle();
+
+      // Nothing is ticked yet, and what it already holds says so.
+      expect(
+        tester.widget<FilledButton>(find.byType(FilledButton)).onPressed,
+        isNull,
+      );
+      expect(find.text('Added'), findsNWidgets(4));
+
+      await tester.tap(find.text('Seven'));
+      await tester.tap(find.text('Five'));
+      // A track already in it cannot be ticked again.
+      await tester.tap(find.text('Two'));
+      await tester.pump();
+      expect(find.text('Add 2'), findsOneWidget);
+
+      await tester.enterText(find.byType(TextField), 'six');
+      await tester.pump();
+      expect(find.text('Five'), findsNothing);
+      await tester.tap(find.text('Six'));
+      await tester.pump();
+
+      await tester.tap(find.text('Add 3'));
+      await tester.pumpAndSettle();
+
+      // In the order they were ticked.
+      expect(repository.calls, ['add 4 [7, 5, 6]']);
+    });
+
+    testWidgets('offers to add tracks while it is empty', (tester) async {
+      await pump(tester, page: playlistPage, library: album);
+
+      await tester.tap(find.text('Add tracks'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('One'), findsOneWidget);
+      expect(find.text('Added'), findsNothing);
+    });
   });
 
   testWidgets('a playlist can be renamed or deleted from its menu', (

@@ -385,7 +385,12 @@ class LibraryRepository {
 
   Future<List<Playlist>> playlists() async {
     final rows = await _db.rawQuery(
-      'SELECT p.id, p.name, p.created_at, COUNT(pt.track_id) AS track_count '
+      'SELECT p.id, p.name, p.created_at, p.cover_path, '
+      'COUNT(pt.track_id) AS track_count, '
+      '(SELECT t.art_path FROM playlist_tracks first '
+      'JOIN tracks t ON t.id = first.track_id '
+      'WHERE first.playlist_id = p.id AND t.art_path IS NOT NULL '
+      'ORDER BY first.position LIMIT 1) AS art_path '
       'FROM playlists p LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id '
       'GROUP BY p.id ORDER BY p.name COLLATE NOCASE',
     );
@@ -411,6 +416,18 @@ class LibraryRepository {
     _changes.add(null);
   }
 
+  /// Sets the picture the user chose for a playlist; null goes back to the
+  /// covers of its tracks.
+  Future<void> setPlaylistCover(int playlistId, String? path) async {
+    await _db.update(
+      'playlists',
+      {'cover_path': path},
+      where: 'id = ?',
+      whereArgs: [playlistId],
+    );
+    _changes.add(null);
+  }
+
   Future<void> deletePlaylist(int playlistId) async {
     await _db.delete('playlists', where: 'id = ?', whereArgs: [playlistId]);
     _changes.add(null);
@@ -424,6 +441,24 @@ class LibraryRepository {
       'FROM playlist_tracks WHERE playlist_id = ?1))',
       [playlistId, trackId],
     );
+    _changes.add(null);
+  }
+
+  /// Appends several tracks to a playlist in the order given, leaving out
+  /// any that are already in it.
+  Future<void> addTracksToPlaylist(int playlistId, List<int> trackIds) async {
+    if (trackIds.isEmpty) return;
+    await _db.transaction((txn) async {
+      for (final trackId in trackIds) {
+        await txn.rawInsert(
+          'INSERT OR IGNORE INTO playlist_tracks'
+          '(playlist_id, track_id, position) '
+          'VALUES(?1, ?2, (SELECT COALESCE(MAX(position), -1) + 1 '
+          'FROM playlist_tracks WHERE playlist_id = ?1))',
+          [playlistId, trackId],
+        );
+      }
+    });
     _changes.add(null);
   }
 

@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
 
 /// Shared-element tag: the mini-player's cover grows into the player's cover.
 const kNowPlayingArtworkHero = 'now-playing-artwork';
@@ -14,14 +15,20 @@ final miniPlayerSurfaceKey = GlobalKey();
 /// the player's lower edge until they are off the screen.
 final playerBarPush = ValueNotifier<double>(0);
 
-const _entranceCurve = Curves.easeOutCubic;
+// The page moves on springs that never pass their end: quick away from rest
+// and a long, soft arrival. Opening takes a little longer than closing.
+final _opening = SpringDescription.withDurationAndBounce(
+  duration: const Duration(milliseconds: 550),
+);
+final _closing = SpringDescription.withDurationAndBounce(
+  duration: const Duration(milliseconds: 500),
+);
 
-// Slow to start, so the mini-player has dissolved into the player before the
-// surface has grown far.
-const _growCurve = Curves.fastOutSlowIn;
+// Close enough to its end to stop: under a pixel away and all but still.
+const _atRest = Tolerance(distance: 0.001, velocity: 0.01);
 
-/// The part of the transition over which the page fades in at the start,
-/// and out at the end of closing.
+/// The part of the way open over which the page fades in at the start, and
+/// out at the end of closing.
 const _dissolve = 0.2;
 
 /// Opens the full player out of the mini-player: its surface grows upwards
@@ -32,7 +39,7 @@ const _dissolve = 0.2;
 ///
 /// Dragging down anywhere that isn't a control moves the page with the
 /// finger; letting go either closes it or settles it back, depending on how
-/// far and how fast it was moving.
+/// far and how fast it was moving, and carries on at the speed it had.
 class NowPlayingRoute extends PageRoute<void> {
   NowPlayingRoute({required this.child}) : super(fullscreenDialog: true);
 
@@ -41,17 +48,16 @@ class NowPlayingRoute extends PageRoute<void> {
   // Where the mini-player was when the player was opened.
   Rect? _origin;
 
+  // The speed the page was let go at, in page-heights a second, for the
+  // spring that takes over from the finger.
+  double _releaseVelocity = 0;
+
   /// Downward speed, in page-heights per second, that counts as a flick.
   static const _flingToClose = 0.9;
 
   /// Released at rest with less than this much of the page still showing,
   /// it closes.
   static const _closeBelow = 0.66;
-
-  // True from the first drag until the page is fully open again. While set,
-  // the page position maps straight onto the animation value, so it stays
-  // under the finger and nothing jumps when the finger lifts.
-  bool _followingFinger = false;
 
   @override
   bool get opaque => true;
@@ -66,10 +72,24 @@ class NowPlayingRoute extends PageRoute<void> {
   bool get maintainState => true;
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 420);
+  Duration get transitionDuration => const Duration(milliseconds: 550);
 
   @override
-  Duration get reverseTransitionDuration => const Duration(milliseconds: 300);
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 500);
+
+  @override
+  Simulation createSimulation({required bool forward}) {
+    final velocity = _releaseVelocity;
+    _releaseVelocity = 0;
+    return SpringSimulation(
+      forward ? _opening : _closing,
+      controller!.value,
+      forward ? 1 : 0,
+      velocity,
+      tolerance: _atRest,
+      snapToEnd: true,
+    );
+  }
 
   @override
   void install() {
@@ -91,32 +111,11 @@ class NowPlayingRoute extends PageRoute<void> {
     }
   }
 
-  /// How far the surface has grown, from the mini-player (0) to the whole
-  /// screen (1).
-  double get _grown {
-    final value = controller!.value;
-    return _followingFinger ? value : _growCurve.transform(value);
-  }
-
   void _pushBar() {
     final screen = navigator?.context.findRenderObject();
     if (screen is! RenderBox) return;
-    playerBarPush.value = (screen.size.height - _origin!.bottom) * _grown;
-  }
-
-  void _startDrag() {
-    final controller = this.controller;
-    if (controller == null) return;
-    controller.stop();
-    if (!_followingFinger) {
-      // Re-express the current on-screen position in linear terms, so
-      // grabbing the page mid-animation doesn't move it.
-      final position = (_origin == null ? _entranceCurve : _growCurve)
-          .transform(controller.value);
-      _followingFinger = true;
-      controller.value = position;
-      changedInternalState();
-    }
+    playerBarPush.value =
+        (screen.size.height - _origin!.bottom) * controller!.value;
   }
 
   void _updateDrag(DragUpdateDetails details, double pageHeight) {
@@ -132,25 +131,26 @@ class NowPlayingRoute extends PageRoute<void> {
     // not moving back up. The direction of travel decides, not just position.
     if (velocity > _flingToClose ||
         (velocity >= 0 && controller.value < _closeBelow)) {
+      _releaseVelocity = -velocity;
       navigator?.pop();
     } else {
-      _settleOpen();
+      _settleOpen(-velocity);
     }
   }
 
-  void _settleOpen() {
-    controller
-        ?.animateTo(
-          1,
-          duration: const Duration(milliseconds: 240),
-          curve: Curves.easeOutCubic,
-        )
-        .whenCompleteOrCancel(() {
-          if (controller?.value == 1) {
-            _followingFinger = false;
-            changedInternalState();
-          }
-        });
+  void _settleOpen([double velocity = 0]) {
+    final controller = this.controller;
+    if (controller == null) return;
+    controller.animateWith(
+      SpringSimulation(
+        _opening,
+        controller.value,
+        1,
+        velocity,
+        tolerance: _atRest,
+        snapToEnd: true,
+      ),
+    );
   }
 
   @override
@@ -163,7 +163,7 @@ class NowPlayingRoute extends PageRoute<void> {
     // Sliders, buttons and scrolling lists inside the page win their own
     // gestures; this only receives drags on the open areas and the cover.
     return GestureDetector(
-      onVerticalDragStart: (_) => _startDrag(),
+      onVerticalDragStart: (_) => controller?.stop(),
       onVerticalDragUpdate: (details) => _updateDrag(details, pageHeight),
       onVerticalDragEnd: (details) => _endDrag(details, pageHeight),
       onVerticalDragCancel: _settleOpen,
@@ -183,43 +183,38 @@ class NowPlayingRoute extends PageRoute<void> {
       return FadeTransition(opacity: animation, child: child);
     }
     final origin = _origin;
-    if (origin != null) {
-      final screen = Offset.zero & MediaQuery.sizeOf(context);
-      final corner = math.min(32.0, origin.height / 2);
-      return AnimatedBuilder(
-        animation: animation,
-        builder: (context, page) {
-          final grown = _grown;
-          // The page keeps its size and place; the surface it shows through
-          // is what grows.
-          return ClipRRect(
-            clipper: _SurfaceClipper(
-              RRect.fromRectAndRadius(
-                Rect.lerp(origin, screen, grown)!,
-                Radius.circular(lerpDouble(corner, 0, grown)!),
-              ),
-            ),
-            child: Opacity(
-              opacity: (controller!.value / _dissolve).clamp(0.0, 1.0),
-              child: page,
-            ),
-          );
-        },
+    if (origin == null) {
+      return SlideTransition(
+        position: Tween<Offset>(
+          begin: const Offset(0, 1),
+          end: Offset.zero,
+        ).animate(animation),
         child: child,
       );
     }
-    final progress = _followingFinger
-        ? animation
-        : CurvedAnimation(
-            parent: animation,
-            curve: _entranceCurve,
-            reverseCurve: Curves.easeInCubic,
-          );
-    return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(0, 1),
-        end: Offset.zero,
-      ).animate(progress),
+    final screen = Offset.zero & MediaQuery.sizeOf(context);
+    final corner = math.min(32.0, origin.height / 2);
+    return AnimatedBuilder(
+      animation: animation,
+      builder: (context, page) {
+        // How far the surface has grown, from the mini-player to the whole
+        // screen.
+        final grown = controller!.value;
+        // The page keeps its size and place; the surface it shows through
+        // is what grows.
+        return ClipRRect(
+          clipper: _SurfaceClipper(
+            RRect.fromRectAndRadius(
+              Rect.lerp(origin, screen, grown)!,
+              Radius.circular(lerpDouble(corner, 0, grown)!),
+            ),
+          ),
+          child: Opacity(
+            opacity: (grown / _dissolve).clamp(0.0, 1.0),
+            child: page,
+          ),
+        );
+      },
       child: child,
     );
   }

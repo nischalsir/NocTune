@@ -177,6 +177,13 @@ void main() {
               ],
             ),
             playlistTracksProvider.overrideWith((ref, id) => tracks),
+            searchResultsProvider.overrideWith(
+              (ref, query) => [
+                for (final track in tracks)
+                  if (track.title.toLowerCase().contains(query.toLowerCase()))
+                    track,
+              ],
+            ),
             allTracksProvider.overrideWith((ref) => tracks),
             recentlyAddedProvider.overrideWith((ref) => tracks),
             recentlyPlayedProvider.overrideWith((ref) => tracks),
@@ -437,6 +444,48 @@ void main() {
       act: () async {
         await openPlaylist();
         await tester.dragFrom(const Offset(195, 600), const Offset(0, -330));
+      },
+    );
+    // The library tab, its search, and the favourites page.
+    Future<void> settleCovers() async {
+      for (var i = 0; i < 8; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 120)),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+    }
+
+    await shoot(
+      '17_library',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: () => tester.tap(find.text('Library').last, warnIfMissed: false),
+    );
+    await shoot(
+      '18_library_search',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: () async {
+        await tester.tap(find.text('Library').last, warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.tap(find.byTooltip('Search the library'));
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.enterText(find.byType(TextField).last, 'li');
+      },
+    );
+    await shoot(
+      '19_favourites',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: () async {
+        await tester.tap(find.text('Library').last, warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 600));
+        // Its chip is past the edge of a phone until the row is scrolled.
+        await tester.ensureVisible(find.text('Favourites').last);
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('Favourites').last);
+        await settleCovers();
       },
     );
     // The player part-way through growing out of the mini-player, to check

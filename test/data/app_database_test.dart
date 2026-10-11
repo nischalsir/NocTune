@@ -113,4 +113,74 @@ void main() {
     expect(await repository.importedLyrics(id), isNull);
     await db.close();
   });
+
+  test(
+    'a version 3 library gains playlist covers and keeps its playlists',
+    () async {
+      final path =
+          '${Directory.systemTemp.createTempSync('noctune_db').path}/v3';
+      final old = await databaseFactoryFfi.openDatabase(
+        path,
+        options: OpenDatabaseOptions(
+          version: 3,
+          onCreate: (db, _) async {
+            await db.execute('''
+            CREATE TABLE tracks(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, uri TEXT NOT NULL UNIQUE,
+              file_name TEXT NOT NULL, folder TEXT NOT NULL,
+              title TEXT NOT NULL, artist TEXT, album TEXT, album_artist TEXT,
+              genre TEXT, duration_ms INTEGER NOT NULL DEFAULT 0,
+              size_bytes INTEGER NOT NULL DEFAULT 0, codec TEXT,
+              sample_rate INTEGER, bit_depth INTEGER, bitrate INTEGER,
+              track_no INTEGER, disc_no INTEGER, year INTEGER,
+              date_added INTEGER NOT NULL, date_modified INTEGER NOT NULL,
+              art_path TEXT, is_favorite INTEGER NOT NULL DEFAULT 0,
+              play_count INTEGER NOT NULL DEFAULT 0, last_played_at INTEGER,
+              reader_version INTEGER NOT NULL DEFAULT 1)''');
+            await db.execute('''
+            CREATE TABLE playlists(
+              id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL,
+              created_at INTEGER NOT NULL)''');
+            await db.execute('''
+            CREATE TABLE playlist_tracks(
+              playlist_id INTEGER NOT NULL
+                REFERENCES playlists(id) ON DELETE CASCADE,
+              track_id INTEGER NOT NULL
+                REFERENCES tracks(id) ON DELETE CASCADE,
+              position INTEGER NOT NULL,
+              PRIMARY KEY(playlist_id, track_id))''');
+            await db.execute('''
+            CREATE TABLE lyrics(
+              track_id INTEGER PRIMARY KEY
+                REFERENCES tracks(id) ON DELETE CASCADE,
+              content TEXT NOT NULL)''');
+            await db.execute('''
+            CREATE TABLE plays(
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              track_id INTEGER NOT NULL
+                REFERENCES tracks(id) ON DELETE CASCADE,
+              played_at INTEGER NOT NULL)''');
+            await db.insert('playlists', {'name': 'Drive', 'created_at': 5});
+          },
+        ),
+      );
+      await old.close();
+
+      final db = await AppDatabase.open(
+        path: path,
+        factory: databaseFactoryFfi,
+      );
+      final repository = LibraryRepository(db);
+
+      final playlist = (await repository.playlists()).single;
+      expect(playlist.name, 'Drive');
+      expect(playlist.coverPath, isNull);
+      await repository.setPlaylistCover(playlist.id, '/covers/mine.jpg');
+      expect(
+        (await repository.playlists()).single.coverPath,
+        '/covers/mine.jpg',
+      );
+      await db.close();
+    },
+  );
 }

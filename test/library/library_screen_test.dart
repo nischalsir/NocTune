@@ -11,6 +11,7 @@ import 'package:noctune/data/repositories/library_repository.dart';
 import 'package:noctune/features/library/library_screen.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 class _FakeHandler extends Fake implements NocAudioHandler {
@@ -86,11 +87,14 @@ void main() {
     });
     addTearDown(() => tester.runAsync(db.close));
     handler = _FakeHandler();
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
 
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           libraryRepositoryProvider.overrideWithValue(repository),
+          sharedPreferencesProvider.overrideWithValue(preferences),
           audioHandlerProvider.overrideWithValue(handler),
           currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
           scanControllerProvider.overrideWith(_IdleScanController.new),
@@ -129,12 +133,69 @@ void main() {
     expect(find.text('Three'), findsNothing);
   });
 
+  testWidgets('the round button on a row plays the list from that track', (
+    tester,
+  ) async {
+    await pump(tester);
+
+    final row = find.ancestor(
+      of: find.text('Three'),
+      matching: find.byType(InkWell),
+    );
+    await tester.tap(
+      find.descendant(of: row, matching: find.byIcon(Icons.play_arrow_rounded)),
+    );
+
+    expect(handler.calls, ['play Three of 3']);
+  });
+
+  testWidgets('has a search of its own, with results in place', (tester) async {
+    await pump(tester);
+    expect(find.text('Your library'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Search the library'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField), 'thr');
+    await settle(tester);
+
+    // The results take the place of the list, and of the chips.
+    expect(find.text('Three'), findsOneWidget);
+    expect(find.text('One'), findsNothing);
+    expect(find.text('Albums'), findsNothing);
+    await tester.tap(find.text('Three'));
+    expect(handler.calls, ['play Three of 1']);
+
+    await tester.tap(find.text('Cancel'));
+    await settle(tester);
+    expect(find.text('One'), findsOneWidget);
+    expect(find.text('Your library'), findsOneWidget);
+  });
+
+  testWidgets('back closes its search before anything else', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byTooltip('Search the library'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField), 'zzz');
+    await settle(tester);
+    expect(find.text('No matches'), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await settle(tester);
+
+    expect(find.text('No matches'), findsNothing);
+    expect(find.text('Your library'), findsOneWidget);
+  });
+
   testWidgets('explains sections that have nothing in them', (tester) async {
     await pump(tester);
 
+    // The favourites open as a page of their own.
     await tester.tap(find.text('Favourites'));
     await settle(tester);
     expect(find.text('No favourites yet'), findsOneWidget);
+    expect(find.text('0 tracks'), findsOneWidget);
+    await tester.tap(find.byTooltip('Back'));
+    await settle(tester);
 
     await tester.tap(find.text('Genres'));
     await settle(tester);
@@ -144,13 +205,14 @@ void main() {
   testWidgets('the track menu queues and favourites a track', (tester) async {
     await pump(tester);
 
-    await tester.tap(find.byTooltip('More for One'));
+    // The menu is a press and hold away.
+    await tester.longPress(find.text('One'));
     await settle(tester);
     await tester.tap(find.text('Play next'));
     await settle(tester);
     expect(handler.calls, ['next One']);
 
-    await tester.tap(find.byTooltip('More for One'));
+    await tester.longPress(find.text('One'));
     await settle(tester);
     await tester.tap(find.text('Add to favourites'));
     await settle(tester);
@@ -159,12 +221,13 @@ void main() {
     await settle(tester);
     expect(find.text('One'), findsOneWidget);
     expect(find.text('Two'), findsNothing);
+    expect(find.text('1 track · 3 min'), findsOneWidget);
   });
 
   testWidgets('creates a playlist and adds a track to it', (tester) async {
     await pump(tester);
 
-    await tester.tap(find.byTooltip('More for Three'));
+    await tester.longPress(find.text('Three'));
     await settle(tester);
     await tester.tap(find.text('Add to playlist…'));
     await settle(tester);
@@ -182,5 +245,24 @@ void main() {
     await tester.tap(find.text('Night drive'));
     await settle(tester);
     expect(find.text('Three'), findsOneWidget);
+  });
+
+  testWidgets('a playlist made in the library opens straight away', (
+    tester,
+  ) async {
+    await pump(tester);
+    await tester.tap(find.text('Playlists'));
+    await settle(tester);
+
+    await tester.tap(find.text('New playlist'));
+    await settle(tester);
+    await tester.enterText(find.byType(TextField), 'Road trip');
+    await tester.tap(find.text('Create'));
+    await settle(tester);
+
+    // Its own page, empty, with the way to fill it.
+    expect(find.text('Road trip'), findsOneWidget);
+    expect(find.text('This playlist is empty'), findsOneWidget);
+    expect(find.text('Add tracks'), findsOneWidget);
   });
 }

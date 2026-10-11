@@ -371,7 +371,11 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                             .playTracks(favourites, initialIndex: index),
                       ),
                   ],
-                  onSeeAll: widget.onOpenLibrary,
+                  onSeeAll: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const FavouritesScreen(),
+                    ),
+                  ),
                 ),
               ),
             const SliverToBoxAdapter(child: SizedBox(height: 12)),

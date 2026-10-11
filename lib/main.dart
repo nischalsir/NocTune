@@ -24,11 +24,19 @@ Future<void> main() async {
   // The few things the first screen can't be drawn without, started together
   // rather than one after another. Nothing here touches the network or scans
   // the library.
-  final (database, preferences, cacheDir, documentsDir, audioHandler) = await (
+  final (
+    database,
+    preferences,
+    cacheDir,
+    documentsDir,
+    supportDir,
+    audioHandler,
+  ) = await (
     AppDatabase.open(),
     SharedPreferences.getInstance(),
     getApplicationCacheDirectory(),
     getApplicationDocumentsDirectory(),
+    getApplicationSupportDirectory(),
     // Registers the media session and background playback service with the OS.
     AudioService.init(
       builder: NocAudioHandler.new,
@@ -67,6 +75,7 @@ Future<void> main() async {
         appPathsProvider.overrideWithValue((
           artworkDir: p.join(cacheDir.path, 'artwork'),
           musicDir: documentsDir.path,
+          coverDir: p.join(supportDir.path, 'covers'),
         )),
         ...deviceProfileOverrides,
       ],

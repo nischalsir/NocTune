@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 
 /// Opens NocTune's on-device SQLite database and owns its schema.
 abstract final class AppDatabase {
-  static const _version = 3;
+  static const _version = 4;
 
   /// Opens the database. Tests pass an in-memory [path] and an FFI [factory].
   static Future<Database> open({String? path, DatabaseFactory? factory}) async {
@@ -109,6 +109,11 @@ abstract final class AppDatabase {
         'SELECT id, last_played_at FROM tracks '
         'WHERE last_played_at IS NOT NULL',
       );
+    }
+    if (from < 4) {
+      // A picture the user chose as a playlist's cover, shown in place of
+      // the covers of its tracks.
+      await db.execute('ALTER TABLE playlists ADD COLUMN cover_path TEXT');
     }
   }
 }

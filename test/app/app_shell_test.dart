@@ -122,6 +122,7 @@ Future<void> _pumpApp(
         topTracksInDaysProvider.overrideWith((ref, days) => const []),
         topGroupsProvider.overrideWith((ref, group) => const []),
         recentAlbumsProvider.overrideWith((ref) => albums),
+        groupTracksProvider.overrideWith((ref, key) => tracks),
         searchResultsProvider.overrideWith(
           (ref, query) => [
             for (final track in tracks)
@@ -979,6 +980,51 @@ void main() {
         tester.getTopLeft(find.text('Favourites')).dy,
         lessThan(tester.getTopLeft(find.text('Plays')).dy),
       );
+    });
+
+    testWidgets('an album opened from Home keeps the bar and mini-player', (
+      tester,
+    ) async {
+      await _pumpApp(
+        tester,
+        size: const Size(390, 1700),
+        tracks: songs,
+        albums: const [
+          TrackGroupSummary(name: 'P-POP CULTURE', trackCount: 3, artist: 'KA'),
+        ],
+        nowPlaying: const MediaItem(id: 'file:///a.flac', title: 'Now Song'),
+      );
+
+      await tester.tap(find.text('P-POP CULTURE'));
+      await tester.pumpAndSettle();
+
+      // Its page, with the navigation still on screen and usable.
+      expect(find.text('3 tracks · 9 min'), findsOneWidget);
+      expect(find.byType(MornyeBottomBar), findsOneWidget);
+      expect(find.text('Now Song').hitTestable(), findsOneWidget);
+
+      // Back leaves the page before it does anything else.
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(find.text('3 tracks · 9 min'), findsNothing);
+      expect(find.text('Albums'), findsWidgets);
+      expect(find.text('Press back again to exit'), findsNothing);
+    });
+
+    testWidgets('See all on the favourites opens their page', (tester) async {
+      await _pumpApp(
+        tester,
+        size: const Size(390, 1700),
+        tracks: songs,
+        favourites: [songs[1]],
+      );
+
+      await tester.tap(find.text('See all'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 track · 3 min'), findsOneWidget);
+      expect(find.byTooltip('Favourites options'), findsOneWidget);
+      expect(find.byType(MornyeBottomBar), findsOneWidget);
     });
 
     testWidgets('has no shelves when there is nothing to put on them', (

@@ -10,6 +10,8 @@ class Playlist {
     required this.name,
     required this.createdAt,
     required this.trackCount,
+    this.coverPath,
+    this.artPath,
   });
 
   factory Playlist.fromRow(Map<String, Object?> row) => Playlist(
@@ -17,12 +19,23 @@ class Playlist {
     name: row['name']! as String,
     createdAt: DateTime.fromMillisecondsSinceEpoch(row['created_at']! as int),
     trackCount: row['track_count']! as int,
+    coverPath: row['cover_path'] as String?,
+    artPath: row['art_path'] as String?,
   );
 
   final int id;
   final String name;
   final DateTime createdAt;
   final int trackCount;
+
+  /// A picture the user chose for this playlist, if they have.
+  final String? coverPath;
+
+  /// Artwork of the first track in it that has any.
+  final String? artPath;
+
+  /// What to picture the playlist with: the user's choice, else its tracks'.
+  String? get cover => coverPath ?? artPath;
 }
 
 /// One album, artist, genre or folder, with enough detail to list it.

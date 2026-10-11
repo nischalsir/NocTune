@@ -8,6 +8,7 @@ Track _track(
   String name, {
   String? artist,
   String? album,
+  String? art,
   int durationSeconds = 180,
   int addedMs = 1000,
   int modifiedMs = 500,
@@ -20,6 +21,7 @@ Track _track(
   artist: artist,
   album: album,
   duration: Duration(seconds: durationSeconds),
+  artPath: art,
   sizeBytes: sizeBytes,
   codec: 'flac',
   dateAdded: DateTime.fromMillisecondsSinceEpoch(addedMs),
@@ -304,6 +306,60 @@ void main() {
       await repository.deletePlaylist(playlist);
       expect(await repository.playlists(), isEmpty);
       expect(await repository.tracks(), hasLength(3));
+    });
+
+    test('adds several tracks at once, in order, skipping repeats', () async {
+      final playlist = await repository.createPlaylist('Mix');
+      await repository.addToPlaylist(playlist, ids['B']!);
+
+      await repository.addTracksToPlaylist(playlist, [
+        ids['C']!,
+        ids['B']!,
+        ids['A']!,
+      ]);
+
+      final tracks = await repository.playlistTracks(playlist);
+      expect(tracks.map((t) => t.title), ['B', 'C', 'A']);
+    });
+
+    test('is pictured by its first track with a cover', () async {
+      await repository.upsertTracks([
+        _track('Plain'),
+        _track('Red', art: '/art/red.jpg'),
+        _track('Blue', art: '/art/blue.jpg'),
+      ]);
+      final byTitle = {
+        for (final t in await repository.tracks()) t.title: t.id,
+      };
+      final playlist = await repository.createPlaylist('Mix');
+      expect((await repository.playlists()).single.cover, isNull);
+
+      await repository.addTracksToPlaylist(playlist, [
+        byTitle['Plain']!,
+        byTitle['Blue']!,
+        byTitle['Red']!,
+      ]);
+
+      expect((await repository.playlists()).single.cover, '/art/blue.jpg');
+    });
+
+    test('a cover the user chose comes first, until it is removed', () async {
+      await repository.upsertTracks([_track('Red', art: '/art/red.jpg')]);
+      final red = (await repository.tracks())
+          .firstWhere((t) => t.title == 'Red')
+          .id;
+      final playlist = await repository.createPlaylist('Mix');
+      await repository.addToPlaylist(playlist, red);
+
+      await repository.setPlaylistCover(playlist, '/covers/mine.jpg');
+      var saved = (await repository.playlists()).single;
+      expect(saved.coverPath, '/covers/mine.jpg');
+      expect(saved.cover, '/covers/mine.jpg');
+
+      await repository.setPlaylistCover(playlist, null);
+      saved = (await repository.playlists()).single;
+      expect(saved.coverPath, isNull);
+      expect(saved.cover, '/art/red.jpg');
     });
 
     test('drops playlist entries when a track leaves the library', () async {

@@ -49,6 +49,7 @@ class AppShell extends ConsumerStatefulWidget {
 
 class _AppShellState extends ConsumerState<AppShell> {
   int _currentIndex = _homeIndex;
+  final _homeNavigator = GlobalKey<NavigatorState>();
   final _libraryNavigator = GlobalKey<NavigatorState>();
   final _homeKey = GlobalKey<HomeScreenState>();
   final _mornyeChrome = MornyeChromeController();
@@ -96,15 +97,26 @@ class _AppShellState extends ConsumerState<AppShell> {
     FocusManager.instance.primaryFocus?.unfocus();
   }
 
-  /// System back: leave an opened album or playlist, dismiss the keyboard on
-  /// Search, return to Home, then ask for a second press before leaving.
+  /// System back: leave an opened album or playlist, close a search on Home
+  /// or in the library, dismiss the keyboard on Search, return to Home, then
+  /// ask for a second press before leaving.
   Future<void> _handleBackPress() async {
-    // A search open on Home closes first.
+    // A page opened from Home, such as an album, closes first.
+    final homePages = _homeNavigator.currentState;
+    if (_currentIndex == _homeIndex &&
+        homePages != null &&
+        homePages.canPop()) {
+      homePages.pop();
+      _lastBackPress = null;
+      return;
+    }
+    // Then a search open on Home.
     if (_currentIndex == _homeIndex &&
         (_homeKey.currentState?.closeSearch() ?? false)) {
       _lastBackPress = null;
       return;
     }
+    // In the library: an opened page, or its search.
     if (_currentIndex == _libraryIndex &&
         await (_libraryNavigator.currentState?.maybePop() ??
             Future.value(false))) {
@@ -228,16 +240,21 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     // Each destination with the name its state is kept under.
     final tabs = <(String, Widget)>[
+      // Home and the library each have their own navigator, so opening an
+      // album or playlist keeps the navigation and mini-player on screen.
       (
         'home',
-        HomeScreen(
-          key: _homeKey,
-          onOpenSearch: () => _onNavTap(_searchIndex),
-          onOpenLibrary: () => _onNavTap(_libraryIndex),
+        Navigator(
+          key: _homeNavigator,
+          onGenerateRoute: (_) => MaterialPageRoute<void>(
+            builder: (_) => HomeScreen(
+              key: _homeKey,
+              onOpenSearch: () => _onNavTap(_searchIndex),
+              onOpenLibrary: () => _onNavTap(_libraryIndex),
+            ),
+          ),
         ),
       ),
-      // The library has its own navigator, so opening an album or playlist
-      // keeps the navigation and mini-player on screen.
       (
         'library',
         Navigator(

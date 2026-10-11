@@ -1,6 +1,4 @@
-import 'dart:io';
 import 'dart:math' as math;
-import 'dart:ui' show ImageFilter;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
@@ -9,54 +7,67 @@ import 'package:path/path.dart' as p;
 
 import '../../app/providers.dart';
 import '../../core/format.dart';
+import '../../core/theme/cover_accent.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/frosted.dart';
+import '../../core/widgets/glass_circle.dart';
 import '../../core/widgets/noc_backdrop.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/track.dart';
 import '../../data/repositories/library_repository.dart';
+import 'covers.dart';
 import 'playlist_dialogs.dart';
 import 'track_menu.dart';
+import 'track_picker.dart';
 import 'track_tile.dart';
 
-/// A page for the tracks of one album, artist, genre, folder or playlist.
+/// One thing the page's own menu offers.
+typedef _MenuItem = (String label, VoidCallback run);
+
+/// A page for the tracks of one album, artist, genre, folder or playlist, or
+/// for the favourites.
 ///
-/// From the top: the collection's covers fanned out over a wash of the
-/// first one's colours, its name with how many tracks it holds and how long
-/// they run, Play and Shuffle, and the tracks. All of it scrolls as one
-/// list; the way back and the page's own actions stay at the top.
+/// From the top: the collection's covers over a wash of the front one's
+/// colour, its name with how many tracks it holds and how long they run,
+/// Play and Shuffle, and the tracks. All of it scrolls as one list; the way
+/// back and the page's own menu stay at the top.
 class _CollectionPage extends ConsumerWidget {
   const _CollectionPage({
     required this.title,
     required this.tracks,
     required this.empty,
     this.playlistId,
-    this.actions = const [],
+    this.cover,
+    this.menuTooltip = 'Options',
+    this.menu = const [],
   });
 
   final String title;
   final AsyncValue<List<Track>> tracks;
   final Widget empty;
   final int? playlistId;
-  final List<Widget> actions;
+
+  /// A picture the user chose for this collection, which goes in front of
+  /// its tracks' covers.
+  final String? cover;
+  final String menuTooltip;
+  final List<_MenuItem> menu;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final loaded = tracks.value;
-    // Up to three different covers, the first track's in front.
+    // Up to three different covers: the user's choice, then the tracks' own
+    // in the order they are listed.
     final covers = {
+      ?cover,
       for (final track in loaded ?? const <Track>[]) ?track.artPath,
     }.take(3).toList();
     final currentId = ref.watch(currentTrackIdProvider);
     final screen = MediaQuery.sizeOf(context);
     final inset = MediaQuery.paddingOf(context);
-    // A whole number of pixels: an edge that falls part-way through one
-    // leaves a hairline across the page where the wash has faded out.
-    final pixels = MediaQuery.devicePixelRatioOf(context);
-    final washHeight = (screen.height * 0.62 * pixels).roundToDouble() / pixels;
 
     Future<void> play({required bool shuffled}) async {
       final handler = ref.read(audioHandlerProvider);
@@ -77,11 +88,8 @@ class _CollectionPage extends ConsumerWidget {
                 top: 0,
                 left: 0,
                 right: 0,
-                height: washHeight,
-                child: _CoverWash(
-                  key: ValueKey(covers.first),
-                  path: covers.first,
-                ),
+                height: screen.height * 0.62,
+                child: _CoverWash(path: covers.first),
               ),
             CustomScrollView(
               slivers: [
@@ -153,13 +161,26 @@ class _CollectionPage extends ConsumerWidget {
                     child: Pressable(
                       semanticLabel: 'Back',
                       onTap: () => Navigator.of(context).maybePop(),
-                      child: const _GlassCircle(
+                      child: const GlassCircle(
                         Icons.arrow_back_ios_new_rounded,
+                        blurBackdrop: true,
                       ),
                     ),
                   ),
                   const Spacer(),
-                  ...actions,
+                  if (menu.isNotEmpty)
+                    PopupMenuButton<VoidCallback>(
+                      tooltip: menuTooltip,
+                      onSelected: (run) => run(),
+                      itemBuilder: (context) => [
+                        for (final (label, run) in menu)
+                          PopupMenuItem(value: run, child: Text(label)),
+                      ],
+                      child: const GlassCircle(
+                        Icons.more_horiz_rounded,
+                        blurBackdrop: true,
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -274,8 +295,9 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// The first cover in front, with up to two more leaning out from behind
-/// it like cards held in a hand.
+/// The first cover in front and, when there are three, the other two
+/// leaning out from behind it like cards held in a hand. With only two the
+/// second would lean out on one side alone, so it is left out.
 class _CoverFan extends StatelessWidget {
   const _CoverFan({required this.covers, required this.size});
 
@@ -313,8 +335,10 @@ class _CoverFan extends StatelessWidget {
           alignment: Alignment.center,
           clipBehavior: Clip.none,
           children: [
-            if (covers.length > 2) behind(covers[2], -1),
-            if (covers.length > 1) behind(covers[1], 1),
+            if (covers.length > 2) ...[
+              behind(covers[2], -1),
+              behind(covers[1], 1),
+            ],
             DecoratedBox(
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(size * 0.09),
@@ -397,106 +421,46 @@ class _PillButton extends StatelessWidget {
   }
 }
 
-/// A round glass button for the top of the page. It blurs what is behind
-/// it, because the covers and the list scroll underneath.
-class _GlassCircle extends StatelessWidget {
-  const _GlassCircle(this.icon);
-
-  final IconData icon;
-
-  @override
-  Widget build(BuildContext context) {
-    return Frosted(
-      blurBackdrop: true,
-      child: SizedBox.square(
-        dimension: 44,
-        child: Icon(icon, size: 20, color: context.noc.textPrimary),
-      ),
-    );
-  }
-}
-
-/// The page's colour: the cover, blurred past recognition and veiled
-/// towards the page behind it, fading out downwards.
-///
-/// It does not move, so it is drawn once and kept as a picture. Otherwise
-/// the blur would be worked out again on every frame the list scrolls.
-class _CoverWash extends StatefulWidget {
-  const _CoverWash({super.key, required this.path});
+/// The page's colour: the main colour of the cover in front, strongest at
+/// the top and fading out downwards. It comes in softly once the cover has
+/// been read; a cover with no colour to speak of leaves the page as it is.
+class _CoverWash extends ConsumerWidget {
+  const _CoverWash({required this.path});
 
   final String path;
 
   @override
-  State<_CoverWash> createState() => _CoverWashState();
-}
-
-class _CoverWashState extends State<_CoverWash> {
-  final _picture = SnapshotController(allowSnapshotting: true);
-  bool _coverDrawn = false;
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // The veil takes the theme's page colour: draw again when it changes.
-    _picture.clear();
-  }
-
-  @override
-  void dispose() {
-    _picture.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final dark = Theme.of(context).brightness == Brightness.dark;
+    final seed = ref.watch(coverSeedProvider(path)).value;
+    var color = Colors.transparent;
+    if (seed != null) {
+      final hsl = HSLColor.fromColor(seed);
+      // Deep enough in the dark theme, and pale enough in the light one,
+      // for the text on it to stay readable whatever the cover is.
+      color = hsl
+          .withSaturation(math.max(hsl.saturation, 0.5))
+          .withLightness(dark ? 0.3 : 0.8)
+          .toColor();
+    }
     return IgnorePointer(
-      child: SnapshotWidget(
-        controller: _picture,
-        // Drawn again at the new size when the window changes.
-        autoresize: true,
-        child: ShaderMask(
-          blendMode: BlendMode.dstIn,
-          shaderCallback: (bounds) => const LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Colors.black, Colors.transparent],
-            stops: [0.2, 1],
-          ).createShader(bounds),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ImageFiltered(
-                imageFilter: ImageFilter.blur(
-                  sigmaX: 40,
-                  sigmaY: 40,
-                  tileMode: TileMode.clamp,
-                ),
-                child: Image.file(
-                  File(widget.path),
-                  fit: BoxFit.cover,
-                  // Blurred beyond recognition, so a tiny decode is plenty.
-                  cacheWidth: 64,
-                  gaplessPlayback: true,
-                  excludeFromSemantics: true,
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  frameBuilder: (context, child, frame, _) {
-                    // The picture was taken before the cover had loaded.
-                    if (frame != null && !_coverDrawn) {
-                      _coverDrawn = true;
-                      _picture.clear();
-                    }
-                    return child;
-                  },
-                ),
-              ),
-              // Keeps the text on it readable whatever the cover is.
-              ColoredBox(
-                color: context.noc.background.withValues(
-                  alpha: dark ? 0.5 : 0.6,
-                ),
-              ),
-            ],
+      child: AnimatedOpacity(
+        opacity: seed == null ? 0 : 1,
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 400),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                color.withValues(alpha: 0.9),
+                color.withValues(alpha: 0.55),
+                color.withValues(alpha: 0),
+              ],
+              stops: const [0, 0.45, 1],
+            ),
           ),
         ),
       ),
@@ -526,7 +490,45 @@ class GroupScreen extends ConsumerWidget {
   }
 }
 
-/// One playlist, with rename and delete.
+/// The tracks the user has favourited, under a cover they can choose.
+class FavouritesScreen extends ConsumerWidget {
+  const FavouritesScreen({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final cover = ref.watch(favouritesCoverProvider);
+
+    Future<void> setCover(String? path) async {
+      ref.read(favouritesCoverProvider.notifier).set(path);
+      await ref.read(coverStoreProvider).discard(cover);
+    }
+
+    return _CollectionPage(
+      title: 'Favourites',
+      cover: cover,
+      tracks: ref.watch(favoritesProvider),
+      empty: const EmptyState(
+        icon: Icons.favorite_border_rounded,
+        title: 'No favourites yet',
+        message: 'Tap the heart on a track you love to keep it here.',
+      ),
+      menuTooltip: 'Favourites options',
+      menu: [
+        (
+          'Change cover',
+          () async {
+            final picked = await ref.read(coverStoreProvider).pick();
+            if (picked != null) await setCover(picked);
+          },
+        ),
+        if (cover != null) ('Remove cover', () => setCover(null)),
+      ],
+    );
+  }
+}
+
+/// One playlist: an album of the user's own making, with tracks they pick
+/// and a cover they can choose.
 class PlaylistScreen extends ConsumerWidget {
   const PlaylistScreen({super.key, required this.playlist});
 
@@ -535,7 +537,7 @@ class PlaylistScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final repository = ref.read(libraryRepositoryProvider);
-    // Follow renames made from this screen.
+    // Follow renames and cover changes made from this screen.
     final current =
         ref
             .watch(playlistsProvider)
@@ -543,38 +545,69 @@ class PlaylistScreen extends ConsumerWidget {
             ?.where((candidate) => candidate.id == playlist.id)
             .firstOrNull ??
         playlist;
+    final tracks = ref.watch(playlistTracksProvider(playlist.id));
+
+    Future<void> addTracks() async {
+      final chosen = await showTrackPicker(
+        context,
+        alreadyIn: {for (final track in tracks.value ?? const []) track.id},
+      );
+      if (chosen != null) {
+        await repository.addTracksToPlaylist(current.id, chosen);
+      }
+    }
+
+    Future<void> setCover(String? path) async {
+      await repository.setPlaylistCover(current.id, path);
+      await ref.read(coverStoreProvider).discard(current.coverPath);
+    }
 
     return _CollectionPage(
       title: current.name,
       playlistId: playlist.id,
-      tracks: ref.watch(playlistTracksProvider(playlist.id)),
-      empty: const EmptyState(
+      cover: current.coverPath,
+      tracks: tracks,
+      empty: EmptyState(
         icon: Icons.playlist_add_rounded,
         title: 'This playlist is empty',
-        message: 'Use the menu on any track and choose "Add to playlist".',
+        message: 'Pick the tracks that belong in it.',
+        action: FilledButton.icon(
+          onPressed: addTracks,
+          icon: const Icon(Icons.add_rounded),
+          label: const Text('Add tracks'),
+        ),
       ),
-      actions: [
-        PopupMenuButton<String>(
-          tooltip: 'Playlist options',
-          onSelected: (action) async {
-            if (action == 'rename') {
-              final name = await askPlaylistName(
-                context,
-                initialName: current.name,
-              );
-              if (name != null) {
-                await repository.renamePlaylist(current.id, name);
-              }
-            } else if (await _confirmDelete(context, current.name)) {
-              await repository.deletePlaylist(current.id);
-              if (context.mounted) Navigator.of(context).pop();
+      menuTooltip: 'Playlist options',
+      menu: [
+        ('Add tracks', addTracks),
+        (
+          'Change cover',
+          () async {
+            final picked = await ref.read(coverStoreProvider).pick();
+            if (picked != null) await setCover(picked);
+          },
+        ),
+        if (current.coverPath != null) ('Remove cover', () => setCover(null)),
+        (
+          'Rename',
+          () async {
+            final name = await askPlaylistName(
+              context,
+              initialName: current.name,
+            );
+            if (name != null) {
+              await repository.renamePlaylist(current.id, name);
             }
           },
-          itemBuilder: (context) => const [
-            PopupMenuItem(value: 'rename', child: Text('Rename')),
-            PopupMenuItem(value: 'delete', child: Text('Delete playlist')),
-          ],
-          child: const _GlassCircle(Icons.more_horiz_rounded),
+        ),
+        (
+          'Delete playlist',
+          () async {
+            if (!await _confirmDelete(context, current.name)) return;
+            await repository.deletePlaylist(current.id);
+            await ref.read(coverStoreProvider).discard(current.coverPath);
+            if (context.mounted) Navigator.of(context).pop();
+          },
         ),
       ],
     );

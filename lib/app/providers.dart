@@ -30,6 +30,10 @@ typedef AppPaths = ({
 
   /// Imported audio. On iOS this is the folder shown in the Files app.
   String musicDir,
+
+  /// Pictures the user chose as covers. Unlike the artwork cache, nothing
+  /// rebuilds these.
+  String coverDir,
 });
 
 final appPathsProvider = Provider<AppPaths>(

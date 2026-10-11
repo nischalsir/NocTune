@@ -62,6 +62,12 @@ Future<int> _seedFromRgba(Uint8List rgba) async {
   ).first;
 }
 
+/// The most characterful colour of the cover at a path, for pages that take
+/// their colour from a cover other than the playing track's.
+final coverSeedProvider = FutureProvider.autoDispose.family<Color?, String>(
+  (ref, path) => seedColorFromCover(path),
+);
+
 /// Adjusts a cover colour so it works as an accent: vivid enough to read as
 /// one, and light or dark enough to stand out from the page behind it.
 Color tuneAccent(Color seed, Brightness brightness) {
