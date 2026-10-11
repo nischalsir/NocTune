@@ -9,6 +9,46 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.6.0 (build 10) - 2026-10-11
+
+Published as a normal release at the owner's request; not yet run on a
+phone. The Library pages follow a design picture the owner supplied, and
+the bottom bar's tabs are set up as in another app of the owner's.
+
+### Changed
+
+- Library: the page for a playlist, album, artist, genre or folder is new.
+  Its covers are fanned out at the top, the first track's in front and up
+  to two more leaning out from behind it, over a wash of that cover's
+  colours that fades into the page. Under them are the name, how many
+  tracks there are and how long they run, and two buttons: Play, which
+  starts the list in order, and Shuffle. The whole page scrolls as one
+  list, and the way back and a playlist's menu stay at the top as glass
+  buttons.
+- Bottom bar: on glass, the selection rests as a flat pill and travels
+  between tabs as a lens that bends the bar under it, on a spring. Holding
+  a tab picks the lens up so it can be slid along the bar. The fold on
+  scroll, the order of the tabs, the mini-player and the glass clarity
+  setting are as they were.
+- Bottom bar: its labels stop growing at one and a half times the normal
+  text size, because the glass capsule has a fixed height.
+- Opening the player: it grows out of the mini-player, upwards and
+  downwards until it fills the screen, and the tabs move down just under
+  its lower edge instead of being covered. Closing it, by its button, the
+  back key or a swipe down, shrinks it back into the mini-player. With
+  reduced motion it fades in and nothing moves. The player itself is
+  unchanged.
+
+### Tests
+
+- The player's opening is checked frame by frame: it starts as the
+  mini-player's own rectangle with the tabs where they were, its top only
+  rises and its bottom only falls, no edge crosses the screen in a single
+  frame, and the tabs stay under its lower edge throughout.
+- The Library page: its details line, Play and Shuffle, the covers it fans
+  out, a playlist's menu, an empty playlist, and its layout on a small
+  phone, with large text, in landscape and on a tablet.
+
 ## 1.5.0 (build 9) - 2026-10-11
 
 Published as a normal release at the owner's request; not yet run on a
