@@ -9,6 +9,24 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.9.1 (build 16) - 2026-10-11
+
+Published at the owner's request. The automated checks pass and the list
+was looked at as a rendered frame; this build has not been run on a phone.
+
+### Changed
+
+- Library: the round button on the row of the song loaded in the player
+  now pauses it, and carries on from where it stopped when it is paused.
+  It shows a pause or a play sign to match. It used to start the song
+  again from the beginning, which a tap on the row itself still does.
+  The buttons on the other rows are unchanged.
+
+### Tests
+
+- The button is checked to show the right sign, to pause while playing
+  and to resume while paused without starting the song again.
+
 ## 1.9.0 (build 15) - 2026-10-11
 
 Published at the owner's request before deleting was tried on a phone. The
