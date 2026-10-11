@@ -11,6 +11,11 @@ Release channels:
 
 ## 1.8.0 (build 14) - 2026-10-11
 
+Run on the owner's phone before release. The phone's mixer showed the
+equaliser, the loudness enhancer and the preamp each taking effect, the
+shapes were heard to change the sound, and the crackle its speaker made at
+high volume was mostly gone with "Small speaker" and a lowered preamp.
+
 ### Added
 
 - An equaliser, under Settings, Audio, Equaliser. It has a switch, a
@@ -31,6 +36,13 @@ Release channels:
 
 - Settings: the "Sound processing" line is now the Equaliser row, and
   says whether it is on and with which shape.
+
+### Known issues
+
+- Some AAC songs still crackle on the phone's speaker when the volume is
+  high. Not yet looked into.
+- The equaliser and the loudness enhancer have been run on one phone. A
+  device that cannot create one of them would fail to load songs.
 
 ### Not done
 
