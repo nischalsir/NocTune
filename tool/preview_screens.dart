@@ -7,6 +7,7 @@ import 'dart:io';
 import 'dart:ui' as ui;
 
 import 'package:audio_service/audio_service.dart';
+import 'package:flutter/cupertino.dart' show CupertinoSwitch;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -19,13 +20,17 @@ import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/data/models/playlist.dart';
 import 'package:noctune/data/models/track.dart';
 import 'package:noctune/data/repositories/library_repository.dart';
+import 'package:noctune/features/equalizer/equalizer_controller.dart';
+import 'package:noctune/features/equalizer/equalizer_settings.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/lyrics/lyrics.dart';
 import 'package:noctune/features/lyrics/lyrics_source.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
+import 'package:noctune/features/playback/noc_audio_handler.dart';
 import 'package:noctune/features/playback/now_playing_route.dart';
 import 'package:noctune/features/playback/now_playing_screen.dart';
 import 'package:noctune/features/playback/playback_mapping.dart';
+import 'package:noctune/features/settings/settings_screen.dart';
 import 'package:noctune/features/startup/startup_prompts.dart';
 import 'package:noctune/features/startup/update_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -37,6 +42,12 @@ final _fonts =
 
 // The playlist page asks for the repository; the previews never write to it.
 class _NoRepository extends Fake implements LibraryRepository {}
+
+/// Takes the equaliser's settings and does nothing with them.
+class _SilentHandler extends Fake implements NocAudioHandler {
+  @override
+  Future<void> applyEqualizer(EqualizerSettings settings) async {}
+}
 
 class _IdleScan extends ScanController {
   @override
@@ -166,6 +177,14 @@ void main() {
           overrides: [
             sharedPreferencesProvider.overrideWithValue(preferences),
             libraryRepositoryProvider.overrideWithValue(_NoRepository()),
+            audioHandlerProvider.overrideWithValue(_SilentHandler()),
+            equalizerBandsProvider.overrideWith(
+              (ref) => (
+                minDb: -15.0,
+                maxDb: 15.0,
+                centers: [60.0, 230.0, 910.0, 3600.0, 14000.0],
+              ),
+            ),
             playlistsProvider.overrideWith(
               (ref) => [
                 Playlist(
@@ -508,6 +527,30 @@ void main() {
         },
       );
     }
+    // Last, because it leaves the equaliser switched on in the preferences.
+    await shoot(
+      '20_equaliser',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: () async {
+        await tester.tap(find.text('Settings').last, warnIfMissed: false);
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.dragUntilVisible(
+          find.text('Equaliser'),
+          find.byType(SettingsScreen),
+          const Offset(0, -250),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('Equaliser'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 600));
+        await tester.tap(find.byType(CupertinoSwitch).last);
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.ensureVisible(find.text('Rock'));
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.text('Rock'));
+      },
+    );
     tester.view.reset();
   });
 }

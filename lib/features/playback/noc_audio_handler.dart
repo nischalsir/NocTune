@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../data/models/track.dart';
+import '../equalizer/equalizer_settings.dart';
 import 'playback_mapping.dart';
 
 /// The playback engine. It owns the audio player and publishes its state to
@@ -20,11 +22,19 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
   /// turns it on, so NocTune never colours the sound by default.
   final AndroidEqualizer androidEqualizer = AndroidEqualizer();
 
+  /// Android's loudness enhancer, for a preamp above the file's own level.
+  /// Attached but disabled, like the equalizer.
+  final _loudness = AndroidLoudnessEnhancer();
+
   late final AudioPlayer _player = AudioPlayer(
     audioPipeline: AudioPipeline(
-      androidAudioEffects: Platform.isAndroid ? [androidEqualizer] : null,
+      androidAudioEffects: Platform.isAndroid
+          ? [androidEqualizer, _loudness]
+          : null,
     ),
   );
+
+  EqualizerSettings? _equalizerSettings;
 
   final _errors = StreamController<String>.broadcast();
 
@@ -46,6 +56,51 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
 
   /// The Android audio session id, needed to query platform audio effects.
   int? get androidAudioSessionId => _player.androidAudioSessionId;
+
+  /// The bands this device's equaliser has. Android only hands the player
+  /// its equaliser once a first track is loaded, so this waits for that.
+  Future<EqualizerBands> get equalizerBands async {
+    if (!Platform.isAndroid) {
+      throw UnsupportedError('No equaliser on this platform');
+    }
+    final parameters = await androidEqualizer.parameters;
+    return (
+      minDb: parameters.minDecibels,
+      maxDb: parameters.maxDecibels,
+      centers: [for (final band in parameters.bands) band.centerFrequency],
+    );
+  }
+
+  /// Makes the player sound as [settings] say. Called again before an
+  /// earlier call has finished, the later one wins.
+  Future<void> applyEqualizer(EqualizerSettings settings) async {
+    if (!Platform.isAndroid) return;
+    _equalizerSettings = settings;
+    final preamp = settings.enabled ? settings.preampDb : 0.0;
+    // Below the file's own level the player turns itself down, which is
+    // always clean. Above it there is nothing to turn up, so Android's
+    // loudness enhancer makes up the difference.
+    await _player.setVolume(
+      preamp < 0 ? math.pow(10, preamp / 20).toDouble() : 1,
+    );
+    await _loudness.setTargetGain(math.max(preamp, 0));
+    await _loudness.setEnabled(preamp > 0);
+    if (!settings.enabled) {
+      await androidEqualizer.setEnabled(false);
+      return;
+    }
+    final parameters = await androidEqualizer.parameters;
+    if (!identical(_equalizerSettings, settings)) return;
+    for (final band in parameters.bands) {
+      await band.setGain(
+        settings.curve
+            .levelAt(band.centerFrequency)
+            .clamp(parameters.minDecibels, parameters.maxDecibels)
+            .toDouble(),
+      );
+    }
+    await androidEqualizer.setEnabled(true);
+  }
 
   Future<void> _init() async {
     // Declares this as a music app: other audio is paused while we play, and

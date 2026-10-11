@@ -7,6 +7,7 @@ import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/data/models/playlist.dart';
 import 'package:noctune/data/repositories/library_repository.dart';
+import 'package:noctune/features/equalizer/equalizer_screen.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
 import 'package:noctune/features/settings/settings_controller.dart';
@@ -283,6 +284,22 @@ void main() {
       expect(find.text('Update available'), findsOneWidget);
       expect(find.text('Better lyrics'), findsOneWidget);
     });
+  });
+
+  testWidgets('the Equaliser row says it is off and opens its page', (
+    tester,
+  ) async {
+    await _pump(tester);
+    await _reveal(tester, find.text('Equaliser'));
+    expect(
+      find.textContaining('Off. Files are played as they are'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Equaliser'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(EqualizerScreen), findsOneWidget);
   });
 
   testWidgets('opens the open-source licences page', (tester) async {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:audio_service/audio_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -12,6 +14,7 @@ import 'app/licenses.dart';
 import 'app/providers.dart';
 import 'data/db/app_database.dart';
 import 'data/repositories/library_repository.dart';
+import 'features/equalizer/equalizer_settings.dart';
 import 'features/playback/noc_audio_handler.dart';
 import 'features/playback/play_history_recorder.dart';
 import 'features/playback/playback_session.dart';
@@ -65,6 +68,9 @@ Future<void> main() async {
     repository: repository,
     handler: audioHandler,
   );
+  // The equaliser as the user left it. It finishes once a first track is
+  // loaded, so it is not waited for here.
+  unawaited(audioHandler.applyEqualizer(EqualizerSettings.load(preferences)));
 
   runApp(
     ProviderScope(

@@ -10,6 +10,8 @@ import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/noc_dialog.dart';
 import '../../third_party/spotiflac/mornye_chrome.dart';
+import '../equalizer/equalizer_controller.dart';
+import '../equalizer/equalizer_screen.dart';
 import '../library/duplicates_screen.dart';
 import '../library/scan/scan_banner.dart';
 import '../library/scan/scan_controller.dart';
@@ -341,12 +343,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       null => 'Checking what this device can decode…',
                     }),
                   ),
-                  const ListTile(
-                    leading: _TileIcon(Icons.graphic_eq_rounded),
-                    title: Text('Sound processing'),
-                    subtitle: Text(
-                      'None. Files are played as they are; a track is '
-                      'labelled lossless only when its format is.',
+                  ListTile(
+                    leading: const _TileIcon(Icons.graphic_eq_rounded),
+                    title: const Text('Equaliser'),
+                    subtitle: Text(ref.watch(equalizerProvider).summary),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const EqualizerScreen(),
+                      ),
                     ),
                   ),
                 ],
