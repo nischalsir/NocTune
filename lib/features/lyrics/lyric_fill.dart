@@ -121,8 +121,9 @@ LyricFillState lyricFillAt(List<LyricUnit> units, Duration position) {
 /// everything already sung, and the word being sung up to a soft edge that
 /// moves across it. It repaints with [position], frame by frame.
 ///
-/// It lays the text out exactly as the dim copy beneath it is laid out, so
-/// the two coincide however the line wraps and whatever the script.
+/// It lays the text out exactly as the dim copy beneath it is laid out (see
+/// [layOut]), so the two coincide however the line wraps and whatever the
+/// script.
 class LyricFill extends StatefulWidget {
   const LyricFill({
     super.key,
@@ -139,6 +140,37 @@ class LyricFill extends StatefulWidget {
   final List<LyricUnit> units;
   final ValueListenable<Duration> position;
 
+  /// Lays [text] out the way a [Text] placed at [context] would: in [style]
+  /// over the text style of the page around it, for the app's language, with
+  /// the same alignment and scale.
+  ///
+  /// The dim copy of a line is such a [Text], and the lit copy has to land
+  /// on the same pixels. The language matters: in the app's typeface, text
+  /// laid out without it sits about a pixel lower than text laid out for
+  /// it, which showed as the lit words standing a little below the dim ones.
+  static TextPainter layOut(
+    BuildContext context, {
+    required String text,
+    required TextStyle style,
+    required double maxWidth,
+  }) {
+    final page = DefaultTextStyle.of(context);
+    var resolved = style.inherit ? page.style.merge(style) : style;
+    if (MediaQuery.boldTextOf(context)) {
+      resolved = resolved.merge(const TextStyle(fontWeight: FontWeight.bold));
+    }
+    return TextPainter(
+      text: TextSpan(text: text, style: resolved),
+      textAlign: page.textAlign ?? TextAlign.start,
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      locale: Localizations.maybeLocaleOf(context),
+      textWidthBasis: page.textWidthBasis,
+      textHeightBehavior:
+          page.textHeightBehavior ?? DefaultTextHeightBehavior.maybeOf(context),
+    )..layout(maxWidth: maxWidth);
+  }
+
   @override
   State<LyricFill> createState() => _LyricFillState();
 }
@@ -148,18 +180,34 @@ class _LyricFillState extends State<LyricFill> {
   Object? _laidOutFor;
 
   TextPainter _layout(double maxWidth) {
-    final direction = Directionality.of(context);
-    final scaler = MediaQuery.textScalerOf(context);
-    final key = (widget.text, widget.style, maxWidth, direction, scaler);
+    // Everything [LyricFill.layOut] reads from the page.
+    final page = DefaultTextStyle.of(context);
+    final key = (
+      widget.text,
+      widget.style,
+      maxWidth,
+      Directionality.of(context),
+      MediaQuery.textScalerOf(context),
+      MediaQuery.boldTextOf(context),
+      Localizations.maybeLocaleOf(context),
+      DefaultTextHeightBehavior.maybeOf(context),
+      (
+        page.style,
+        page.textAlign,
+        page.textWidthBasis,
+        page.textHeightBehavior,
+      ),
+    );
     final existing = _painter;
     if (existing != null && key == _laidOutFor) return existing;
     existing?.dispose();
     _laidOutFor = key;
-    return _painter = TextPainter(
-      text: TextSpan(text: widget.text, style: widget.style),
-      textDirection: direction,
-      textScaler: scaler,
-    )..layout(maxWidth: maxWidth);
+    return _painter = LyricFill.layOut(
+      context,
+      text: widget.text,
+      style: widget.style,
+      maxWidth: maxWidth,
+    );
   }
 
   @override

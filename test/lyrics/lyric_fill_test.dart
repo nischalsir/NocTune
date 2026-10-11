@@ -1,4 +1,12 @@
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:noctune/core/theme/flex_type.dart';
+import 'package:noctune/core/theme/noc_palette.dart';
+import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/features/lyrics/lyric_fill.dart';
 import 'package:noctune/features/lyrics/lyrics.dart';
 
@@ -137,6 +145,123 @@ void main() {
 
       expect(fill.sungEnd, 11);
       expect(fill.current, isNull);
+    });
+  });
+
+  group('the lit copy of a line', () {
+    const text = "I'm on the bridge with a tank of unleaded";
+    const all = TextSelection(baseOffset: 0, extentOffset: text.length);
+
+    // Where every letter of the dim copy, a Text, is drawn.
+    List<TextBox> dim(WidgetTester tester) => tester
+        .renderObject<RenderParagraph>(find.text(text))
+        .getBoxesForSelection(all);
+
+    // And where the lit copy over it draws them.
+    List<TextBox> lit(WidgetTester tester, TextStyle style) {
+      final painter = LyricFill.layOut(
+        tester.element(find.byType(LyricFill)),
+        text: text,
+        style: style,
+        maxWidth: 330,
+      );
+      addTearDown(painter.dispose);
+      return painter.getBoxesForSelection(all);
+    }
+
+    // The two copies as the lyrics draw them: the dim one in grey, the lit
+    // one over it in white with a glow.
+    TextStyle lighted(TextStyle style) => style.copyWith(
+      color: const Color(0xFFFFFFFF),
+      shadows: const [Shadow(color: Color(0x80FFFFFF), blurRadius: 8)],
+    );
+    Widget copies(TextStyle style) => Align(
+      alignment: Alignment.topLeft,
+      child: SizedBox(
+        width: 330,
+        child: Stack(
+          children: [
+            Text(text, style: style.copyWith(color: const Color(0x6BFFFFFF))),
+            LyricFill(
+              text: text,
+              style: lighted(style),
+              units: const [],
+              position: ValueNotifier(Duration.zero),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    testWidgets('lands on the dim copy under it, letter for letter', (
+      tester,
+    ) async {
+      // As in the app: its typeface, its theme and its language. A Text is
+      // laid out for the app's language, which moves these letters by a
+      // pixel; laid out without it, the lit copy sits that much lower.
+      await tester.runAsync(
+        () =>
+            (FontLoader(FlexType.family)..addFont(
+                  File('assets/fonts/GoogleSansFlex.ttf')
+                      .readAsBytes()
+                      .then(ByteData.sublistView),
+                ))
+                .load(),
+      );
+      final style = FlexType.custom(
+        size: 30,
+        lineHeight: 30 * 1.38,
+        weight: 700,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: buildNocTheme(Brightness.dark, NocAccent.red),
+          home: Material(child: copies(style)),
+        ),
+      );
+
+      // The text engine keeps layouts it has made and can hand one back for
+      // the same words later, so a layout made without the app's language
+      // may come out right or wrong depending on what came before it. Make
+      // one the way the lit copy used to, so this does not pass by luck.
+      TextPainter(
+          text: TextSpan(text: text, style: lighted(style)),
+          textDirection: TextDirection.ltr,
+        )
+        ..layout(maxWidth: 330)
+        ..dispose();
+
+      expect(dim(tester).length, greaterThan(1));
+      expect(lit(tester, lighted(style)), dim(tester));
+      expect(
+        tester.getSize(find.byType(LyricFill)),
+        tester.getSize(find.text(text)),
+      );
+    });
+
+    testWidgets('follows the page when its text style changes', (tester) async {
+      // A style that leaves its tracking to the page around it.
+      const style = TextStyle(fontSize: 30, height: 1.4);
+      Future<void> pump(double tracking) => tester.pumpWidget(
+        Directionality(
+          textDirection: TextDirection.ltr,
+          child: DefaultTextStyle(
+            style: TextStyle(fontSize: 14, letterSpacing: tracking),
+            child: copies(style),
+          ),
+        ),
+      );
+
+      await pump(0);
+      final before = dim(tester);
+      await pump(0.5);
+
+      expect(dim(tester), isNot(before));
+      expect(lit(tester, lighted(style)), dim(tester));
+      expect(
+        tester.getSize(find.byType(LyricFill)),
+        tester.getSize(find.text(text)),
+      );
     });
   });
 }
