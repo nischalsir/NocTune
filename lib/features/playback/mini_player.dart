@@ -17,8 +17,9 @@ import 'now_playing_screen.dart';
 const kMiniPlayerHeight = 58.0;
 
 /// The player bar that sits on top of the navigation bar while something is
-/// loaded. Tapping it opens the full player; swiping it sideways stops
-/// playback and clears the queue. It takes no space when the queue is empty.
+/// loaded. Tapping it opens the full player, which grows out of this bar;
+/// swiping it sideways stops playback and clears the queue. It takes no
+/// space when the queue is empty.
 ///
 /// This is the mini-player of the navigation bar it belongs to (see
 /// `third_party/spotiflac`), connected to NocTune's player and made a little
@@ -173,6 +174,7 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> {
     return Padding(
       padding: EdgeInsets.only(bottom: widget.bottomPadding),
       child: MornyeGlass.navigation(
+        key: miniPlayerSurfaceKey,
         strongTint: true,
         tintOpacity: MornyeTheme.chromeOpacity(context),
         blurEnabled: ref.watch(mornyeBlurEnabledProvider),

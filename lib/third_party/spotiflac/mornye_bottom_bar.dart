@@ -5,7 +5,9 @@
 // the folded bar's right-hand button is named after the last destination
 // rather than always "Search". The fold is NocTune's own: the bar parts in
 // the middle and each half draws back into the round button at its side,
-// and unfolding fills it back in from the sides.
+// and unfolding fills it back in from the sides. The tabs and the folded
+// side buttons also move down ahead of the player as it opens out of the
+// mini-player.
 
 import 'dart:math' as math;
 import 'dart:ui' show lerpDouble;
@@ -18,6 +20,7 @@ import '../../app/providers.dart';
 import 'runtime_profile_provider.dart';
 import 'mornye_theme.dart';
 import '../../features/playback/mini_player.dart';
+import '../../features/playback/now_playing_route.dart';
 import 'mornye_chrome.dart';
 
 /// Deliberate vertical drags minimize the chrome until the page returns to its
@@ -251,47 +254,52 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
                 bottom: fullIconBottom * (1 - amount) + 34 * amount - 26,
                 width: size,
                 height: size,
-                child: IgnorePointer(
-                  ignoring: amount < 0.5,
-                  child: ExcludeSemantics(
-                    excluding: amount < 0.5,
-                    child: Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        Positioned.fill(
-                          child: Offstage(offstage: amount < 1, child: surface),
-                        ),
-                        Material(
-                          color: Colors.transparent,
-                          child: IconButton(
-                            key: ValueKey(
-                              leading
-                                  ? 'mornye-compact-leading'
-                                  : 'mornye-compact-search',
+                child: _PushedByPlayer(
+                  child: IgnorePointer(
+                    ignoring: amount < 0.5,
+                    child: ExcludeSemantics(
+                      excluding: amount < 0.5,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Positioned.fill(
+                            child: Offstage(
+                              offstage: amount < 1,
+                              child: surface,
                             ),
-                            tooltip: leading
-                                ? destinations[leadingIndex].label
-                                : destinations.last.label,
-                            iconSize: 25,
-                            constraints: BoxConstraints.tightFor(
-                              width: size,
-                              height: size,
-                            ),
-                            color: index == selectedIndex
-                                ? scheme.primary
-                                : inactiveIconColor,
-                            icon: Opacity(
-                              opacity: amount == 0 ? 0 : 1,
-                              child: destinations[index].icon,
-                            ),
-                            onPressed: leading
-                                ? leadingIndex == 0
-                                      ? onHome
-                                      : () => onSelected(leadingIndex)
-                                : onSearch,
                           ),
-                        ),
-                      ],
+                          Material(
+                            color: Colors.transparent,
+                            child: IconButton(
+                              key: ValueKey(
+                                leading
+                                    ? 'mornye-compact-leading'
+                                    : 'mornye-compact-search',
+                              ),
+                              tooltip: leading
+                                  ? destinations[leadingIndex].label
+                                  : destinations.last.label,
+                              iconSize: 25,
+                              constraints: BoxConstraints.tightFor(
+                                width: size,
+                                height: size,
+                              ),
+                              color: index == selectedIndex
+                                  ? scheme.primary
+                                  : inactiveIconColor,
+                              icon: Opacity(
+                                opacity: amount == 0 ? 0 : 1,
+                                child: destinations[index].icon,
+                              ),
+                              onPressed: leading
+                                  ? leadingIndex == 0
+                                        ? onHome
+                                        : () => onSelected(leadingIndex)
+                                  : onSearch,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -319,26 +327,28 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
                           // mini-player can come down, and the bar parts in
                           // the middle: each half draws back to its side
                           // until it is the round button left there.
-                          child: Align(
-                            alignment: Alignment.bottomCenter,
-                            heightFactor: 1 - amount,
-                            child: IgnorePointer(
-                              ignoring: amount > 0.5,
-                              child: ExcludeSemantics(
-                                excluding: amount > 0.5,
-                                child: ClipPath(
-                                  clipBehavior: amount == 0
-                                      ? Clip.none
-                                      : Clip.antiAlias,
-                                  // On the same clock as the mini-player
-                                  // above: the halves have parted exactly
-                                  // when it lands, and have met again
-                                  // exactly when it is back up.
-                                  clipper: _FoldClipper(
-                                    progress: amount,
-                                    inset: glassTabs ? 8 : 0,
+                          child: _PushedByPlayer(
+                            child: Align(
+                              alignment: Alignment.bottomCenter,
+                              heightFactor: 1 - amount,
+                              child: IgnorePointer(
+                                ignoring: amount > 0.5,
+                                child: ExcludeSemantics(
+                                  excluding: amount > 0.5,
+                                  child: ClipPath(
+                                    clipBehavior: amount == 0
+                                        ? Clip.none
+                                        : Clip.antiAlias,
+                                    // On the same clock as the mini-player
+                                    // above: the halves have parted exactly
+                                    // when it lands, and have met again
+                                    // exactly when it is back up.
+                                    clipper: _FoldClipper(
+                                      progress: amount,
+                                      inset: glassTabs ? 8 : 0,
+                                    ),
+                                    child: amount == 0 ? fullTabs : foldingTabs,
                                   ),
-                                  child: amount == 0 ? fullTabs : foldingTabs,
                                 ),
                               ),
                             ),
@@ -388,6 +398,22 @@ class _MornyeBottomBarState extends ConsumerState<MornyeBottomBar>
       },
     );
   }
+}
+
+/// NocTune: moves its child down by as far as the opening player has pushed
+/// the bar.
+class _PushedByPlayer extends StatelessWidget {
+  const _PushedByPlayer({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<double>(
+    valueListenable: playerBarPush,
+    builder: (context, push, child) =>
+        Transform.translate(offset: Offset(0, push), child: child),
+    child: child,
+  );
 }
 
 /// NocTune: the shape the tab bar is cut to while it folds. At 0 it is the

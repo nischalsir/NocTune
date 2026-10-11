@@ -18,10 +18,12 @@ import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/data/models/playlist.dart';
 import 'package:noctune/data/models/track.dart';
+import 'package:noctune/data/repositories/library_repository.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/lyrics/lyrics.dart';
 import 'package:noctune/features/lyrics/lyrics_source.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
+import 'package:noctune/features/playback/now_playing_route.dart';
 import 'package:noctune/features/playback/now_playing_screen.dart';
 import 'package:noctune/features/playback/playback_mapping.dart';
 import 'package:noctune/features/startup/startup_prompts.dart';
@@ -32,6 +34,9 @@ const _out = String.fromEnvironment('OUT');
 // The fonts Flutter ships for Material apps; `flutter test` sets FLUTTER_ROOT.
 final _fonts =
     '${Platform.environment['FLUTTER_ROOT']}/bin/cache/artifacts/material_fonts';
+
+// The playlist page asks for the repository; the previews never write to it.
+class _NoRepository extends Fake implements LibraryRepository {}
 
 class _IdleScan extends ScanController {
   @override
@@ -160,6 +165,18 @@ void main() {
           key: UniqueKey(),
           overrides: [
             sharedPreferencesProvider.overrideWithValue(preferences),
+            libraryRepositoryProvider.overrideWithValue(_NoRepository()),
+            playlistsProvider.overrideWith(
+              (ref) => [
+                Playlist(
+                  id: 1,
+                  name: 'Night drive',
+                  createdAt: DateTime(2026),
+                  trackCount: tracks.length,
+                ),
+              ],
+            ),
+            playlistTracksProvider.overrideWith((ref, id) => tracks),
             allTracksProvider.overrideWith((ref) => tracks),
             recentlyAddedProvider.overrideWith((ref) => tracks),
             recentlyPlayedProvider.overrideWith((ref) => tracks),
@@ -330,7 +347,10 @@ void main() {
           tester.getCenter(find.text('Library').last),
         );
         await tester.pump();
-        await tester.pump(const Duration(milliseconds: 260));
+        // The lens moves on a ticker, so it needs its frames one by one.
+        for (var i = 0; i < 16; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
       },
     );
     await finger?.up();
@@ -388,6 +408,57 @@ void main() {
         await tester.drag(find.byType(Scrollable).last, const Offset(0, -2400));
       },
     );
+    // A playlist's page, reached the way it is on the phone.
+    Future<void> openPlaylist() async {
+      await tester.tap(find.text('Library').last, warnIfMissed: false);
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.tap(find.text('Playlists'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Night drive'));
+      // The page's covers are decoded at a new size, which needs real time.
+      for (var i = 0; i < 8; i++) {
+        await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 120)),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+      }
+    }
+
+    await shoot(
+      '12_playlist',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: openPlaylist,
+    );
+    await shoot(
+      '13_playlist_scrolled',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: () async {
+        await openPlaylist();
+        await tester.dragFrom(const Offset(195, 600), const Offset(0, -330));
+      },
+    );
+    // The player part-way through growing out of the mini-player, to check
+    // the shape it takes and where the tabs are while it does.
+    for (final (name, elapsed) in const [
+      ('14_player_opening_60', 60),
+      ('15_player_opening_150', 150),
+      ('16_player_opening_240', 240),
+    ]) {
+      await shoot(
+        name,
+        child: const NocTuneApp(),
+        playing: tracks[0],
+        settleAfterAct: false,
+        act: () async {
+          await tester.tap(find.byKey(miniPlayerSurfaceKey));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 16));
+          await tester.pump(Duration(milliseconds: elapsed - 16));
+        },
+      );
+    }
     tester.view.reset();
   });
 }

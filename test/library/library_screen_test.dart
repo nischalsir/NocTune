@@ -124,7 +124,7 @@ void main() {
     await tester.tap(find.text('Skyline'));
     await settle(tester);
 
-    expect(find.text('2 tracks'), findsOneWidget);
+    expect(find.text('2 tracks · 6 min'), findsOneWidget);
     expect(find.text('One'), findsOneWidget);
     expect(find.text('Three'), findsNothing);
   });

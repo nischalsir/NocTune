@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:liquid_glass_easy/liquid_glass_easy.dart';
 import 'package:noctune/app/app.dart';
 import 'package:noctune/app/providers.dart';
 import 'package:noctune/data/models/playlist.dart';
@@ -12,6 +13,7 @@ import 'package:noctune/features/playback/playback_mapping.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
+import 'package:noctune/features/playback/now_playing_route.dart';
 import 'package:noctune/features/startup/startup_prompts.dart';
 import 'package:noctune/features/startup/update_service.dart';
 import 'package:noctune/third_party/spotiflac/mornye_bottom_bar.dart';
@@ -352,6 +354,50 @@ void main() {
       await tester.pumpAndSettle(const Duration(seconds: 3));
     });
 
+    testWidgets('on glass its tabs are the glass tab bar, with one pill', (
+      tester,
+    ) async {
+      await _pumpApp(tester, size: phone);
+
+      final tabs = tester.widget<LiquidGlassTabBar>(
+        find.byType(LiquidGlassTabBar),
+      );
+      expect(tabs.items.map((item) => item.label), [
+        'Home',
+        'Library',
+        'Search',
+        'Settings',
+      ]);
+      // The selection travels as a lens where the renderer can draw one.
+      expect(tabs.pillStyle.mode, LiquidGlassPillMode.impellerOnly);
+      expect(tabs.pillStyle.animated, isTrue);
+
+      await tester.tap(find.text('Library').last, warnIfMissed: false);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<LiquidGlassTabBar>(find.byType(LiquidGlassTabBar))
+            .selectedIndex,
+        1,
+      );
+    });
+
+    testWidgets('with reduced motion its tabs are the flat bar', (
+      tester,
+    ) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await _pumpApp(tester, size: phone);
+
+      expect(find.byType(LiquidGlassTabBar), findsNothing);
+      await tester.tap(find.text('Library').last);
+      await tester.pumpAndSettle();
+      expect(find.text('Tracks'), findsWidgets);
+    });
+
     testWidgets('swiping the mini-player away clears the queue', (
       tester,
     ) async {
@@ -368,6 +414,143 @@ void main() {
 
       expect(handler.cleared, 1);
       expect(find.text('Now Song'), findsNothing);
+    });
+  });
+
+  group('opening the player', () {
+    const song = MediaItem(id: 'file:///a.flac', title: 'Now Song');
+    const frame = Duration(milliseconds: 16);
+
+    // The surface the player is showing through, in screen coordinates.
+    // A new page is kept offstage for its first frame, which still counts.
+    final surface = find.byWidgetPredicate(
+      (widget) =>
+          widget is ClipRRect &&
+          widget.clipper.runtimeType.toString() == '_SurfaceClipper',
+      skipOffstage: false,
+    );
+    Rect shown(WidgetTester tester) =>
+        tester.widget<ClipRRect>(surface).clipper!.getClip(Size.zero).outerRect;
+
+    testWidgets('it grows out of the mini-player and pushes the tabs down', (
+      tester,
+    ) async {
+      await _pumpApp(tester, size: phone, nowPlaying: song);
+      final mini = tester.getRect(find.byKey(miniPlayerSurfaceKey));
+      final tabs = tester.getTopLeft(find.text('Home').last).dy;
+      expect(playerBarPush.value, 0);
+
+      await tester.tap(find.text('Now Song'));
+      await tester.pump();
+      // It starts as the mini-player's own shape, in the same place, with
+      // the tabs where they were.
+      expect(shown(tester), mini);
+      expect(playerBarPush.value, 0);
+
+      var before = mini;
+      var largestStep = 0.0;
+      var midway = 0;
+      for (var i = 0; i < 40; i++) {
+        await tester.pump(frame);
+        final now = shown(tester);
+        // Its top goes up and its bottom goes down, and neither comes back.
+        expect(now.top, lessThanOrEqualTo(before.top));
+        expect(now.bottom, greaterThanOrEqualTo(before.bottom));
+        largestStep = [
+          largestStep,
+          before.top - now.top,
+          now.bottom - before.bottom,
+        ].reduce((a, b) => a > b ? a : b);
+        // The tabs stay just under its lower edge.
+        expect(playerBarPush.value, closeTo(now.bottom - mini.bottom, 0.01));
+        if (now.bottom < phone.height - 1) {
+          midway++;
+          expect(
+            tester.getTopLeft(find.text('Home').last).dy,
+            closeTo(tabs + playerBarPush.value, 0.01),
+          );
+        }
+        before = now;
+      }
+      await tester.pumpAndSettle();
+
+      expect(midway, greaterThan(8));
+      // No part of it crosses the screen in a single frame.
+      expect(largestStep, lessThan(80));
+      expect(shown(tester), Offset.zero & phone);
+      expect(playerBarPush.value, closeTo(phone.height - mini.bottom, 0.01));
+      expect(find.text('NOW PLAYING'), findsOneWidget);
+    });
+
+    testWidgets('closing it shrinks back into the mini-player', (tester) async {
+      await _pumpApp(tester, size: phone, nowPlaying: song);
+      final mini = tester.getRect(find.byKey(miniPlayerSurfaceKey));
+      await tester.tap(find.text('Now Song'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byTooltip('Close player'));
+      await tester.pump();
+      var before = shown(tester);
+      for (var i = 0; i < 30 && surface.evaluate().isNotEmpty; i++) {
+        await tester.pump(frame);
+        if (surface.evaluate().isEmpty) break;
+        final now = shown(tester);
+        expect(now.top, greaterThanOrEqualTo(before.top));
+        expect(now.bottom, lessThanOrEqualTo(before.bottom));
+        before = now;
+      }
+      await tester.pumpAndSettle();
+
+      // It ended on the mini-player, and the tabs are back where they were.
+      expect(before.top, closeTo(mini.top, 12));
+      expect(playerBarPush.value, 0);
+      expect(find.text('NOW PLAYING'), findsNothing);
+      expect(find.text('Now Song'), findsOneWidget);
+    });
+
+    testWidgets('dragging it down closes it, and the tabs come back with it', (
+      tester,
+    ) async {
+      await _pumpApp(tester, size: phone, nowPlaying: song);
+      await tester.tap(find.text('Now Song'));
+      await tester.pumpAndSettle();
+      final pushed = playerBarPush.value;
+
+      // On the cover, which leaves vertical drags to the page.
+      final finger = await tester.startGesture(const Offset(195, 300));
+      await finger.moveBy(const Offset(0, 40));
+      await tester.pump();
+      await finger.moveBy(const Offset(0, 300));
+      await tester.pump();
+
+      // Under the finger it is part-way shut, with the tabs part-way back.
+      expect(shown(tester).top, greaterThan(0));
+      expect(playerBarPush.value, inExclusiveRange(0, pushed));
+
+      await finger.up();
+      await tester.pumpAndSettle();
+      expect(playerBarPush.value, 0);
+      expect(find.text('NOW PLAYING'), findsNothing);
+    });
+
+    testWidgets('with reduced motion it fades in and nothing moves', (
+      tester,
+    ) async {
+      tester.platformDispatcher.accessibilityFeaturesTestValue =
+          const FakeAccessibilityFeatures(disableAnimations: true);
+      addTearDown(
+        tester.platformDispatcher.clearAccessibilityFeaturesTestValue,
+      );
+      await _pumpApp(tester, size: phone, nowPlaying: song);
+
+      await tester.tap(find.text('Now Song'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(surface, findsNothing);
+      expect(playerBarPush.value, 0);
+      await tester.pumpAndSettle();
+      expect(find.text('NOW PLAYING'), findsOneWidget);
     });
   });
 

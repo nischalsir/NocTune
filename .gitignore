@@ -50,6 +50,7 @@ app.*.map.json
 # Local reference material, never part of the app
 /*-main/
 /Screenshot*.png
+/*.webp
 
 # Signed builds prepared for a release
 /build/dist/

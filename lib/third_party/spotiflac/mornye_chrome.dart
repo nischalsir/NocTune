@@ -1,6 +1,9 @@
 // Copied from SpotiFLAC-Mobile (https://github.com/zarzet/SpotiFLAC-Mobile),
 // Copyright (c) 2026 zarzet, MIT licence. See LICENSE in this folder.
-// Changes for NocTune are limited to imports and app-specific hooks.
+// Changes for NocTune: imports, app-specific hooks, and the tab bar on glass,
+// which is liquid_glass_easy's own bar over the frosted capsule: the
+// selection rests as a flat pill and travels between tabs as a lens that
+// refracts the capsule, on the package's spring.
 
 import 'dart:ui' show ImageFilter;
 
@@ -521,87 +524,200 @@ class MornyeTabBar extends StatelessWidget {
       !MediaQuery.disableAnimationsOf(context) &&
       !MediaQuery.highContrastOf(context);
 
-  @override
-  Widget build(BuildContext context) {
+  /// NocTune: the bar on glass. The frosted capsule is a sibling beneath the
+  /// package's tab bar, not its ancestor, so the travelling lens refracts
+  /// the capsule's real pixels rather than a filtered copy of them.
+  Widget _glassTabs(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final floating = usesLiquidGlass(
-      context,
-      blurEnabled: blurEnabled,
-      liquidGlass: liquidGlass,
-    );
-    return Padding(
-      padding: EdgeInsets.symmetric(vertical: floating ? 8 : 0),
-      child: MornyeSelectionPill(
-        selectionColor: scheme.primary,
-        maskItemForeground: false,
-        liquidInteraction:
-            floating && MornyeTheme.glassClarityOf(context) > 0.2,
-        labels: [for (final destination in destinations) destination.label],
-        selectedIndex: selectedIndex,
-        onChanged: onSelected,
-        padding: EdgeInsets.symmetric(
-          horizontal: floating ? 6 : 5,
-          vertical: 5,
-        ),
-        interactionBuilder: (context, progress, child) => Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Positioned.fill(
-              // Only the capsule projects forward. Icons, labels and touch
-              // coordinates stay fixed, and collapse never fades the backdrop.
-              child: Transform.scale(
-                scaleX: 1 + 0.025 * progress,
-                scaleY: 1 + 0.06 * progress,
+    final labelStyle = Theme.of(context).textTheme.labelSmall;
+    return LayoutBuilder(
+      builder: (context, constraints) => SizedBox(
+        // Room above and below the capsule for the lens to lift and stretch
+        // without being clipped.
+        height: 80,
+        child: MediaQuery.removePadding(
+          context: context,
+          removeBottom: true,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 8,
+                height: 64,
                 child: MornyeGlass.navigation(
                   blurEnabled: blurEnabled,
                   strongTint: true,
                   tintOpacity: MornyeTheme.navigationOpacity(context),
-                  refractionDepth: 0.45 + 0.15 * progress,
+                  refractionDepth: 0.45,
                   child: const SizedBox.expand(),
                 ),
               ),
-            ),
-            // The selection lens can swell beyond the capsule's clip.
-            FadeTransition(opacity: contentOpacity, child: child),
-          ],
+              Positioned.fill(
+                // Fades the icons, labels and resting pill only: the
+                // capsule keeps sampling the page while the bar folds.
+                child: FadeTransition(
+                  opacity: contentOpacity,
+                  child: LiquidGlassTabBar.withImpeller(
+                    width: constraints.maxWidth,
+                    height: 64,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    selectedIndex: selectedIndex,
+                    onChanged: onSelected,
+                    style: LiquidGlassTabBar.defaultStyle.copyWith(
+                      // The capsule beneath supplies the rim, tint and blur;
+                      // this one stays clear so the lens has icons to bend.
+                      shape: const LiquidGlassShape.continuousRoundedRectangle(
+                        cornerRadius: 32,
+                        borderWidth: 0,
+                        lightIntensity: 0,
+                      ),
+                      appearance: const LiquidGlassAppearance(),
+                      refraction: const LiquidGlassRefraction(
+                        distortion: 0,
+                        chromaticAberration: 0,
+                      ),
+                    ),
+                    itemStyle: LiquidGlassTabItemStyle(
+                      selectedColor: scheme.primary,
+                      unselectedColor: scheme.onSurface,
+                      iconSize: 25,
+                      labelFontSize: 11,
+                      selectedFontWeight: FontWeight.w600,
+                      unselectedFontWeight: FontWeight.w600,
+                      iconLabelGap: 2,
+                    ),
+                    pillStyle: LiquidGlassTabPillStyle(
+                      mode: LiquidGlassPillMode.impellerOnly,
+                      color: scheme.onSurface.withValues(
+                        alpha: scheme.brightness == Brightness.dark
+                            ? 0.12
+                            : 0.08,
+                      ),
+                      animated: true,
+                      // One lens: the package's second, magnifying one
+                      // under it is left out.
+                      magnifierPill: const LiquidGlassTabMagnifierPillStyle(
+                        enabled: false,
+                      ),
+                    ),
+                    itemPadding: 6,
+                    items: [
+                      for (final (index, destination) in destinations.indexed)
+                        LiquidGlassTabBarItem(
+                          label: destination.label,
+                          iconBuilder: (context, glyph) => Opacity(
+                            opacity: hiddenIconIndices.contains(index) ? 0 : 1,
+                            child: IconTheme(
+                              data: IconThemeData(
+                                size: glyph.size,
+                                color: glyph.color,
+                              ),
+                              child: destination.icon,
+                            ),
+                          ),
+                          labelBuilder: (context, label) => Text(
+                            destination.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            // The capsule's height is fixed, so the labels
+                            // stop growing where they would no longer fit.
+                            textScaler: MediaQuery.textScalerOf(context)
+                                .clamp(maxScaleFactor: 1.5),
+                            style: labelStyle?.copyWith(
+                              fontSize: label.fontSize,
+                              fontWeight: FontWeight.w600,
+                              color: label.color,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-        itemBuilder: (context, index, selected) => ConstrainedBox(
-          constraints: const BoxConstraints(minHeight: 54),
-          child: Padding(
-            padding: EdgeInsets.symmetric(vertical: floating ? 0 : 6),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconTheme(
-                  data: IconThemeData(
-                    size: 25,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    if (usesLiquidGlass(
+      context,
+      blurEnabled: blurEnabled,
+      liquidGlass: liquidGlass,
+    )) {
+      return _glassTabs(context);
+    }
+    // Without glass: a flat capsule whose flat pill slides between tabs.
+    return MornyeSelectionPill(
+      selectionColor: scheme.primary,
+      maskItemForeground: false,
+      labels: [for (final destination in destinations) destination.label],
+      selectedIndex: selectedIndex,
+      onChanged: onSelected,
+      padding: const EdgeInsets.all(5),
+      interactionBuilder: (context, progress, child) => Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(
+            // Only the capsule projects forward. Icons, labels and touch
+            // coordinates stay fixed, and collapse never fades the backdrop.
+            child: Transform.scale(
+              scaleX: 1 + 0.025 * progress,
+              scaleY: 1 + 0.06 * progress,
+              child: MornyeGlass.navigation(
+                blurEnabled: blurEnabled,
+                strongTint: true,
+                tintOpacity: MornyeTheme.navigationOpacity(context),
+                refractionDepth: 0.45 + 0.15 * progress,
+                child: const SizedBox.expand(),
+              ),
+            ),
+          ),
+          // The selection lens can swell beyond the capsule's clip.
+          FadeTransition(opacity: contentOpacity, child: child),
+        ],
+      ),
+      itemBuilder: (context, index, selected) => ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 54),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              IconTheme(
+                data: IconThemeData(
+                  size: 25,
+                  color: selected ? scheme.primary : scheme.onSurface,
+                ),
+                child: Opacity(
+                  opacity: hiddenIconIndices.contains(index) ? 0 : 1,
+                  child: destinations[index].icon is MornyeNavigationIcon
+                      ? destinations[index].icon
+                      : MornyeSelectionForeground(
+                          child: destinations[index].icon,
+                        ),
+                ),
+              ),
+              const SizedBox(height: 2),
+              MornyeSelectionForeground(
+                child: Text(
+                  destinations[index].label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
                     color: selected ? scheme.primary : scheme.onSurface,
                   ),
-                  child: Opacity(
-                    opacity: hiddenIconIndices.contains(index) ? 0 : 1,
-                    child: destinations[index].icon is MornyeNavigationIcon
-                        ? destinations[index].icon
-                        : MornyeSelectionForeground(
-                            child: destinations[index].icon,
-                          ),
-                  ),
                 ),
-                const SizedBox(height: 2),
-                MornyeSelectionForeground(
-                  child: Text(
-                    destinations[index].label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      fontSize: floating ? 11 : null,
-                      fontWeight: FontWeight.w600,
-                      color: selected ? scheme.primary : scheme.onSurface,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),

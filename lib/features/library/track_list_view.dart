@@ -10,20 +10,12 @@ import 'track_tile.dart';
 /// A scrolling list of tracks loaded from a provider, with loading, error
 /// and empty states. Tapping a track plays the whole list from that track.
 class TrackListView extends ConsumerWidget {
-  const TrackListView({
-    super.key,
-    required this.tracks,
-    required this.empty,
-    this.playlistId,
-  });
+  const TrackListView({super.key, required this.tracks, required this.empty});
 
   final AsyncValue<List<Track>> tracks;
 
   /// Shown when the list has loaded and contains nothing.
   final Widget empty;
-
-  /// Set when listing a playlist, so tracks can be removed from it.
-  final int? playlistId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -48,8 +40,7 @@ class TrackListView extends ConsumerWidget {
               onTap: () => ref
                   .read(audioHandlerProvider)
                   .playTracks(tracks, initialIndex: index),
-              onMenu: () =>
-                  showTrackMenu(context, ref, track, playlistId: playlistId),
+              onMenu: () => showTrackMenu(context, ref, track),
             );
           },
         );

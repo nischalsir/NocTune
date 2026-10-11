@@ -4,8 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:noctune/third_party/spotiflac/mornye_selection_pill.dart';
 
-/// How the bottom bar marks the selected tab: a flat pill at rest, a glass
-/// lens while the selection moves, and never both.
+/// How the selector marks its choice: a flat pill at rest, a glass lens while
+/// the selection moves, and never both. It is the theme choice in Settings,
+/// and the bottom bar's tabs where glass is switched off.
 ///
 /// The lens needs a renderer with shader filters, which the default test
 /// renderer is not. Run this file with `flutter test --enable-impeller`;
