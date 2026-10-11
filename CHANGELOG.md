@@ -9,6 +9,47 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.9.0 (build 15) - 2026-10-11
+
+Published at the owner's request before deleting was tried on a phone. The
+automated checks pass; the Android part that asks the system to remove a
+file has not been run on a device.
+
+### Added
+
+- Delete a song. "Delete from device" is the last entry in a song's menu
+  (press and hold a song in a list, or the menu in the player). NocTune asks
+  first. For a file in shared storage Android then asks once more itself and
+  does the removing. The song also leaves the library, its playlists, the
+  favourites and the queue.
+- Duplicates page: a delete button beside each copy.
+
+### Changed
+
+- The Duplicates page no longer says NocTune never deletes files.
+
+### Known issues
+
+- Deleting a file in shared storage needs Android 11 or later. On older
+  versions NocTune says so and deletes nothing. Files NocTune imported
+  itself can be deleted on any version.
+- Some AAC songs crackle when loud. One was measured against the FLAC of
+  the same song from the same phone. It is a 96 kbit/s AAC track inside a
+  video file, and decoded exactly it goes up to 20% over full scale in
+  6,656 samples, where the FLAC never does. Android's AAC decoder hands
+  over 16-bit sound, which cannot hold those peaks, and it does so before
+  the equaliser and the preamp, so neither can undo it. Repairing that
+  takes a decoder of NocTune's own, which is the larger job listed under
+  1.8.0. Not fixed.
+- Such files carry a moving picture that the player decodes and throws
+  away, which costs battery. The audio plugin has no setting for that.
+
+### Tests
+
+- Deleting is covered by 4 new tests: it asks first, Cancel changes
+  nothing, a yes removes the file, the library entry and the queue entry,
+  and a refusal or a failure keeps the song and says why.
+
 ## 1.8.0 (build 14) - 2026-10-11
 
 Run on the owner's phone before release. The phone's mixer showed the
