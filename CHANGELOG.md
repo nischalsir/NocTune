@@ -9,6 +9,42 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.8.0 (build 14) - 2026-10-11
+
+### Added
+
+- An equaliser, under Settings, Audio, Equaliser. It has a switch, a
+  slider for each band the phone's own equaliser offers (five on most
+  phones), ready-made shapes (Flat, Bass boost, Treble boost, Vocal, Rock,
+  Pop, Jazz, Classical, Small speaker), shapes of your own saved under a
+  name, and a preamp from -12 to +6 dB. Switched off, which is how it
+  starts, nothing touches the sound. What you set is kept and applied
+  again at launch.
+- It uses Android's equaliser, which the player already had attached and
+  switched off. A preamp below 0 turns the player's own level down; above
+  0 it uses Android's loudness enhancer. The phone's own sound processing
+  (Dolby, spatial sound) still comes after it.
+- "Small speaker" takes the deepest band down and raises nothing, for
+  a phone speaker that rattles when the volume is high.
+
+### Changed
+
+- Settings: the "Sound processing" line is now the Equaliser row, and
+  says whether it is on and with which shape.
+
+### Not done
+
+- A choice of decoder was asked for together with the equaliser. It needs
+  a modified copy of the audio plugin with FFmpeg inside the app, and it
+  would not change how a FLAC file sounds: a lossless file decodes to the
+  same samples whatever decodes it. Left for a later version if still
+  wanted.
+
+### Tests
+
+- The shapes, storing and reading the settings, and the page's switch,
+  sliders, shapes, saving and deleting are covered by 22 new tests.
+
 ## 1.7.1 (build 13) - 2026-10-11
 
 Fixes what running 1.7.0 on the owner's phone showed. The cause was found
