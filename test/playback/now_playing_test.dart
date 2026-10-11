@@ -263,6 +263,28 @@ void main() {
     });
   });
 
+  testWidgets('its wave holds still while something covers the app', (
+    tester,
+  ) async {
+    addTearDown(
+      () => tester.binding.handleAppLifecycleStateChanged(
+        AppLifecycleState.resumed,
+      ),
+    );
+    await _pump(tester, state: PlaybackState(playing: true));
+    expect(tester.hasRunningAnimations, isTrue);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.hasRunningAnimations, isFalse);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(tester.hasRunningAnimations, isTrue);
+  });
+
   testWidgets('shows the favourite state', (tester) async {
     await _pump(tester);
     expect(find.byTooltip('Add to favourites'), findsOneWidget);

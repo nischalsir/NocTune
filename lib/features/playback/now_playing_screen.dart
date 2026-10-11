@@ -13,6 +13,7 @@ import '../../core/theme/cover_accent.dart';
 import '../../core/theme/flex_type.dart';
 import '../../core/theme/noc_theme.dart';
 import '../../core/widgets/artwork.dart';
+import '../../core/widgets/still_when_covered.dart';
 import '../../data/models/track.dart';
 import '../../third_party/spotiflac/overflow_marquee.dart';
 import '../library/track_menu.dart';
@@ -204,13 +205,19 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                                         ),
                                       ),
                                     )
-                                  : _NowPlaying(
+                                  // The seek bar's wave holds still
+                                  // under the notification shade. The
+                                  // lyrics above do not: their motion
+                                  // is the content.
+                                  : StillWhenCovered(
                                       key: const ValueKey('player'),
-                                      item: item,
-                                      track: track,
-                                      onShowLyrics: () => _setLyrics(true),
-                                      detailsKey: _detailsKey,
-                                      sideways: sideways,
+                                      child: _NowPlaying(
+                                        item: item,
+                                        track: track,
+                                        onShowLyrics: () => _setLyrics(true),
+                                        detailsKey: _detailsKey,
+                                        sideways: sideways,
+                                      ),
                                     ),
                             ),
                     ),
@@ -627,7 +634,6 @@ class _MenuCircle extends StatelessWidget {
 /// landscape) there is no room for that, so the cover sits beside them.
 class _NowPlaying extends ConsumerWidget {
   const _NowPlaying({
-    super.key,
     required this.item,
     required this.track,
     required this.onShowLyrics,

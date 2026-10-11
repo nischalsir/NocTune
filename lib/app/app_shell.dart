@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/theme/flex_type.dart';
 import '../core/theme/noc_palette.dart';
 import '../core/widgets/noc_backdrop.dart';
+import '../core/widgets/still_when_covered.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/library_screen.dart';
 import '../features/library/scan/scan_controller.dart';
@@ -374,7 +375,9 @@ class _AppShellState extends ConsumerState<AppShell> {
               : Brightness.dark,
           systemNavigationBarContrastEnforced: false,
         ),
-        child: scaffold,
+        // The pages, the bar and the mini-player hold still under the
+        // notification shade.
+        child: StillWhenCovered(child: scaffold),
       ),
     );
   }

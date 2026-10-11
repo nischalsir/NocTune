@@ -786,6 +786,37 @@ void main() {
       );
     });
 
+    testWidgets('holds still while something covers the app', (tester) async {
+      addTearDown(
+        () => tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        ),
+      );
+      await _pumpApp(
+        tester,
+        size: phone,
+        tracks: [_track('Other'), loaded],
+        currentTrack: loaded,
+        playing: true,
+        settle: false,
+      );
+      expect(tester.hasRunningAnimations, isTrue);
+
+      // The notification shade comes down over the app. Every frame the app
+      // draws from here on, the system has to blur again behind the shade.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.hasRunningAnimations, isFalse);
+      expect(tester.binding.hasScheduledFrame, isFalse);
+
+      // And goes back up: the bars pick up where they were.
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(tester.hasRunningAnimations, isTrue);
+    });
+
     testWidgets('holds the bars still while paused', (tester) async {
       await _pumpApp(
         tester,
