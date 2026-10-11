@@ -9,6 +9,74 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.7.0 (build 11) - 2026-10-11
+
+Published as a normal release at the owner's request. Version 1.6.0 was run
+on the owner's phone and this release answers what was seen and asked for
+there; this build itself has not yet been run on a phone.
+
+### Added
+
+- Favourites have a page of their own, in the album design: their covers,
+  how many tracks there are and how long they run, Play and Shuffle. It
+  opens from the Favourites chip in the library and from "See all" on
+  Home. From its menu a picture of your own can be set as its cover, and
+  removed again.
+- Playlists are albums of your own making. A playlist's menu has "Add
+  tracks", which lists the whole library with a search and lets many
+  tracks be ticked at once, and "Change cover" and "Remove cover" for a
+  picture of your own. A new playlist opens straight away, ready to be
+  filled, and the library lists playlists by their covers.
+- The library has a search of its own: a round button opens a field at
+  the top, and matching tracks take the place of the list as you type.
+  Back closes it.
+- The Search page remembers the last ten searches and lists them while
+  the field is empty. A tap runs one again, and Clear empties the list. A
+  search is remembered when it is sent from the keyboard or one of its
+  results is played, not on every letter.
+
+### Changed
+
+- Library: a new look. Round glass buttons at the top for searching,
+  importing, rescanning and sorting, "Your library" under them, the
+  sections as pills with the chosen one filled in the accent colour, and
+  each track row ending in its length and a round play button. A track's
+  menu is now a press and hold on its row.
+- Album, artist, genre, folder, playlist and favourites pages take their
+  colour from the main colour of the cover in front, deep in the dark
+  theme and pale in the light one, in place of a blur of the cover that
+  was barely visible behind dark covers. With only two covers, the second
+  no longer leans out on one side alone.
+- A page opened from Home, such as an album from the shelf, keeps the
+  navigation bar and the mini-player, as pages opened from the library
+  do. Back closes it first.
+- Opening and closing the player move on springs that never pass their
+  end: quick away and a long, soft arrival, about 0.55 s to open and 0.5 s
+  to close, where they were 0.42 s and 0.3 s on fixed curves. Let go while
+  it is being dragged, it carries on at the speed the finger gave it.
+
+### Fixed
+
+- Lyrics: the lit words stood about a pixel below the dim words under
+  them. The dim copy is laid out for the app's language and the lit copy
+  was not, and in the app's typeface that moves the letters. Both are now
+  laid out the same way.
+
+### Data
+
+- The library database moves to version 4: a playlist can hold a cover.
+  Existing playlists, tracks, favourites and history are kept. Covers you
+  choose are copied into the app's own storage.
+
+### Tests
+
+- The lit copy of a lyric line is checked, letter for letter, against
+  the dim copy in the app's typeface, theme and language.
+- The favourites page, covers chosen and removed, tracks ticked into a
+  playlist, the library's search and play buttons, the search history,
+  and an album opened from Home keeping the navigation bar.
+- The upgrade of a version 3 library.
+
 ## 1.6.0 (build 10) - 2026-10-11
 
 Published as a normal release at the owner's request; not yet run on a
