@@ -9,7 +9,7 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
-## 1.7.1 (build 12) - 2026-10-11
+## 1.7.1 (build 13) - 2026-10-11
 
 Fixes what running 1.7.0 on the owner's phone showed. The cause was found
 by timing frames on that phone with test builds, not by guessing.
@@ -28,6 +28,17 @@ by timing frames on that phone with test builds, not by guessing.
   The navigation bar that came in 1.6.0 added one more glass pass to each
   frame, which is what pushed an already heavy screen over the limit; with
   the blurs gone it costs nothing that can be measured, and it stays.
+- That alone did not make the shade smooth (build 12, tried on the phone).
+  While music played the app went on drawing a new frame on every tick of
+  the screen even with the shade down over it, and the system had to draw
+  each of those frames again behind its own blur. Now, while the app is
+  not the one in front (under the notification shade or the control
+  centre, behind a system dialog, unfocused in a split screen), its
+  decoration holds still: the sound bars, the pulsing "Now Playing" pill,
+  the seek bar's wave and the navigation bar. On the phone, over a page of
+  the app that was holding still, the system drew about a quarter more
+  frames of its own in the same time than over Home in motion. Lyrics keep
+  moving, because their motion is the content.
 
 ### Changed
 
@@ -39,6 +50,8 @@ by timing frames on that phone with test builds, not by guessing.
 
 - Home's hero is checked to hold no backdrop blur while its bars move,
   and the bar's active colour is checked against the accent.
+- Home and the player are checked to ask for no frames while the app is
+  covered, and to carry on when it is back in front.
 
 ## 1.7.0 (build 11) - 2026-10-11
 
