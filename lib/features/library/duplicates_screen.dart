@@ -5,9 +5,10 @@ import '../../app/providers.dart';
 import '../../core/audio_format.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/noc_backdrop.dart';
+import 'delete_track.dart';
 
-/// Lists tracks that appear to be stored more than once. It only reports
-/// them: NocTune never deletes or changes music files.
+/// Lists tracks that appear to be stored more than once, each copy with a
+/// button to delete it from the device.
 class DuplicatesScreen extends ConsumerWidget {
   const DuplicatesScreen({super.key});
 
@@ -47,8 +48,8 @@ class DuplicatesScreen extends ConsumerWidget {
                     children: [
                       Text(
                         'These tracks share a title, artist and length. '
-                        'NocTune never deletes files; remove the copies you '
-                        "don't want with a file manager, then rescan.",
+                        "Delete the copies you don't want; NocTune asks "
+                        'before it removes a file.',
                         style: text.bodyMedium,
                       ),
                       for (final copies in sets) ...[
@@ -61,9 +62,23 @@ class DuplicatesScreen extends ConsumerWidget {
                         for (final track in copies)
                           Padding(
                             padding: const EdgeInsets.only(top: 6),
-                            child: Text(
-                              '${qualityLabel(track)}\n${track.uri}',
-                              style: text.bodySmall,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    '${qualityLabel(track)}\n${track.uri}',
+                                    style: text.bodySmall,
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: 'Delete this copy',
+                                  icon: const Icon(
+                                    Icons.delete_outline_rounded,
+                                  ),
+                                  onPressed: () =>
+                                      deleteTrack(context, ref, track),
+                                ),
+                              ],
                             ),
                           ),
                       ],

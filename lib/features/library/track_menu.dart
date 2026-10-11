@@ -7,6 +7,7 @@ import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../data/models/track.dart';
 import '../playback/playback_mapping.dart';
+import 'delete_track.dart';
 import 'playlist_dialogs.dart';
 
 /// Opens the actions for one track. Pass [playlistId] when the track is shown
@@ -109,6 +110,16 @@ Future<void> showTrackMenu(
               onTap: () {
                 Navigator.of(sheetContext).pop();
                 showTrackDetails(context, track);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded),
+              title: const Text('Delete from device'),
+              iconColor: Theme.of(sheetContext).colorScheme.error,
+              textColor: Theme.of(sheetContext).colorScheme.error,
+              onTap: () {
+                Navigator.of(sheetContext).pop();
+                deleteTrack(context, ref, track);
               },
             ),
           ],

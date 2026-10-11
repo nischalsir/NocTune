@@ -247,6 +247,15 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  /// Takes every entry for [track] out of the queue, for when its file has
+  /// been deleted.
+  Future<void> removeTrack(Track track) async {
+    final id = mediaItemFromTrack(track).id;
+    for (var index = queue.value.length - 1; index >= 0; index--) {
+      if (queue.value[index].id == id) await removeQueueItemAt(index);
+    }
+  }
+
   /// Stops playback and empties the queue, which also dismisses the
   /// mini-player. Used when the user swipes the player away.
   Future<void> clearQueue() async {

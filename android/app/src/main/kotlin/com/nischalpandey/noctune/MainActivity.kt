@@ -1,5 +1,6 @@
 package com.nischalpandey.noctune
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import com.ryanheise.audioservice.AudioServiceActivity
@@ -9,6 +10,8 @@ import io.flutter.plugin.common.MethodChannel
 // AudioServiceActivity shares one Flutter engine with the playback service, so
 // audio keeps running when this activity is destroyed.
 class MainActivity : AudioServiceActivity() {
+    private var deleteAudio: DeleteAudioChannel? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         preferFastestRefreshRate()
@@ -47,5 +50,15 @@ class MainActivity : AudioServiceActivity() {
             .setMethodCallHandler(AudioCapabilitiesChannel())
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "noctune/device_profile")
             .setMethodCallHandler(DeviceProfileChannel(applicationContext))
+        deleteAudio = DeleteAudioChannel(this).also {
+            MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "noctune/delete_audio")
+                .setMethodCallHandler(it)
+        }
+    }
+
+    // Android's answer to "allow NocTune to delete this file?".
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (deleteAudio?.onActivityResult(requestCode, resultCode) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
     }
 }
