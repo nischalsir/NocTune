@@ -19,6 +19,12 @@ import '../playback/now_playing_screen.dart';
 /// action shows that it is playing; otherwise it offers to play it.
 ///
 /// The scrim is dark in both themes, so the type on it is always white.
+///
+/// Its glass pills paint the glass finish only and do not blur the artwork
+/// behind them. While music plays the bars in the pill redraw the screen on
+/// every frame, and two blurs worked out again on each of those frames took
+/// a phone's whole frame time, enough to slow the system's own animations
+/// over the app. The scrim under them keeps their text readable.
 class HomeHero extends StatelessWidget {
   const HomeHero({
     super.key,
@@ -264,7 +270,6 @@ class _PlayPill extends StatelessWidget {
       onTap: onTap,
       child: Frosted(
         tint: palette.accent,
-        blurBackdrop: true,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 9, 14, 9),
           child: Row(
@@ -309,7 +314,6 @@ class _NowPlayingPill extends ConsumerWidget {
       semanticLabel: '$label. Open player.',
       onTap: () => showNowPlaying(context),
       child: Frosted(
-        blurBackdrop: true,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(14, 9, 16, 9),
           child: Row(

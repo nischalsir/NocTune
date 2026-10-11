@@ -105,7 +105,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     return Semantics(
       label: 'Search your library',
       child: onHero
-          ? Frosted(blurBackdrop: true, child: field)
+          ? Frosted(child: field)
           : DecoratedBox(
               decoration: ShapeDecoration(
                 color: palette.glass,

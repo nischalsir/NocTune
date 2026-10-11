@@ -179,9 +179,10 @@ class _AppShellState extends ConsumerState<AppShell> {
 
     final palette = context.noc;
     final dark = Theme.of(context).brightness == Brightness.dark;
-    // The bar keeps its own theme: it is drawn exactly as in its source app,
-    // whatever accent the rest of NocTune is using. NocTune's palette rides
-    // along for the cover placeholder in the mini-player.
+    // The bar keeps its own theme and is drawn as in its source app, except
+    // for the colour of the active tab, which is NocTune's accent and so
+    // follows the cover art. NocTune's palette rides along for the cover
+    // placeholder in the mini-player.
     final barBase = MornyeTheme.build(
       Theme.of(context).brightness,
       glassClarity: ref.watch(
@@ -189,6 +190,7 @@ class _AppShellState extends ConsumerState<AppShell> {
       ),
     );
     final barTheme = barBase.copyWith(
+      colorScheme: barBase.colorScheme.copyWith(primary: palette.accent),
       // Set in the app's own typeface, like every other screen.
       textTheme: barBase.textTheme.apply(fontFamily: FlexType.family),
       extensions: [...barBase.extensions.values, palette],

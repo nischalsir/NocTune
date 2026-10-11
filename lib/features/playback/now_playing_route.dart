@@ -111,6 +111,14 @@ class NowPlayingRoute extends PageRoute<void> {
     }
   }
 
+  @override
+  void dispose() {
+    // Removed without closing, the page must not leave the bar pushed away.
+    // Not during the removal itself, when nothing may be rebuilt.
+    if (_origin != null) Future.microtask(() => playerBarPush.value = 0);
+    super.dispose();
+  }
+
   void _pushBar() {
     final screen = navigator?.context.findRenderObject();
     if (screen is! RenderBox) return;

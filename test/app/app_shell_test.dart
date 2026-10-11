@@ -8,7 +8,9 @@ import 'package:noctune/app/app.dart';
 import 'package:noctune/app/providers.dart';
 import 'package:noctune/data/models/playlist.dart';
 import 'package:noctune/data/models/track.dart';
+import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/widgets/wave_bars.dart';
+import 'package:noctune/features/home/home_hero.dart';
 import 'package:noctune/features/playback/playback_mapping.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
@@ -383,6 +385,20 @@ void main() {
       );
     });
 
+    testWidgets('the active tab takes the accent, not a colour of its own', (
+      tester,
+    ) async {
+      await _pumpApp(tester, size: phone, preferences: {'accent': 'blue'});
+
+      expect(
+        tester
+            .widget<LiquidGlassTabBar>(find.byType(LiquidGlassTabBar))
+            .itemStyle
+            .selectedColor,
+        NocAccent.blue.onDark,
+      );
+    });
+
     testWidgets('with reduced motion its tabs are the flat bar', (
       tester,
     ) async {
@@ -743,6 +759,31 @@ void main() {
       }
       // The bars keep moving, so this screen never comes to rest.
       expect(tester.hasRunningAnimations, isTrue);
+    });
+
+    testWidgets('blurs nothing behind its glass while its bars move', (
+      tester,
+    ) async {
+      await _pumpApp(
+        tester,
+        size: phone,
+        tracks: [_track('Other'), loaded],
+        currentTrack: loaded,
+        playing: true,
+        settle: false,
+      );
+
+      // The bars redraw the screen on every frame while music plays. A blur
+      // of what is behind each pill, worked out again on each of those
+      // frames, is what took the phone's whole frame time.
+      expect(find.text('Now playing'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(HomeHero),
+          matching: find.byType(BackdropFilter),
+        ),
+        findsNothing,
+      );
     });
 
     testWidgets('holds the bars still while paused', (tester) async {
