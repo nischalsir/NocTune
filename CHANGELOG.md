@@ -12,7 +12,9 @@ Release channels:
 ## 1.7.1 (build 13) - 2026-10-11
 
 Fixes what running 1.7.0 on the owner's phone showed. The cause was found
-by timing frames on that phone with test builds, not by guessing.
+by timing frames on that phone with test builds, not by guessing. Build 13
+was run on that phone, and the shade and the control centre are smooth
+over the app again with music playing.
 
 ### Fixed
 
