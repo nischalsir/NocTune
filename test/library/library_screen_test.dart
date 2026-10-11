@@ -11,6 +11,7 @@ import 'package:noctune/data/repositories/library_repository.dart';
 import 'package:noctune/features/library/library_screen.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
+import 'package:noctune/features/playback/playback_mapping.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -27,6 +28,12 @@ class _FakeHandler extends Fake implements NocAudioHandler {
   @override
   Future<void> addQueueItem(MediaItem mediaItem) async =>
       calls.add('queue ${mediaItem.title}');
+
+  @override
+  Future<void> play() async => calls.add('resume');
+
+  @override
+  Future<void> pause() async => calls.add('pause');
 }
 
 class _IdleScanController extends ScanController {
@@ -54,7 +61,12 @@ void main() {
     }
   }
 
-  Future<void> pump(WidgetTester tester) async {
+  // [current] is the title of the track loaded in the player, if any.
+  Future<void> pump(
+    WidgetTester tester, {
+    String? current,
+    bool playing = true,
+  }) async {
     // Wide enough that every section chip is on screen without scrolling.
     tester.view.physicalSize = const Size(900, 844);
     tester.view.devicePixelRatio = 1;
@@ -86,6 +98,10 @@ void main() {
       ]);
     });
     addTearDown(() => tester.runAsync(db.close));
+    final loaded = current == null
+        ? null
+        : (await tester.runAsync(repository.tracks))!
+              .firstWhere((track) => track.title == current);
     handler = _FakeHandler();
     SharedPreferences.setMockInitialValues({});
     final preferences = await SharedPreferences.getInstance();
@@ -96,7 +112,15 @@ void main() {
           libraryRepositoryProvider.overrideWithValue(repository),
           sharedPreferencesProvider.overrideWithValue(preferences),
           audioHandlerProvider.overrideWithValue(handler),
-          currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
+          currentMediaItemProvider.overrideWith(
+            (ref) => Stream.value(
+              loaded == null ? null : mediaItemFromTrack(loaded),
+            ),
+          ),
+          if (loaded != null)
+            playbackStateProvider.overrideWith(
+              (ref) => Stream.value(PlaybackState(playing: playing)),
+            ),
           scanControllerProvider.overrideWith(_IdleScanController.new),
         ],
         child: MaterialApp(
@@ -147,6 +171,41 @@ void main() {
     );
 
     expect(handler.calls, ['play Three of 3']);
+  });
+
+  testWidgets('the round button of the song that is playing pauses it', (
+    tester,
+  ) async {
+    await pump(tester, current: 'Two');
+
+    Finder inRow(String title, IconData icon) => find.descendant(
+      of: find.ancestor(of: find.text(title), matching: find.byType(InkWell)),
+      matching: find.byIcon(icon),
+    );
+    expect(inRow('Two', Icons.pause_rounded), findsOneWidget);
+    expect(inRow('Two', Icons.play_arrow_rounded), findsNothing);
+    // Every other row still offers to play.
+    expect(inRow('One', Icons.play_arrow_rounded), findsOneWidget);
+    expect(find.bySemanticsLabel('Pause'), findsOneWidget);
+
+    await tester.tap(inRow('Two', Icons.pause_rounded));
+
+    expect(handler.calls, ['pause']);
+  });
+
+  testWidgets('and carries on with it when it is paused', (tester) async {
+    await pump(tester, current: 'Two', playing: false);
+
+    final button = find.descendant(
+      of: find.ancestor(of: find.text('Two'), matching: find.byType(InkWell)),
+      matching: find.byIcon(Icons.play_arrow_rounded),
+    );
+    expect(find.byIcon(Icons.pause_rounded), findsNothing);
+
+    await tester.tap(button);
+
+    // From where it stopped, not from the start of the track.
+    expect(handler.calls, ['resume']);
   });
 
   testWidgets('has a search of its own, with results in place', (tester) async {

@@ -32,6 +32,11 @@ class TrackListView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final currentId = ref.watch(currentTrackIdProvider);
+    // Only whether it is playing, so the list is not rebuilt on every other
+    // change in the player's state.
+    final playing = ref.watch(
+      playbackStateProvider.select((state) => state.value?.playing ?? false),
+    );
     return tracks.when(
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (error, _) => EmptyState(
@@ -50,6 +55,11 @@ class TrackListView extends ConsumerWidget {
               track: track,
               isCurrent: track.id == currentId,
               playButton: playButtons,
+              playing: playing,
+              onPlayPause: () {
+                final handler = ref.read(audioHandlerProvider);
+                playing ? handler.pause() : handler.play();
+              },
               onTap: () {
                 ref
                     .read(audioHandlerProvider)

@@ -15,6 +15,8 @@ class TrackTile extends StatelessWidget {
     this.onMenu,
     this.isCurrent = false,
     this.playButton = false,
+    this.playing = false,
+    this.onPlayPause,
   });
 
   final Track track;
@@ -31,11 +33,20 @@ class TrackTile extends StatelessWidget {
   /// Whether this is the track loaded in the player right now.
   final bool isCurrent;
 
+  /// Whether the player is playing right now.
+  final bool playing;
+
+  /// Pauses the player, or carries on from where it paused. When given, the
+  /// round button on the current track's row does this, and shows which,
+  /// in place of starting the track again.
+  final VoidCallback? onPlayPause;
+
   @override
   Widget build(BuildContext context) {
     final palette = context.noc;
     final text = Theme.of(context).textTheme;
     final menuButton = onMenu != null && !playButton;
+    final pauses = isCurrent && onPlayPause != null;
     return InkWell(
       onTap: onTap,
       onLongPress: onMenu,
@@ -76,14 +87,32 @@ class TrackTile extends StatelessWidget {
             ),
             if (playButton) ...[
               const SizedBox(width: 12),
-              // The row plays on a tap as well, so to assistive technology
-              // this is one control, not two.
-              ExcludeSemantics(
-                child: GestureDetector(
-                  onTap: onTap,
-                  child: const GlassCircle(Icons.play_arrow_rounded, size: 38),
+              if (pauses)
+                // Unlike the row, which starts the track again.
+                Semantics(
+                  container: true,
+                  button: true,
+                  label: playing ? 'Pause' : 'Play',
+                  child: GestureDetector(
+                    onTap: onPlayPause,
+                    child: GlassCircle(
+                      playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                      size: 38,
+                    ),
+                  ),
+                )
+              else
+                // The row plays on a tap as well, so to assistive technology
+                // this is one control, not two.
+                ExcludeSemantics(
+                  child: GestureDetector(
+                    onTap: onTap,
+                    child: const GlassCircle(
+                      Icons.play_arrow_rounded,
+                      size: 38,
+                    ),
+                  ),
                 ),
-              ),
             ],
             if (menuButton)
               IconButton(
