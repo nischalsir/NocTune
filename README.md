@@ -25,6 +25,9 @@ are listed in the [changelog](CHANGELOG.md).
   import, an `.lrc` beside the track, or the file's own tags.
 - **Equaliser:** Android's equaliser with ready-made shapes, your own saved
   ones, and a preamp.
+- **Decoder and output rate (Android):** Android's own decoders or FFmpeg,
+  which decodes with headroom so loud files are not clipped, and the sample
+  rate handed to Android (the file's own, 48, 96 or 192 kHz).
 - **Private:** no account, no ads, and nothing is uploaded. The only network
   use is an optional update check.
 
@@ -50,6 +53,11 @@ flutter analyze
 The bottom bar's glass selector is only drawn by a renderer with shader
 filters, so its tests are skipped by plain `flutter test` and run with
 `--enable-impeller`.
+
+The FFmpeg decoder libraries are committed under
+`packages/just_audio/android/src/main/jniLibs/`, so ordinary builds do not
+need FFmpeg. To rebuild them (in MSYS2 on Windows, or Linux bash):
+`tool/build_ffmpeg_decoder.sh <work dir> <NDK path> [CMake bin dir]`.
 
 Android compiles against SDK 37. Kotlin incremental compilation is turned off
 in `android/gradle.properties` because the project and the pub cache may sit

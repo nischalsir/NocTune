@@ -10,6 +10,11 @@ void registerBundledLicenses() {
       ('SpotiFLAC-Mobile', 'assets/licenses/SpotiFLAC-Mobile-MIT.txt'),
       ('Inter (typeface)', 'assets/licenses/Inter-OFL.txt'),
       ('Google Sans Flex (typeface)', 'assets/licenses/GoogleSansFlex-OFL.txt'),
+      ('FFmpeg', 'assets/licenses/FFmpeg-LGPL-2.1.txt'),
+      (
+        'AndroidX Media (media3)',
+        'assets/licenses/AndroidX-Media-Apache-2.0.txt',
+      ),
     ]) {
       yield LicenseEntryWithLineBreaks([
         name,
