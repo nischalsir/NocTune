@@ -19,6 +19,7 @@ import '../playback/now_playing_screen.dart';
 import 'home_feed.dart';
 import 'home_hero.dart';
 import 'home_rows.dart';
+import 'taste_mix.dart';
 
 /// The home screen: a hero featuring one track, then the listening feed: a
 /// pill row with the listening time, the newest albums, a statistics card,
@@ -270,6 +271,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
     final albums = ref.watch(recentAlbumsProvider).value ?? const [];
+    final mix = ref.watch(tasteMixProvider).value ?? const <Track>[];
     final favourites = (ref.watch(favoritesProvider).value ?? const <Track>[])
         .take(30)
         .toList();
@@ -371,6 +373,24 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
             const SliverToBoxAdapter(child: SizedBox(height: 10)),
             SliverToBoxAdapter(child: HomeHeaderRow(onShuffleAll: shuffleAll)),
             const SliverToBoxAdapter(child: ScanBanner()),
+            if (mix.isNotEmpty)
+              SliverToBoxAdapter(
+                child: HomeShelf(
+                  title: 'Mixed for you',
+                  items: [
+                    // From your own plays; tapping one plays the mix from it.
+                    for (final (index, track) in mix.indexed)
+                      (
+                        artPath: track.artPath,
+                        title: track.title,
+                        subtitle: track.displayArtist,
+                        onTap: () => ref
+                            .read(audioHandlerProvider)
+                            .playTracks(mix, initialIndex: index),
+                      ),
+                  ],
+                ),
+              ),
             if (albums.isNotEmpty)
               SliverToBoxAdapter(
                 child: HomeShelf(

@@ -80,6 +80,8 @@ Future<void> _pumpApp(
 
   SharedPreferences.setMockInitialValues({
     if (!firstLaunch) 'welcome_seen': true,
+    // This version has run before, so there is no "what's new".
+    if (!firstLaunch) 'last_version_run': '1.0.0+1',
     ...preferences,
   });
   final prefs = await SharedPreferences.getInstance();

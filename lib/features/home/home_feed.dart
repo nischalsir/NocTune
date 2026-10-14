@@ -1127,12 +1127,14 @@ class HomeShelf extends StatelessWidget {
     super.key,
     required this.title,
     required this.items,
-    required this.onSeeAll,
+    this.onSeeAll,
   });
 
   final String title;
   final List<ShelfItem> items;
-  final VoidCallback onSeeAll;
+
+  /// Opens the whole list; there is no "See all" without it.
+  final VoidCallback? onSeeAll;
 
   static const _cover = 116.0;
 
@@ -1160,10 +1162,14 @@ class HomeShelf extends StatelessWidget {
                   ),
                 ),
               ),
-              TextButton(
-                onPressed: onSeeAll,
-                child: Text('See all', style: FlexType.labelLarge),
-              ),
+              if (onSeeAll != null)
+                TextButton(
+                  onPressed: onSeeAll,
+                  child: Text('See all', style: FlexType.labelLarge),
+                )
+              else
+                // The height the button would give the row.
+                const SizedBox(height: 48),
             ],
           ),
         ),
