@@ -1,4 +1,6 @@
 import 'package:flutter/cupertino.dart' show CupertinoSwitch;
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,9 +9,11 @@ import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/data/models/playlist.dart';
 import 'package:noctune/data/repositories/library_repository.dart';
+import 'package:noctune/features/audio_output/audio_output_settings.dart';
 import 'package:noctune/features/equalizer/equalizer_screen.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
 import 'package:noctune/features/playback/audio_capabilities.dart';
+import 'package:noctune/features/playback/noc_audio_handler.dart';
 import 'package:noctune/features/settings/settings_controller.dart';
 import 'package:noctune/features/settings/settings_screen.dart';
 import 'package:noctune/features/startup/startup_prompts.dart';
@@ -21,6 +25,14 @@ class _FakeRepository extends Fake implements LibraryRepository {
 
   @override
   Future<void> clearListeningHistory() async => historyCleared++;
+}
+
+class _FakeHandler extends Fake implements NocAudioHandler {
+  @override
+  Future<void> applyAudioOutput(
+    AudioOutputSettings settings, {
+    bool reload = true,
+  }) async {}
 }
 
 class _IdleScanController extends ScanController {
@@ -46,6 +58,7 @@ Future<(_FakeRepository, ProviderContainer)> _pump(
       overrides: [
         sharedPreferencesProvider.overrideWithValue(preferences),
         libraryRepositoryProvider.overrideWithValue(repository),
+        audioHandlerProvider.overrideWithValue(_FakeHandler()),
         libraryStatsProvider.overrideWith(
           (ref) => const LibraryStats(
             trackCount: 319,
@@ -302,6 +315,50 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(EqualizerScreen), findsOneWidget);
+  });
+
+  testWidgets('offers the decoder and the output rate on Android', (
+    tester,
+  ) async {
+    await _pump(tester);
+    await _reveal(tester, find.text('Output sample rate'));
+
+    for (final label in [
+      'Decoder',
+      'System',
+      'FFmpeg',
+      'Output sample rate',
+      'Original',
+      '48k',
+      '96k',
+      '192k',
+    ]) {
+      expect(find.text(label), findsOneWidget, reason: label);
+    }
+  });
+
+  testWidgets('choosing FFmpeg and a rate is saved', (tester) async {
+    await _pump(tester);
+    await _reveal(tester, find.text('FFmpeg'));
+    await tester.tap(find.text('FFmpeg'));
+    await tester.pumpAndSettle();
+    await _reveal(tester, find.text('48k'));
+    await tester.tap(find.text('48k'));
+    await tester.pumpAndSettle();
+
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString('audio_decoder'), 'ffmpeg');
+    expect(preferences.getInt('audio_output_rate'), 48000);
+  });
+
+  testWidgets('iOS has no decoder rows', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    await _pump(tester);
+    await _reveal(tester, find.text('Equaliser'));
+
+    expect(find.text('Decoder'), findsNothing);
+    debugDefaultTargetPlatformOverride = null;
   });
 
   testWidgets('opens the open-source licences page', (tester) async {

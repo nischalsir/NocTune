@@ -11,6 +11,8 @@ import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/noc_dialog.dart';
 import '../../core/widgets/pill_button.dart';
 import '../../third_party/spotiflac/mornye_chrome.dart';
+import '../audio_output/audio_output_controller.dart';
+import '../audio_output/audio_output_settings.dart';
 import '../equalizer/equalizer_controller.dart';
 import '../equalizer/equalizer_screen.dart';
 import '../library/duplicates_screen.dart';
@@ -140,6 +142,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final stats = ref.watch(libraryStatsProvider).value;
     final notifications = ref.watch(_notificationAccessProvider).value;
     final lyricsPercent = (settings.lyricsScale * 100).round();
+    final audioOutput = ref.watch(audioOutputProvider);
+    final audioOutputController = ref.read(audioOutputProvider.notifier);
 
     return SafeArea(
       bottom: false,
@@ -360,6 +364,42 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ),
                   ),
+                  if (defaultTargetPlatform == TargetPlatform.android) ...[
+                    _Block(
+                      icon: Icons.memory_rounded,
+                      title: 'Decoder',
+                      child: _Noted(
+                        note:
+                            "System uses Android's decoders. FFmpeg decodes "
+                            'inside NocTune with headroom, so loud files are '
+                            'not clipped.',
+                        child: MornyeSegmentedControl(
+                          labels: const ['System', 'FFmpeg'],
+                          selectedIndex: audioOutput.decoder.index,
+                          onChanged: (index) => audioOutputController
+                              .setDecoder(AudioDecoder.values[index]),
+                        ),
+                      ),
+                    ),
+                    _Block(
+                      icon: Icons.tune_rounded,
+                      title: 'Output sample rate',
+                      child: _Noted(
+                        note:
+                            'Android may convert again to what the speaker or '
+                            'headphones support. With FFmpeg, any rate other '
+                            'than Original gives up its headroom.',
+                        child: MornyeSegmentedControl(
+                          labels: const ['Original', '48k', '96k', '192k'],
+                          selectedIndex: AudioOutputSettings.rates.indexOf(
+                            audioOutput.outputRateHz,
+                          ),
+                          onChanged: (index) => audioOutputController
+                              .setOutputRate(AudioOutputSettings.rates[index]),
+                        ),
+                      ),
+                    ),
+                  ],
                 ],
               ),
 
@@ -776,6 +816,26 @@ class _Block extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// A control with a short explanation under it.
+class _Noted extends StatelessWidget {
+  const _Noted({required this.note, required this.child});
+
+  final String note;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        child,
+        const SizedBox(height: 8),
+        Text(note, style: Theme.of(context).textTheme.bodySmall),
+      ],
     );
   }
 }
