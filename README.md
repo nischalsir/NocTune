@@ -8,11 +8,31 @@ music stored on the device, needs no account, and uploads nothing.
 Builds are published on the [Releases](../../releases) page, and changes
 are listed in the [changelog](CHANGELOG.md).
 
+## What it does
+
+- **Library:** scans the device (Android) or takes imported files, and
+  browses by track, album, artist, genre and folder, with search, sorting
+  and a duplicates finder. A song can be deleted from the device.
+- **Playlists and Favourites:** your own albums with a cover you choose,
+  filled by ticking tracks.
+- **Home:** the song that is playing, the newest albums, your favourites,
+  play and listening-time totals, and a table of what you played, ranked
+  or by day.
+- **Player:** the cover, a wave seek bar, shuffle and repeat, a reorderable
+  queue, and a label for the audio format (lossless and Dolby Atmos only
+  when the file and device confirm it). It follows the light or dark theme.
+- **Lyrics:** time-synced lyrics that fill word by word, from a file you
+  import, an `.lrc` beside the track, or the file's own tags.
+- **Equaliser:** Android's equaliser with ready-made shapes, your own saved
+  ones, and a preamp.
+- **Private:** no account, no ads, and nothing is uploaded. The only network
+  use is an optional update check.
+
 ## Screenshots
 
-| Home | Listening feed | Player | Lyrics | Settings |
-|---|---|---|---|---|
-| <img src="docs/screenshots/home.png" width="160" alt="Home screen with the track that is playing"> | <img src="docs/screenshots/home-list.png" width="160" alt="Recent plays grouped by day, with the navigation folded away"> | <img src="docs/screenshots/player.png" width="160" alt="Full player with a Dolby Atmos label"> | <img src="docs/screenshots/lyrics.png" width="160" alt="Time-synced lyrics with their own seek bar and transport"> | <img src="docs/screenshots/settings.png" width="160" alt="Settings page"> |
+| Home | Listening table | Library | Player | Lyrics | Settings |
+|---|---|---|---|---|---|
+| <img src="docs/screenshots/home.png" width="140" alt="Home screen with the track that is playing"> | <img src="docs/screenshots/home-list.png" width="140" alt="The List card: numbered recent plays by day, with the time each was played"> | <img src="docs/screenshots/library.png" width="140" alt="Library with its title, Search and Scan buttons and section chips"> | <img src="docs/screenshots/player.png" width="140" alt="Full player with the cover across the top"> | <img src="docs/screenshots/lyrics.png" width="140" alt="Time-synced lyrics with their own seek bar and transport"> | <img src="docs/screenshots/settings.png" width="140" alt="Settings page"> |
 
 Shown with sample tracks.
 
@@ -48,7 +68,7 @@ to announce an update:
 flutter build apk --release --dart-define=NOCTUNE_UPDATE_MANIFEST=https://api.github.com/repos/nischalsir/NocTune/releases/latest
 ```
 
-With a GitHub address the release tag (`v1.2.0`) is the version, the release
+With a GitHub address the release tag (`v1.9.2`) is the version, the release
 page is where "Update now" goes, and bulleted lines in the release text are
 shown under "What's new".
 
@@ -89,16 +109,24 @@ How the app uses it:
 - The app never downloads or installs anything itself.
 
 The logic lives in `lib/features/startup/update_service.dart`. Bump the app's
-own version in `pubspec.yaml` (`version: 1.2.0+12`) for each release.
+own version in `pubspec.yaml` (`version: 1.9.2+17`) for each release.
 
 ## Making a release
 
-1. Bump `version:` in `pubspec.yaml`.
-2. Build the APKs. Release signing reads `android/key.properties`, which is
-   not in the repository; it names the keystore, its passwords and the key
-   alias. Without it, release builds are signed with the debug key.
-3. Create a GitHub release tagged `v<version>` and attach the APKs. Publishing
-   it starts the `iOS build` workflow, which attaches an unsigned IPA.
+1. Bump `version:` in `pubspec.yaml` (the build number goes up with every
+   build that is handed out) and add the release to `CHANGELOG.md`.
+2. Run `flutter test` and `flutter test --enable-impeller`.
+3. Build the APKs with the update address above: once as is for the
+   universal APK, and once with `--split-per-abi` for the smaller
+   `arm64-v8a` one. Name them `NocTune-v<version>-universal.apk` and
+   `NocTune-v<version>-arm64-v8a.apk`. Release signing reads
+   `android/key.properties`, which is not in the repository; it names the
+   keystore, its passwords and the key alias. Without it, release builds are
+   signed with the debug key.
+4. Create a GitHub release tagged `v<version>` and attach both APKs. Lines in
+   the release text that start with `- ` are what the app shows under
+   "What's new". Publishing it starts the `iOS build` workflow, which
+   attaches an unsigned IPA.
 
 The app icon is drawn by `tool/generate_app_icon.dart`; rerun it with
 `flutter test tool/generate_app_icon.dart` after changing the design.
@@ -113,6 +141,7 @@ lib/
   features/
     home/     hero and listening feed
     library/  browsing, playlists, device scan
+    equalizer/ equaliser screen, shapes and preamp
     lyrics/   lyrics view, seek bar, timing offset
     playback/ audio engine, mini-player, full player, queue
     search/
@@ -157,6 +186,9 @@ are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and, in the
 app, under Settings > About > Open-source licences.
 
 ## Developed by Nischal Pandey
+
+Designed and built as a private, offline player for the music on your
+device.
 
 - Instagram: [@nischal_sir](https://www.instagram.com/nischal_sir)
 - Email: [nischalpandey.dev@gmail.com](mailto:nischalpandey.dev@gmail.com)

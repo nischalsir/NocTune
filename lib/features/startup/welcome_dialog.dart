@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/noc_dialog.dart';
+import '../../core/widgets/pill_button.dart';
 
 /// Remembers, on the device, whether the first-run welcome has been seen.
 class WelcomeStore {
@@ -30,13 +31,14 @@ Future<void> showWelcomeDialog(BuildContext context) {
       return NocDialogCard(
         title: 'Your music,\nfront and centre',
         actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Get started'),
+          PillButton(
+            label: 'Get started',
+            filled: true,
+            onTap: () => Navigator.of(context).pop(),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Maybe later'),
+          PillButton(
+            label: 'Maybe later',
+            onTap: () => Navigator.of(context).pop(),
           ),
         ],
         children: [

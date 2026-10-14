@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:noctune/app/providers.dart';
 import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
+import 'package:noctune/core/widgets/pill_button.dart';
 import 'package:noctune/data/models/track.dart';
 import 'package:noctune/data/repositories/library_repository.dart';
 import 'package:noctune/features/library/delete_track.dart';
@@ -110,7 +111,7 @@ void main() {
         deleter: (_) async => true,
       );
 
-      await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+      await tester.tap(find.widgetWithText(PillButton, 'Delete'));
       await tester.pumpAndSettle();
 
       expect(asked.single.uri, _song.uri);
@@ -128,7 +129,7 @@ void main() {
       deleter: (_) async => false,
     );
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.tap(find.widgetWithText(PillButton, 'Delete'));
     await tester.pumpAndSettle();
 
     expect(asked, hasLength(1));
@@ -146,7 +147,7 @@ void main() {
           throw const DeleteFailed('Deleting needs Android 11 or later.'),
     );
 
-    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.tap(find.widgetWithText(PillButton, 'Delete'));
     await tester.pumpAndSettle();
 
     expect(

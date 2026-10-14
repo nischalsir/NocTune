@@ -11,9 +11,9 @@ import '../../core/theme/cover_accent.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
-import '../../core/widgets/frosted.dart';
 import '../../core/widgets/glass_circle.dart';
 import '../../core/widgets/noc_backdrop.dart';
+import '../../core/widgets/pill_button.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/track.dart';
@@ -289,7 +289,7 @@ class _Header extends StatelessWidget {
                 child: Row(
                   children: [
                     Expanded(
-                      child: _PillButton(
+                      child: PillButton(
                         icon: Icons.play_arrow_rounded,
                         label: 'Play',
                         filled: true,
@@ -298,7 +298,7 @@ class _Header extends StatelessWidget {
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: _PillButton(
+                      child: PillButton(
                         icon: Icons.shuffle_rounded,
                         label: 'Shuffle',
                         onTap: onShuffle,
@@ -380,64 +380,6 @@ class _CoverFan extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// A wide pill with an icon and a word: filled for the main action, glass
-/// for the other.
-class _PillButton extends StatelessWidget {
-  const _PillButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.filled = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool filled;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.noc;
-    final color = filled ? palette.background : palette.textPrimary;
-    final content = ConstrainedBox(
-      constraints: const BoxConstraints(minHeight: 48),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        // Shrinks rather than overflowing when the text is very large.
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(icon, size: 22, color: color),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                maxLines: 1,
-                style: Theme.of(context).textTheme.titleSmall
-                    ?.copyWith(color: color),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    return Pressable(
-      semanticLabel: label,
-      onTap: onTap,
-      child: filled
-          ? DecoratedBox(
-              decoration: ShapeDecoration(
-                color: palette.textPrimary,
-                shape: const StadiumBorder(),
-              ),
-              child: content,
-            )
-          : Frosted(child: content),
     );
   }
 }

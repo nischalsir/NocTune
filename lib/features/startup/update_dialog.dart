@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/noc_dialog.dart';
+import '../../core/widgets/pill_button.dart';
 import 'update_service.dart';
 
 /// What the user chose in the update popup.
@@ -24,14 +25,15 @@ Future<UpdateChoice?> showUpdateDialog(
       return NocDialogCard(
         title: prompt.required ? 'Update required' : 'Update available',
         actions: [
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(UpdateChoice.updateNow),
-            child: const Text('Update now'),
+          PillButton(
+            label: 'Update now',
+            filled: true,
+            onTap: () => Navigator.of(context).pop(UpdateChoice.updateNow),
           ),
           if (!prompt.required) ...[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(UpdateChoice.later),
-              child: const Text('Later'),
+            PillButton(
+              label: 'Later',
+              onTap: () => Navigator.of(context).pop(UpdateChoice.later),
             ),
             TextButton(
               onPressed: () =>

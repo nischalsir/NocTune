@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../theme/noc_palette.dart';
+import 'pill_button.dart';
 
 /// Presents [builder]'s content as a NocTune popup: dimmed, blurred backdrop
 /// and a card that materialises with a short scale-and-fade. With reduced
@@ -49,7 +50,8 @@ Future<T?> showNocDialog<T>(
   );
 }
 
-/// The popup card: a branded eyebrow, a headline, content and stacked actions.
+/// The popup card: a branded eyebrow, a headline, content and stacked
+/// actions, which are [PillButton]s like the rest of the app's buttons.
 class NocDialogCard extends StatelessWidget {
   const NocDialogCard({
     super.key,
@@ -69,7 +71,7 @@ class NocDialogCard extends StatelessWidget {
     final palette = context.noc;
     final text = Theme.of(context).textTheme;
     final highContrast = MediaQuery.highContrastOf(context);
-    final radius = BorderRadius.circular(26);
+    final radius = BorderRadius.circular(28);
 
     return ClipRRect(
       borderRadius: radius,
@@ -105,7 +107,7 @@ class NocDialogCard extends StatelessWidget {
                 ...children,
                 const SizedBox(height: 22),
                 for (final (index, action) in actions.indexed) ...[
-                  if (index > 0) const SizedBox(height: 6),
+                  if (index > 0) const SizedBox(height: 10),
                   SizedBox(width: double.infinity, child: action),
                 ],
               ],

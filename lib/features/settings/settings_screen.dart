@@ -9,6 +9,7 @@ import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/noc_dialog.dart';
+import '../../core/widgets/pill_button.dart';
 import '../../third_party/spotiflac/mornye_chrome.dart';
 import '../equalizer/equalizer_controller.dart';
 import '../equalizer/equalizer_screen.dart';
@@ -91,17 +92,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       builder: (context) => NocDialogCard(
         title: 'Clear listening history?',
         actions: [
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-              foregroundColor: Theme.of(context).colorScheme.onError,
-            ),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Clear history'),
+          PillButton(
+            label: 'Clear history',
+            destructive: true,
+            onTap: () => Navigator.of(context).pop(true),
           ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
+          PillButton(
+            label: 'Cancel',
+            onTap: () => Navigator.of(context).pop(false),
           ),
         ],
         children: [
@@ -520,6 +518,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   const _Tile(
                     leading: _TileIcon(Icons.person_rounded),
                     title: Text('Developed by Nischal Pandey'),
+                    subtitle: Text(
+                      'Designed and built as a private, offline player for '
+                      'the music on your device. No account, no ads, and '
+                      'nothing is uploaded.',
+                    ),
                   ),
                   _Tile(
                     leading: const _TileIcon(Icons.camera_alt_rounded),

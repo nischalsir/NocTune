@@ -343,6 +343,13 @@ void main() {
       playing: tracks[0],
       act: () => tester.dragFrom(const Offset(195, 560), const Offset(0, -470)),
     );
+    // Scrolled to the end: the List card's table, with the bar folded away.
+    await shoot(
+      '2b_home_list',
+      child: const NocTuneApp(),
+      playing: tracks[0],
+      act: () => tester.dragFrom(const Offset(195, 560), const Offset(0, -2400)),
+    );
     // The bar part-way through folding, to check the shape it takes.
     for (final (name, elapsed) in const [
       ('8_fold_early', 170),

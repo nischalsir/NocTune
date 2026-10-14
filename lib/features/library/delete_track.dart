@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../../app/providers.dart';
 import '../../core/widgets/noc_dialog.dart';
+import '../../core/widgets/pill_button.dart';
 import '../../data/models/track.dart';
 
 const _channel = MethodChannel('noctune/delete_audio');
@@ -72,17 +73,14 @@ Future<void> deleteTrack(
     builder: (context) => NocDialogCard(
       title: 'Delete this song?',
       actions: [
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: Theme.of(context).colorScheme.error,
-            foregroundColor: Theme.of(context).colorScheme.onError,
-          ),
-          onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Delete'),
+        PillButton(
+          label: 'Delete',
+          destructive: true,
+          onTap: () => Navigator.of(context).pop(true),
         ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: const Text('Cancel'),
+        PillButton(
+          label: 'Cancel',
+          onTap: () => Navigator.of(context).pop(false),
         ),
       ],
       children: [
