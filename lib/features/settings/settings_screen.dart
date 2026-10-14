@@ -589,8 +589,9 @@ class _SwitchTile extends StatelessWidget {
 }
 
 /// One row of a card: its icon, its title with a line or two under it, and
-/// a switch or an arrow at the end. Laid out as [_Block] is, so every icon
-/// and every control is level with its row's title, whatever is under it.
+/// a switch or an arrow at the end. Laid out as [_Block] is: the title
+/// starts level with the top of the icon, and the control sits on the
+/// title's line, whatever is under it.
 class _Tile extends StatelessWidget {
   const _Tile({
     required this.leading,
@@ -624,15 +625,10 @@ class _Tile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 40),
-                  child: Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: DefaultTextStyle.merge(
-                      style: text.bodyLarge,
-                      child: title,
-                    ),
-                  ),
+                DefaultTextStyle.merge(
+                  style: text.bodyLarge,
+                  textHeightBehavior: _titleHeight,
+                  child: title,
                 ),
                 if (subtitle != null)
                   DefaultTextStyle.merge(
@@ -646,7 +642,7 @@ class _Tile extends StatelessWidget {
           ),
           if (trailing != null) ...[
             const SizedBox(width: 12),
-            SizedBox(height: 40, child: Center(child: trailing)),
+            _OnTitleLine(child: trailing),
           ],
         ],
       ),
@@ -654,6 +650,30 @@ class _Tile extends StatelessWidget {
     return Opacity(
       opacity: enabled ? 1 : 0.5,
       child: InkWell(onTap: enabled ? onTap : null, child: row),
+    );
+  }
+}
+
+// A row's title starts right at the top of its icon: no space above its
+// first line, so the tops of the letters are level with the icon's tile.
+const _titleHeight = TextHeightBehavior(applyHeightToFirstAscent: false);
+
+/// A switch, an arrow or a figure at the end of a row, centred on the
+/// title's line rather than on the whole row.
+class _OnTitleLine extends StatelessWidget {
+  const _OnTitleLine({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    // As wide as the control; as tall as the line, the control spilling
+    // evenly above and below it.
+    return IntrinsicWidth(
+      child: SizedBox(
+        height: 20,
+        child: OverflowBox(maxHeight: double.infinity, child: child),
+      ),
     );
   }
 }
@@ -733,20 +753,20 @@ class _Block extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ConstrainedBox(
-                  constraints: const BoxConstraints(minHeight: 40),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: Theme.of(context).textTheme.bodyLarge,
-                        ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: Theme.of(context).textTheme.bodyLarge,
+                        textHeightBehavior: _titleHeight,
                       ),
-                      ?trailing,
-                    ],
-                  ),
+                    ),
+                    if (trailing != null) _OnTitleLine(child: trailing),
+                  ],
                 ),
+                const SizedBox(height: 10),
                 child,
               ],
             ),

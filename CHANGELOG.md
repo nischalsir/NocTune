@@ -15,8 +15,9 @@ Published at the owner's request. The automated checks pass, with and
 without Impeller. Most of it was run on the owner's phone while it was
 built (the Library header, the menus, the Home table, the player cover
 and the light player); the last changes (the cover drawn at the screen's
-width, Settings and Equaliser alignment, the Devanagari and "v1:" lyrics
-fixes) were installed on the phone but not yet looked at there.
+width, Equaliser alignment, the Devanagari and "v1:" lyrics fixes, and
+Settings titles level with the tops of their icons) were installed on the
+phone but not yet looked at there.
 
 ### Changed
 
@@ -42,9 +43,10 @@ fixes) were installed on the phone but not yet looked at there.
   glass buttons frosted white; the dark theme is unchanged.
 - Lyrics: the "LINE SYNC • Embedded in the audio file" label is gone.
 - Settings: the title, the section headings and the cards share one left
-  edge, and the title matches the Library's. Every row's icon and switch
-  is level with its title, sliders run the width of the text, and all
-  controls end on the same right edge.
+  edge, and the title matches the Library's. Every row's title starts
+  level with the top of its icon, switches sit on the title's line,
+  sliders run the width of the text, and all controls end on the same
+  right edge.
 - Equaliser: the switch ends where the preamp figure does, the preamp
   slider runs the width of the text, and the buttons start on the
   cards' text edge.
