@@ -45,6 +45,8 @@ android {
 
     defaultConfig {
         minSdk = 16
+        // NocTune: media3's keep rules for the FFmpeg decoder.
+        consumerProguardFiles("ffmpeg-proguard-rules.txt")
     }
 
     compileOptions {
@@ -73,4 +75,7 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:$exoplayerVersion")
     implementation("androidx.media3:media3-exoplayer-hls:$exoplayerVersion")
     implementation("androidx.media3:media3-exoplayer-smoothstreaming:$exoplayerVersion")
+    // NocTune: the FFmpeg audio decoder in androidx.media3.decoder.ffmpeg.
+    implementation("androidx.media3:media3-decoder:$exoplayerVersion")
+    compileOnly("org.checkerframework:checker-qual:3.13.0")
 }
