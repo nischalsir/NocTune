@@ -48,6 +48,8 @@ class MainActivity : AudioServiceActivity() {
             .setMethodCallHandler(ArtworkChannel())
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "noctune/audio_capabilities")
             .setMethodCallHandler(AudioCapabilitiesChannel())
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "noctune/audio_output")
+            .setMethodCallHandler(AudioOutputChannel())
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "noctune/device_profile")
             .setMethodCallHandler(DeviceProfileChannel(applicationContext))
         deleteAudio = DeleteAudioChannel(this).also {

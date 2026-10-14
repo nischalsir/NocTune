@@ -14,6 +14,7 @@ import 'app/licenses.dart';
 import 'app/providers.dart';
 import 'data/db/app_database.dart';
 import 'data/repositories/library_repository.dart';
+import 'features/audio_output/audio_output_settings.dart';
 import 'features/equalizer/equalizer_settings.dart';
 import 'features/playback/noc_audio_handler.dart';
 import 'features/playback/play_history_recorder.dart';
@@ -72,6 +73,12 @@ Future<void> main() async {
   // The equaliser as the user left it. It finishes once a first track is
   // loaded, so it is not waited for here.
   unawaited(audioHandler.applyEqualizer(EqualizerSettings.load(preferences)));
+  // The decoder and output rate as the user left them, before the first
+  // track loads.
+  await audioHandler.applyAudioOutput(
+    AudioOutputSettings.load(preferences),
+    reload: false,
+  );
 
   runApp(
     ProviderScope(

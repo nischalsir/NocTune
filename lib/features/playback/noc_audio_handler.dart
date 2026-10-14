@@ -7,6 +7,8 @@ import 'package:audio_session/audio_session.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../data/models/track.dart';
+import '../audio_output/audio_output_channel.dart';
+import '../audio_output/audio_output_settings.dart';
 import '../equalizer/equalizer_settings.dart';
 import 'playback_mapping.dart';
 
@@ -35,6 +37,9 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
   );
 
   EqualizerSettings? _equalizerSettings;
+
+  final _audioOutput = const AudioOutputChannel();
+  Future<void> _applyingOutput = Future.value();
 
   final _errors = StreamController<String>.broadcast();
 
@@ -101,6 +106,32 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
     }
     await androidEqualizer.setEnabled(true);
   }
+
+  /// Sets the decoder and output sample rate. The native player only reads
+  /// them when it is built, so with [reload] and a track loaded it is
+  /// rebuilt: the queue comes back at the same track and position, playing
+  /// only if it was, with the equaliser as it was. Calls run one after
+  /// another, so the last choice is the one that stays.
+  Future<void> applyAudioOutput(
+    AudioOutputSettings settings, {
+    bool reload = true,
+  }) => _applyingOutput = _applyingOutput.then((_) async {
+    await _audioOutput.configure(settings);
+    final items = queue.value;
+    final index = _player.currentIndex;
+    if (!reload || items.isEmpty || index == null) return;
+    final position = _player.position;
+    final wasPlaying = _player.playing;
+    await _player.stop();
+    await _player.setAudioSources(
+      items.map(_sourceFor).toList(),
+      initialIndex: index,
+      initialPosition: position,
+    );
+    final equalizer = _equalizerSettings;
+    if (equalizer != null) await applyEqualizer(equalizer);
+    if (wasPlaying) unawaited(_player.play());
+  });
 
   Future<void> _init() async {
     // Declares this as a music app: other audio is paused while we play, and
