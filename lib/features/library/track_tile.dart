@@ -17,6 +17,7 @@ class TrackTile extends StatelessWidget {
     this.playButton = false,
     this.playing = false,
     this.onPlayPause,
+    this.action,
   });
 
   final Track track;
@@ -41,20 +42,29 @@ class TrackTile extends StatelessWidget {
   /// in place of starting the track again.
   final VoidCallback? onPlayPause;
 
+  /// Ends the row in place of the menu button, such as a download button.
+  final Widget? action;
+
   @override
   Widget build(BuildContext context) {
     final palette = context.noc;
     final text = Theme.of(context).textTheme;
-    final menuButton = onMenu != null && !playButton;
+    final action = this.action;
+    final menuButton = onMenu != null && !playButton && action == null;
     final pauses = isCurrent && onPlayPause != null;
     return InkWell(
       onTap: onTap,
       onLongPress: onMenu,
       child: Padding(
-        padding: EdgeInsets.fromLTRB(16, 8, menuButton ? 4 : 16, 8),
+        padding: EdgeInsets.fromLTRB(
+          16,
+          8,
+          menuButton || action != null ? 4 : 16,
+          8,
+        ),
         child: Row(
           children: [
-            Artwork(path: track.artPath, size: 48),
+            Artwork(path: track.artPath, url: track.artUrl, size: 48),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -114,6 +124,7 @@ class TrackTile extends StatelessWidget {
                   ),
                 ),
             ],
+            ?action,
             if (menuButton)
               IconButton(
                 tooltip: 'More for ${track.title}',

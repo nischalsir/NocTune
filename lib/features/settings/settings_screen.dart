@@ -18,6 +18,7 @@ import '../equalizer/equalizer_screen.dart';
 import '../library/duplicates_screen.dart';
 import '../library/scan/scan_banner.dart';
 import '../library/scan/scan_controller.dart';
+import '../online/online_search.dart';
 import '../playback/audio_capabilities.dart';
 import '../startup/startup_prompts.dart';
 import '../startup/update_dialog.dart';
@@ -402,6 +403,25 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   ],
                 ],
               ),
+
+              if (ref.watch(jamendoClientProvider) != null)
+                _Group(
+                  title: 'Online',
+                  children: [
+                    _SwitchTile(
+                      icon: Icons.travel_explore_rounded,
+                      title: 'Search Jamendo',
+                      subtitle:
+                          'Search also finds free music on Jamendo, sending '
+                          'what you type to Jamendo. Off, search stays on '
+                          'this device.',
+                      value: ref.watch(onlineSearchEnabledProvider),
+                      onChanged: ref
+                          .read(onlineSearchEnabledProvider.notifier)
+                          .set,
+                    ),
+                  ],
+                ),
 
               if (notifications != null)
                 _Group(
