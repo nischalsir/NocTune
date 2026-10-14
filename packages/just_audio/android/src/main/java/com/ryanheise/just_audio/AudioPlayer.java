@@ -9,6 +9,10 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import androidx.media3.common.C;
+import androidx.media3.common.audio.AudioProcessor;
+import androidx.media3.common.audio.SonicAudioProcessor;
+import androidx.media3.exoplayer.audio.AudioSink;
+import androidx.media3.exoplayer.audio.DefaultAudioSink;
 import androidx.media3.exoplayer.DefaultLivePlaybackSpeedControl;
 import androidx.media3.exoplayer.DefaultLoadControl;
 import androidx.media3.exoplayer.DefaultRenderersFactory;
@@ -774,10 +778,39 @@ public class AudioPlayer implements MethodCallHandler, Player.Listener, Metadata
         player.prepare();
     }
 
+    // NocTune: the decoder and output rate come from NocTuneAudioConfig, read
+    // once here. FFmpeg is preferred over Android's decoders but they still
+    // take any format it cannot decode. Resampling works on 16-bit audio
+    // only, so float output is used just at the original rate.
+    private DefaultRenderersFactory createNocTuneRenderersFactory() {
+        final boolean ffmpeg = NocTuneAudioConfig.ffmpeg;
+        final int outputRate = NocTuneAudioConfig.outputSampleRateHz;
+        DefaultRenderersFactory factory = outputRate <= 0
+            ? new DefaultRenderersFactory(context)
+            : new DefaultRenderersFactory(context) {
+                @Override
+                protected AudioSink buildAudioSink(Context context, boolean enableFloatOutput, boolean enableAudioTrackPlaybackParams) {
+                    SonicAudioProcessor resampler = new SonicAudioProcessor();
+                    resampler.setOutputSampleRateHz(outputRate);
+                    return new DefaultAudioSink.Builder(context)
+                        .setEnableFloatOutput(enableFloatOutput)
+                        .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                        .setAudioProcessors(new AudioProcessor[] {resampler})
+                        .build();
+                }
+            };
+        return factory
+            .setExtensionRendererMode(ffmpeg
+                ? DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER
+                : DefaultRenderersFactory.EXTENSION_RENDERER_MODE_OFF)
+            .setEnableAudioFloatOutput(ffmpeg && outputRate <= 0);
+    }
+
     private void ensurePlayerInitialized() {
         if (player == null) {
+            DefaultRenderersFactory nocTuneRenderersFactory = createNocTuneRenderersFactory();
             RenderersFactory renderersFactory = (eventHandler, videoListener, audioListener, textOutput, metadataOutput) -> {
-                Renderer[] defaultRenderers = new DefaultRenderersFactory(context)
+                Renderer[] defaultRenderers = nocTuneRenderersFactory
                     .createRenderers(eventHandler, videoListener, audioListener, textOutput, metadataOutput);
                 Renderer[] allRenderers = Arrays.copyOf(defaultRenderers, defaultRenderers.length + 1);
                 allRenderers[defaultRenderers.length] = new ObserverRenderer();
