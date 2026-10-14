@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
-/// One audio file in the local library.
+/// One audio file in the local library, or a track streamed from Jamendo
+/// (an `https` [uri] and an [id] of 0).
 @immutable
 class Track {
   const Track({
@@ -28,6 +29,7 @@ class Track {
     this.isFavorite = false,
     this.playCount = 0,
     this.lastPlayedAt,
+    this.artUrl,
   });
 
   factory Track.fromRow(Map<String, Object?> row) => Track(
@@ -65,7 +67,8 @@ class Track {
   /// Database id; 0 until the track has been stored.
   final int id;
 
-  /// Where the audio lives: an absolute file path, or a `content://` URI.
+  /// Where the audio lives: an absolute file path, a `content://` URI, or
+  /// for a streamed track an `https` address.
   final String uri;
   final String fileName;
 
@@ -104,12 +107,19 @@ class Track {
   final int playCount;
   final DateTime? lastPlayedAt;
 
+  /// Cover on the web, for a streamed track shown in a list. Never stored.
+  final Uri? artUrl;
+
+  /// Played over the internet rather than from the device.
+  bool get isStreamed => uri.startsWith('https://');
+
   String get displayArtist => artist ?? 'Unknown artist';
   String get displayAlbum => album ?? 'Unknown album';
 
   /// The URI handed to the audio engine.
-  Uri get playbackUri =>
-      uri.startsWith('content://') ? Uri.parse(uri) : Uri.file(uri);
+  Uri get playbackUri => uri.startsWith('content://') || isStreamed
+      ? Uri.parse(uri)
+      : Uri.file(uri);
 
   /// Columns describing the file itself. Favourites, play counts and the
   /// date added are owned by the user and never overwritten by a rescan.

@@ -194,12 +194,14 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
   void _onError(PlayerException error) {
     final index = error.index;
     final items = queue.value;
-    final title = index != null && index < items.length
-        ? items[index].title
-        : 'This track';
+    final item = index != null && index < items.length ? items[index] : null;
+    final title = item?.title ?? 'This track';
     _errors.add(
-      "$title can't be played. The file may be corrupt or use a format "
-      "this device doesn't support.",
+      item != null && item.id.startsWith('https://')
+          ? "$title couldn't be streamed. Check the internet connection, or "
+                'download it to play it offline.'
+          : "$title can't be played. The file may be corrupt or use a format "
+                "this device doesn't support.",
     );
     // Move past the bad file rather than stalling the queue.
     final next = _relativeIndex(1);

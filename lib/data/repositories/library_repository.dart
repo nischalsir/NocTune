@@ -134,6 +134,9 @@ class LibraryRepository {
   Future<Track?> trackById(int id) async =>
       (await _queryTracks(where: 'id = ?', whereArgs: [id])).firstOrNull;
 
+  Future<Track?> trackByUri(String uri) async =>
+      (await _queryTracks(where: 'uri = ?', whereArgs: [uri])).firstOrNull;
+
   /// Loads tracks by id, in the order the ids are given. Ids that are no
   /// longer in the library are skipped.
   Future<List<Track>> tracksByIds(List<int> ids) async {
