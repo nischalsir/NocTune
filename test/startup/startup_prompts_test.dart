@@ -5,6 +5,7 @@ import 'package:noctune/features/startup/startup_prompts.dart';
 import 'package:noctune/features/startup/update_dialog.dart';
 import 'package:noctune/features/startup/update_service.dart';
 import 'package:noctune/features/startup/welcome_dialog.dart';
+import 'package:noctune/features/startup/whats_new_dialog.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 UpdatePrompt _prompt({bool required = false}) => UpdatePrompt(
@@ -16,6 +17,8 @@ UpdatePrompt _prompt({bool required = false}) => UpdatePrompt(
   required: required,
 );
 
+const _installed = AppVersion(1, 1, 0, 20);
+
 void main() {
   late SharedPreferences prefs;
   late List<String> events;
@@ -23,9 +26,17 @@ void main() {
   UpdatePrompt? available;
   Completer<void>? welcomeOpen;
 
-  Future<void> start({bool welcomeSeen = false}) async {
+  /// [lastVersion] is the version the previous launch ran. Left out with
+  /// [welcomeSeen], it is this one: an ordinary restart.
+  Future<void> start({
+    bool welcomeSeen = false,
+    String? lastVersion,
+    bool versionRecorded = true,
+  }) async {
     SharedPreferences.setMockInitialValues({
       if (welcomeSeen) 'welcome_seen': true,
+      if (welcomeSeen && versionRecorded)
+        'last_version_run': lastVersion ?? '$_installed',
     });
     prefs = await SharedPreferences.getInstance();
     events = [];
@@ -36,6 +47,9 @@ void main() {
 
   StartupPrompts prompts() => StartupPrompts(
     welcome: WelcomeStore(prefs),
+    whatsNew: WhatsNewStore(prefs),
+    installedVersion: () async => _installed,
+    showWhatsNew: (version) async => events.add('whats new $version'),
     checkForUpdate: () async {
       events.add('check');
       return available;
@@ -141,5 +155,48 @@ void main() {
     await startup.run();
 
     expect(events.where((event) => event == 'update shown'), hasLength(1));
+  });
+
+  test('the first launch after an update says what is new, once', () async {
+    await start(welcomeSeen: true, lastVersion: '1.0.0+19');
+
+    await prompts().run();
+    expect(events, ['whats new 1.1.0+20', 'check']);
+
+    events.clear();
+    await prompts().run();
+    expect(events, ['check']);
+  });
+
+  test('updating from a version that kept no record counts too', () async {
+    await start(welcomeSeen: true, versionRecorded: false);
+
+    await prompts().run();
+
+    expect(events, contains('whats new 1.1.0+20'));
+  });
+
+  test('a new installation gets the welcome, not what is new', () async {
+    await start();
+
+    await prompts().run();
+    await prompts().run();
+
+    expect(events.where((event) => event.startsWith('whats new')), isEmpty);
+  });
+
+  test('what is new waits for a launch with the main screen in front', () async {
+    await start(welcomeSeen: true, lastVersion: '1.0.0+19');
+    mainScreenInFront = false;
+
+    await prompts().run();
+    expect(events, ['check']);
+
+    mainScreenInFront = true;
+    await prompts().run();
+    await prompts().run();
+    expect(events.where((event) => event.startsWith('whats new')), [
+      'whats new 1.1.0+20',
+    ]);
   });
 }

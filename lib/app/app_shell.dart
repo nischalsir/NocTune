@@ -17,6 +17,8 @@ import '../features/settings/settings_screen.dart';
 import '../features/startup/startup_prompts.dart';
 import '../features/startup/update_dialog.dart';
 import '../features/startup/welcome_dialog.dart';
+import '../features/startup/whats_new.dart';
+import '../features/startup/whats_new_dialog.dart';
 import '../third_party/spotiflac/lazy_tab_view.dart';
 import '../third_party/spotiflac/mornye_bottom_bar.dart';
 import '../third_party/spotiflac/mornye_chrome.dart';
@@ -58,6 +60,14 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   late final _startupPrompts = StartupPrompts(
     welcome: WelcomeStore(ref.read(sharedPreferencesProvider)),
+    whatsNew: WhatsNewStore(ref.read(sharedPreferencesProvider)),
+    installedVersion: () => ref.read(installedVersionProvider.future),
+    showWhatsNew: (version) async {
+      // A build with no notes written has nothing to say.
+      if (mounted && kWhatsNew.isNotEmpty) {
+        await showWhatsNewDialog(context, version);
+      }
+    },
     checkForUpdate: () async =>
         (await ref.read(updateServiceProvider.future)).check(),
     showWelcome: () => showWelcomeDialog(context),

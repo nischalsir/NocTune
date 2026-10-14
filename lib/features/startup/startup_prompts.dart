@@ -8,14 +8,19 @@ import '../../app/providers.dart';
 import 'update_dialog.dart';
 import 'update_service.dart';
 import 'welcome_dialog.dart';
+import 'whats_new_dialog.dart';
 
 /// Shows the popups that can appear at launch, strictly one at a time: the
-/// first-run welcome, then an update notice if there is one. It runs after
+/// first-run welcome or, after an update, what is new; then an update notice
+/// if there is one. It runs after
 /// the app is usable, and has no connection to the audio engine, so playback
 /// carries on whatever it shows.
 class StartupPrompts {
   StartupPrompts({
     required this.welcome,
+    required this.whatsNew,
+    required this.installedVersion,
+    required this.showWhatsNew,
     required this.checkForUpdate,
     required this.showWelcome,
     required this.showUpdate,
@@ -24,6 +29,9 @@ class StartupPrompts {
   });
 
   final WelcomeStore welcome;
+  final WhatsNewStore whatsNew;
+  final Future<AppVersion> Function() installedVersion;
+  final Future<void> Function(AppVersion version) showWhatsNew;
 
   /// Resolves to the update to announce, or null.
   final Future<UpdatePrompt?> Function() checkForUpdate;
@@ -44,11 +52,21 @@ class StartupPrompts {
     if (_started) return;
     _started = true;
 
-    if (welcome.isPending) {
+    final newInstallation = welcome.isPending;
+    if (newInstallation) {
       // Recorded before showing: a welcome interrupted by the app being
       // closed is not shown a second time.
       await welcome.markSeen();
       if (canInterrupt()) await showWelcome();
+    }
+
+    final installed = await installedVersion();
+    if (!whatsNew.isPending(installed, newInstallation: newInstallation)) {
+      await whatsNew.markSeen(installed);
+    } else if (canInterrupt()) {
+      // Otherwise it waits for a launch where it covers nothing.
+      await whatsNew.markSeen(installed);
+      await showWhatsNew(installed);
     }
 
     final prompt = await checkForUpdate();
