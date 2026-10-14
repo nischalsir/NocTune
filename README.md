@@ -28,8 +28,16 @@ are listed in the [changelog](CHANGELOG.md).
 - **Decoder and output rate (Android):** Android's own decoders or FFmpeg,
   which decodes with headroom so loud files are not clipped, and the sample
   rate handed to Android (the file's own, 48, 96 or 192 kHz).
-- **Private:** no account, no ads, and nothing is uploaded. The only network
-  use is an optional update check.
+- **Free music online:** search also finds free, Creative Commons music on
+  [Jamendo](https://www.jamendo.com). It streams, or downloads into the
+  library to play offline. Without a connection, search shows downloaded
+  songs and marks results that need the internet.
+- **Mixed for you:** a Home shelf of library songs picked from what you
+  play, worked out on the device.
+- **Private:** no account, no ads, and nothing is uploaded. The network is
+  used for an optional update check and, in builds with a Jamendo client id,
+  for Jamendo search (what you type is sent to Jamendo; it can be switched
+  off in Settings › Online).
 
 ## Screenshots
 
@@ -62,6 +70,13 @@ need FFmpeg. To rebuild them (in MSYS2 on Windows, or Linux bash):
 Android compiles against SDK 37. Kotlin incremental compilation is turned off
 in `android/gradle.properties` because the project and the pub cache may sit
 on different Windows drives.
+
+## Jamendo
+
+Online search is **off in a build without a Jamendo client id**. Get a free
+one at [devportal.jamendo.com](https://devportal.jamendo.com) (for
+non-commercial use) and add
+`--dart-define=NOCTUNE_JAMENDO_CLIENT_ID=<client id>` to the build command.
 
 ## Update checks
 
@@ -127,7 +142,8 @@ own version in `pubspec.yaml` (`version: 1.9.2+17`) for each release.
 1. Bump `version:` in `pubspec.yaml` (the build number goes up with every
    build that is handed out) and add the release to `CHANGELOG.md`.
 2. Run `flutter test` and `flutter test --enable-impeller`.
-3. Build the APKs with the update address above: once as is for the
+3. Build the APKs with the update address above and the Jamendo client
+   id: once as is for the
    universal APK, and once with `--split-per-abi` for the smaller
    `arm64-v8a` one. Name them `NocTune-v<version>-universal.apk` and
    `NocTune-v<version>-arm64-v8a.apk`. Release signing reads
@@ -136,7 +152,9 @@ own version in `pubspec.yaml` (`version: 1.9.2+17`) for each release.
    signed with the debug key.
 4. Create a GitHub release tagged `v<version>` and attach both APKs. Lines in
    the release text that start with `- ` are what the app shows under
-   "What's new". Publishing it starts the `iOS build` workflow, which
+   "What's new"; use the same lines as `kWhatsNew` in
+   `lib/features/startup/whats_new.dart`, which the app shows once after
+   updating. Publishing it starts the `iOS build` workflow, which
    attaches an unsigned IPA.
 
 The app icon is drawn by `tool/generate_app_icon.dart`; rerun it with

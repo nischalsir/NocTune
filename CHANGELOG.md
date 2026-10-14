@@ -11,6 +11,39 @@ Release channels:
 
 ## Unreleased
 
+### Added
+
+- Search (the Search tab) also finds free, Creative Commons music on
+  Jamendo, listed under the library's matches. A result streams when
+  tapped, its cover saved to the artwork cache first so the player shows
+  it. Its download button saves it to `Jamendo/` in the app's music folder,
+  which the library scan reads, so it joins the library and plays offline.
+  Without a connection the search shows the results saved from the last
+  time the same words were searched (the last 20 searches are kept), marks
+  those not downloaded as needing the internet and does not start them.
+  Jamendo being offline, rate-limited or answering with an error is said in
+  one line and never hides the library's matches. Only in builds made with
+  a Jamendo client id (`--dart-define=NOCTUNE_JAMENDO_CLIENT_ID`); Settings
+  › Online can switch it off.
+- Home: "Mixed for you", up to 30 library songs picked on the device from
+  the artists and genres played most, leaning to songs not played yet and
+  favourites, leaving out what played in the last two days, at most three
+  per artist, in an order that changes once a day.
+- Settings › Audio, Android only: a Decoder choice (System or FFmpeg) and
+  an Output sample rate (Original, 48, 96 or 192 kHz). FFmpeg 6.0 (LGPL,
+  audio decoders only, built by `tool/build_ffmpeg_decoder.sh`) decodes
+  inside NocTune; at the original rate it hands Android floating-point
+  audio, so files that overshoot full scale are not clipped while
+  decoding. A change applies at once: the song carries on from the same
+  place, paused if it was paused, with the equaliser as it was. With the
+  defaults playback is as before. `just_audio` is now a copy in
+  `packages/just_audio`, changed only where its Android player is built.
+- A splash screen: the NocTune icon on the app's dark or light background
+  (following the phone's dark mode), with the same colour behind the first
+  frame.
+- After an update, the first launch shows "Updated to <version>" with what
+  is new, once. A new installation gets the welcome instead.
+
 ### Changed
 
 - Updates: a copy of NocTune that has fallen three or more releases behind
@@ -22,6 +55,13 @@ Release channels:
 
 ### Tests
 
+- Jamendo: search and its errors (offline, timeout, rate limit, an error
+  answer, an unreadable answer, tracks with nothing to play), the saved
+  searches, streaming a result, playing a downloaded one online and
+  offline, not starting one that needs the internet, and downloads that
+  work, fail or are not allowed. The search page with library and Jamendo
+  results together, a failing Jamendo, and offline.
+- The taste mix, the decoder settings and their rows, the what's-new rule.
 - The release list is read (pre-releases left out) and the rule is checked
   at one, two and three releases behind, on the automatic check and the
   one started from Settings.
