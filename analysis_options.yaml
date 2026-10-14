@@ -16,6 +16,8 @@ analyzer:
     - ios/**
     # Local reference material, never part of the app.
     - "*-main/**"
+    # A copy of a published plugin, kept as it was published.
+    - packages/**
 
 linter:
   # The lint rules applied to this project can be customized in the

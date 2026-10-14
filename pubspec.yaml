@@ -122,3 +122,9 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+# NocTune's copy of just_audio, whose Android player can use FFmpeg and a
+# fixed output sample rate.
+dependency_overrides:
+  just_audio:
+    path: packages/just_audio
