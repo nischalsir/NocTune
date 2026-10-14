@@ -43,12 +43,16 @@ equaliser and preamp as they were. With the defaults nothing changes.
 2. **FFmpeg decoder, built here.** media3 1.4.1's `decoder_ffmpeg` module
    (Apache-2.0), built against FFmpeg configured without GPL or nonfree
    parts (LGPL-2.1), with only the audio decoders AAC, MP3, FLAC, ALAC,
-   Opus and Vorbis. Built through WSL with the Linux Android NDK for
-   arm64-v8a, armeabi-v7a and x86_64. The build script
+   Opus and Vorbis, for arm64-v8a, armeabi-v7a and x86_64. This PC has no
+   WSL, so the build runs in MSYS2 (installed per user through Scoop) with
+   the Windows NDK; if that proves unworkable, the owner installs WSL and
+   media3's Linux steps are used instead. The build script
    (`tool/build_ffmpeg_decoder.sh`) and its output (the module's Java
    sources and the `.so` libraries) are committed, so ordinary app builds
-   need neither WSL nor the NDK. FFmpeg is linked dynamically (its own
-   `.so`), as the LGPL requires to allow relinking.
+   need neither. As media3 does, FFmpeg is built as static libraries and
+   linked into `libffmpegJNI.so`; that library is built only from published
+   source (FFmpeg, media3's JNI wrapper) by the committed script, so anyone
+   can rebuild it with a changed FFmpeg, which is what the LGPL asks.
 3. **App side.**
    - `AudioOutputSettings` (decoder, output rate) with load/save in
      `SharedPreferences`, following `EqualizerSettings`.
