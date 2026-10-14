@@ -13,8 +13,8 @@ Release channels:
 
 Published at the owner's request. The automated checks pass, with and
 without Impeller, and the popups were looked at as rendered frames in both
-themes; this build was installed on the owner's phone but not yet looked at
-there.
+themes. This build has not been run on a phone: the phone was not connected
+when it was published.
 
 ### Changed
 
