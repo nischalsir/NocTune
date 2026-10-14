@@ -9,6 +9,83 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.9.2 (build 17) - 2026-10-14
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller. Most of it was run on the owner's phone while it was
+built (the Library header, the menus, the Home table, the player cover
+and the light player); the last changes (the cover drawn at the screen's
+width, Settings and Equaliser alignment, the Devanagari and "v1:" lyrics
+fixes) were installed on the phone but not yet looked at there.
+
+### Changed
+
+- Library: the title "Your library" is at the top of the page. Under it
+  the buttons say what they do: a wide Search, with Scan and Sort on its
+  right, each a glass pill with its icon and a word. Import is no longer
+  among them; it is still offered when the library is empty.
+- Menus (the Favourites and playlist "⋯" menu with Change cover, and the
+  Library's Sort menu) look like the Home list's menu: a rounded solid
+  panel in the theme's colours. The Favourites and playlist items have
+  icons.
+- Home: the List card is a table. Column headings (#, Song, Played or
+  Plays) sit over numbered rows; Recent shows the time each song was
+  played, with "3×" under it for repeats that day, and the other lists
+  their play counts, albums and artists included. The card is about
+  seven rows tall and scrolls by itself, so the page no longer grows
+  with every song played.
+- Player: the cover is no longer enlarged. It still runs from the top of
+  the screen and fades into the backdrop, but it is drawn at the
+  screen's width, so none of its sides is cut off.
+- Player and lyrics follow the app's theme. In the light theme the
+  washes over the cover are white, text and icons near black, and the
+  glass buttons frosted white; the dark theme is unchanged.
+- Lyrics: the "LINE SYNC • Embedded in the audio file" label is gone.
+- Settings: the title, the section headings and the cards share one left
+  edge, and the title matches the Library's. Every row's icon and switch
+  is level with its title, sliders run the width of the text, and all
+  controls end on the same right edge.
+- Equaliser: the switch ends where the preamp figure does, the preamp
+  slider runs the width of the text, and the buttons start on the
+  cards' text edge.
+- Library: the sort order of the tracks and the tab last open (Tracks,
+  Albums, Artists, Playlists, Genres or Folders) are kept when the app
+  is closed. A first launch opens on Tracks by title, as before.
+
+### Fixed
+
+- Home: the plays number and the other numbers on the statistics card
+  show their saved value when the card appears. They used to count up
+  from zero every time the app opened, which looked like the total was
+  climbing. A new play while the card is showing still counts up.
+- Pressing play on the song brought back from the last session carries
+  on that play instead of counting a new one, when the last session had
+  stopped partway through it.
+- Listening time adds only the time actually listened. Skipping a
+  3-minute song after 40 seconds adds 40 seconds; time spent paused is
+  not counted, and pausing and resuming adds each stretch once. It used
+  to add every play at the song's full length.
+- Lyrics: a dimmed line in Devanagari (Nepali, Hindi) no longer shows
+  lighter seams along the top line where letters join; dimmed lines are
+  drawn solid and faded as a whole.
+- Lyrics: duet lyrics that mark each line's singer with "v1:", "v2:" and
+  so on (converted from Apple Music) no longer show those marks.
+
+### Database
+
+- Schema 5 adds the listening time of each track. The total from before
+  the update was only an estimate (every play at full length); it is
+  kept as the starting amount, so nothing drops on update. Clearing the
+  listening history also clears it.
+
+### Tests
+
+- The recorder is checked for skips, pausing, cued-up tracks and the
+  resumed song; the repository and the upgrade from schema 4 for the new
+  listening time; the statistics card for showing its number at once;
+  the Library for its title above labelled buttons and for remembering
+  its sort order and tab; the lyrics reader for dropping "v1:" marks.
+
 ## 1.9.1 (build 16) - 2026-10-11
 
 Published at the owner's request. The automated checks pass and the list
