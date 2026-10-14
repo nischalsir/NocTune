@@ -72,6 +72,7 @@ class ReleaseInfo {
     this.notes = const [],
     this.minSupported,
     this.mandatory = false,
+    this.published = const [],
   });
 
   /// Reads and validates a manifest. Throws [FormatException] when a field is
@@ -90,6 +91,7 @@ class ReleaseInfo {
   /// ```
   factory ReleaseInfo.fromManifest(String body, {required bool isIos}) {
     final Object? json = jsonDecode(body);
+    if (json is List) return ReleaseInfo._fromGitHubList(json);
     if (json is! Map<String, dynamic>) {
       throw const FormatException('The manifest is not a JSON object.');
     }
@@ -128,6 +130,40 @@ class ReleaseInfo {
           ? AppVersion.tryParse(minSupported)
           : null,
       mandatory: json['mandatory'] == true,
+    );
+  }
+
+  /// Reads GitHub's list of recent releases, newest first, as served by
+  /// `https://api.github.com/repos/<owner>/<repo>/releases`. The newest
+  /// stable release is the one offered; drafts, pre-releases and tags that
+  /// are not versions are left out.
+  factory ReleaseInfo._fromGitHubList(List<Object?> releases) {
+    final stable = [
+      for (final release in releases)
+        if (release is Map<String, dynamic> &&
+            release['draft'] != true &&
+            release['prerelease'] != true &&
+            release['tag_name'] is String &&
+            AppVersion.tryParse(release['tag_name'] as String) != null)
+          release,
+    ];
+    if (stable.isEmpty) {
+      throw const FormatException('The list has no stable release.');
+    }
+    final versions = [
+      for (final release in stable)
+        AppVersion.tryParse(release['tag_name'] as String)!,
+    ]..sort((a, b) => b.compareTo(a));
+    final newest = stable.firstWhere(
+      (release) =>
+          AppVersion.tryParse(release['tag_name'] as String) == versions.first,
+    );
+    final info = ReleaseInfo._fromGitHub(newest);
+    return ReleaseInfo(
+      version: info.version,
+      url: info.url,
+      notes: info.notes,
+      published: versions,
     );
   }
 
@@ -175,6 +211,10 @@ class ReleaseInfo {
   /// Oldest version still allowed to run, if the publisher sets one.
   final AppVersion? minSupported;
   final bool mandatory;
+
+  /// The stable releases known, newest first, when the release came from a
+  /// GitHub release list; empty for a single release or a manifest.
+  final List<AppVersion> published;
 }
 
 /// A release worth telling the user about now.
@@ -206,11 +246,12 @@ Future<String> fetchManifestOverHttps(Uri url) async {
     if (response.statusCode != HttpStatus.ok) {
       throw HttpException('Unexpected status ${response.statusCode}', uri: url);
     }
-    // A manifest is a few hundred bytes; refuse anything implausibly large.
+    // A manifest is a few hundred bytes and a list of five releases a few
+    // tens of kilobytes; refuse anything implausibly large.
     final bytes = <int>[];
     await for (final chunk in response.timeout(const Duration(seconds: 8))) {
       bytes.addAll(chunk);
-      if (bytes.length > 64 * 1024) {
+      if (bytes.length > 256 * 1024) {
         throw HttpException('The manifest is too large', uri: url);
       }
     }
@@ -244,6 +285,9 @@ class UpdateService {
   /// How long "Later" silences an optional update.
   static const remindAfter = Duration(days: 3);
 
+  /// Falling this many releases behind makes the update required.
+  static const forceAfterReleases = 3;
+
   final String manifestUrl;
   final AppVersion installed;
   final bool isIos;
@@ -270,9 +314,7 @@ class UpdateService {
     final release = await _latestRelease();
     if (release == null || !(installed < release.version)) return null;
 
-    final minSupported = release.minSupported;
-    final required =
-        release.mandatory || (minSupported != null && installed < minSupported);
+    final required = _isRequired(release);
     if (!required) {
       final version = release.version.toString();
       if (_prefs.getString(_skippedKey) == version) return null;
@@ -297,7 +339,7 @@ class UpdateService {
     if (!isConfigured) return (update: null, checked: false);
     final ReleaseInfo release;
     try {
-      final fresh = await fetch(Uri.parse(manifestUrl));
+      final fresh = await fetch(_fetchUrl);
       release = ReleaseInfo.fromManifest(fresh, isIos: isIos);
       await _prefs.setString(_manifestKey, fresh);
       await _prefs.setInt(_checkedAtKey, _now().millisecondsSinceEpoch);
@@ -305,16 +347,37 @@ class UpdateService {
       return (update: null, checked: false);
     }
     if (!(installed < release.version)) return (update: null, checked: true);
-    final minSupported = release.minSupported;
     return (
       update: UpdatePrompt(
         release: release,
         installed: installed,
-        required:
-            release.mandatory ||
-            (minSupported != null && installed < minSupported),
+        required: _isRequired(release),
       ),
       checked: true,
+    );
+  }
+
+  /// Whether the update can't be put off: the publisher says so, the app is
+  /// older than the oldest version supported, or it has fallen
+  /// [forceAfterReleases] or more releases behind.
+  bool _isRequired(ReleaseInfo release) {
+    final minSupported = release.minSupported;
+    return release.mandatory ||
+        (minSupported != null && installed < minSupported) ||
+        release.published.where((version) => installed < version).length >=
+            forceAfterReleases;
+  }
+
+  /// Where to ask. GitHub's "latest release" address is swapped for its
+  /// list of recent releases, which also tells how far behind the app is.
+  /// Five are enough to know whether it is three or more behind.
+  Uri get _fetchUrl {
+    final url = Uri.parse(manifestUrl);
+    final latest = RegExp(r'^/repos/[^/]+/[^/]+/releases/latest$');
+    if (url.host != 'api.github.com' || !latest.hasMatch(url.path)) return url;
+    return url.replace(
+      path: url.path.substring(0, url.path.length - '/latest'.length),
+      queryParameters: {'per_page': '5'},
     );
   }
 
@@ -326,7 +389,7 @@ class UpdateService {
     var body = _prefs.getString(_manifestKey);
     if (body == null || age < 0 || age > checkInterval.inMilliseconds) {
       try {
-        final fresh = await fetch(Uri.parse(manifestUrl));
+        final fresh = await fetch(_fetchUrl);
         // Validate before caching, so a bad response can't stick.
         ReleaseInfo.fromManifest(fresh, isIos: isIos);
         body = fresh;

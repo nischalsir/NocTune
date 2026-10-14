@@ -19,10 +19,19 @@ String _manifest({
     '${minSupported == null ? '' : '"minSupported": "$minSupported", '}'
     '"notes": [${notes.map((n) => '"$n"').join(', ')}]}';
 
+/// One release as GitHub's release list describes it.
+String _gitHubRelease(String tag, {bool prerelease = false}) =>
+    '{"tag_name": "$tag", "prerelease": $prerelease, "draft": false, '
+    '"html_url": "https://github.com/nischalsir/NocTune/releases/tag/$tag", '
+    '"body": "- Notes for $tag"}';
+
+String _gitHubList(List<String> releases) => '[${releases.join(', ')}]';
+
 void main() {
   late SharedPreferences prefs;
   late DateTime now;
   late int fetches;
+  Uri? fetched;
   String? served;
 
   setUp(() async {
@@ -44,6 +53,7 @@ void main() {
     now: () => now,
     fetch: (url) async {
       fetches++;
+      fetched = url;
       final body = served;
       if (body == null) throw const SocketException('offline');
       return body;
@@ -163,6 +173,36 @@ void main() {
       });
     });
 
+    group('GitHub release list', () {
+      test('reads the newest stable release and lists the published ones', () {
+        final info = ReleaseInfo.fromManifest(
+          _gitHubList([
+            _gitHubRelease('v1.4.0', prerelease: true),
+            _gitHubRelease('v1.3.0'),
+            _gitHubRelease('v1.2.0'),
+          ]),
+          isIos: false,
+        );
+
+        expect(info.version, const AppVersion(1, 3, 0));
+        expect(info.notes, ['Notes for v1.3.0']);
+        expect(info.published, const [
+          AppVersion(1, 3, 0),
+          AppVersion(1, 2, 0),
+        ]);
+      });
+
+      test('rejects a list with no stable release', () {
+        expect(
+          () => ReleaseInfo.fromManifest(
+            _gitHubList([_gitHubRelease('v1.4.0', prerelease: true)]),
+            isIos: false,
+          ),
+          throwsFormatException,
+        );
+      });
+    });
+
     test('keeps release notes short', () {
       final release = ReleaseInfo.fromManifest(
         _manifest(notes: [for (var i = 0; i < 9; i++) 'Note $i', 'x' * 400]),
@@ -229,6 +269,61 @@ void main() {
         (await service(installed: const AppVersion(1, 1, 0)).check())!.required,
         isFalse,
       );
+    });
+
+    group('three releases behind', () {
+      const latest =
+          'https://api.github.com/repos/nischalsir/NocTune/releases/latest';
+
+      setUp(() {
+        served = _gitHubList([
+          _gitHubRelease('v1.3.0'),
+          _gitHubRelease('v1.2.0'),
+          _gitHubRelease('v1.1.0'),
+          _gitHubRelease('v1.0.0'),
+        ]);
+      });
+
+      test('a GitHub address asks for the recent releases', () async {
+        await service(manifestUrl: latest).check();
+
+        expect(
+          fetched.toString(),
+          'https://api.github.com/repos/nischalsir/NocTune/releases?per_page=5',
+        );
+      });
+
+      test('three or more releases behind must update', () async {
+        final prompt = await service(
+          manifestUrl: latest,
+          installed: const AppVersion(1, 0, 0, 1),
+        ).check();
+
+        expect(prompt!.release.version, const AppVersion(1, 3, 0));
+        expect(prompt.required, isTrue);
+      });
+
+      test('one or two releases behind stays optional', () async {
+        for (final installed in const [
+          AppVersion(1, 1, 0),
+          AppVersion(1, 2, 0),
+        ]) {
+          final prompt = await service(
+            manifestUrl: latest,
+            installed: installed,
+          ).checkNow();
+          expect(prompt.update!.required, isFalse, reason: '$installed');
+        }
+      });
+
+      test('checking by hand applies the same rule', () async {
+        final result = await service(
+          manifestUrl: latest,
+          installed: const AppVersion(1, 0, 0),
+        ).checkNow();
+
+        expect(result.update!.required, isTrue);
+      });
     });
 
     test('stays quiet offline with nothing cached', () async {

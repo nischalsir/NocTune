@@ -105,6 +105,9 @@ How the app uses it:
 - A file that is malformed, or whose links are not HTTPS, is ignored.
 - "Later" silences that version for three days. "Don't remind me" silences it
   for good; a newer version is still announced.
+- With a GitHub address the app reads the five newest releases. Once the
+  installed version is three or more stable releases behind, the update is
+  required.
 - A required update shows only "Update now" and cannot be dismissed.
 - The app never downloads or installs anything itself.
 

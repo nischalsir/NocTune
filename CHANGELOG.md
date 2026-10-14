@@ -9,6 +9,23 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## Unreleased
+
+### Changed
+
+- Updates: a copy of NocTune that has fallen three or more releases behind
+  must update; the popup then offers only "Update now" and cannot be
+  dismissed. One or two behind stays optional. It works from the release
+  that brings it: older copies behave as before until they update once.
+  The app now reads GitHub's five newest releases instead of only the
+  latest, still in one request.
+
+### Tests
+
+- The release list is read (pre-releases left out) and the rule is checked
+  at one, two and three releases behind, on the automatic check and the
+  one started from Settings.
+
 ## 1.9.3 (build 18) - 2026-10-14
 
 Published at the owner's request. The automated checks pass, with and
