@@ -9,6 +9,29 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.9.3 (build 18) - 2026-10-14
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller, and the popups were looked at as rendered frames in both
+themes; this build was installed on the owner's phone but not yet looked at
+there.
+
+### Changed
+
+- The welcome popup, the update popup and the delete-song and
+  clear-history questions use the app's own buttons: the main action is
+  the solid pill of the Play button, the other the glass pill of Shuffle,
+  and the delete actions a pill in the theme's error colour. The popup's
+  corners match the Settings cards.
+- Settings › About: "Developed by Nischal Pandey" has a line saying what
+  NocTune is.
+- README: what the app does, new screenshots (with the Library and the
+  Home table), and the release steps as they are now.
+
+### Tests
+
+- The delete-song tests press the new pill button.
+
 ## 1.9.2 (build 17) - 2026-10-14
 
 Published at the owner's request. The automated checks pass, with and
