@@ -3,7 +3,7 @@ import 'package:sqflite/sqflite.dart';
 
 /// Opens NocTune's on-device SQLite database and owns its schema.
 abstract final class AppDatabase {
-  static const _version = 4;
+  static const _version = 5;
 
   /// Opens the database. Tests pass an in-memory [path] and an FFI [factory].
   static Future<Database> open({String? path, DatabaseFactory? factory}) async {
@@ -114,6 +114,17 @@ abstract final class AppDatabase {
       // A picture the user chose as a playlist's cover, shown in place of
       // the covers of its tracks.
       await db.execute('ALTER TABLE playlists ADD COLUMN cover_path TEXT');
+    }
+    if (from < 5) {
+      // Time actually spent listening to each track. Earlier versions only
+      // estimated it, every play at the track's full length; that estimate
+      // carries over as the starting amount.
+      await db.execute(
+        'ALTER TABLE tracks ADD COLUMN listened_ms INTEGER NOT NULL DEFAULT 0',
+      );
+      await db.execute(
+        'UPDATE tracks SET listened_ms = duration_ms * play_count',
+      );
     }
   }
 }

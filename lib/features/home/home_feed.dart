@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -88,9 +86,8 @@ class HomeHeaderRow extends StatelessWidget {
   }
 }
 
-/// Estimated time spent listening in this app, counting up while music
-/// plays: every finished play at the track's full length, plus how far into
-/// the current track the player is.
+/// Time spent listening in this app, counting up while music plays: the
+/// stored total plus the stretch of the current track not stored yet.
 class ListenTimerPill extends ConsumerWidget {
   const ListenTimerPill({super.key});
 
@@ -103,20 +100,7 @@ class ListenTimerPill extends ConsumerWidget {
     var listened =
         ref.watch(libraryStatsProvider).value?.listenedDuration ??
         Duration.zero;
-    final current = ref.watch(currentTrackProvider).value;
-    if (current != null &&
-        current.id == ref.watch(currentTrackIdProvider) &&
-        current.playCount > 0) {
-      // The current play is already in the total at full length; swap that
-      // for the position actually reached.
-      final seconds = ref.watch(
-        playbackPositionProvider.select((p) => p.value?.inSeconds ?? 0),
-      );
-      listened =
-          listened -
-          current.duration +
-          Duration(seconds: math.min(seconds, current.duration.inSeconds));
-    }
+    if (isPlaying) listened += ref.watch(unsavedListeningProvider);
     final text = formatListeningTime(listened.inSeconds);
     final color = isPlaying ? scheme.primary : scheme.onSurface;
 
@@ -162,7 +146,7 @@ class ListenTimerPill extends ConsumerWidget {
 
 /// The statistics card: plays as the headline number with a way into the
 /// library, then tracks, artists and albums as three tiles. It fades and
-/// unfolds in once, and its numbers count up to their values.
+/// unfolds in once, and its numbers count up when they change.
 class HomeStatsCard extends StatefulWidget {
   const HomeStatsCard({
     super.key,
@@ -395,9 +379,12 @@ class _AnimatedCountState extends State<_AnimatedCount>
 
   void _animate() {
     if (_target == widget.value) return;
+    // The saved number shows as it is when the card appears; only a change
+    // while it is on screen counts up.
+    final first = _target == null;
     _target = widget.value;
     final target = widget.value.toDouble();
-    if (MediaQuery.disableAnimationsOf(context)) {
+    if (first || MediaQuery.disableAnimationsOf(context)) {
       _count.value = target;
     } else {
       _count.animateWith(SpringSimulation(_spring, _count.value, target, 0));
@@ -622,11 +609,20 @@ class HomeTrackRow extends StatelessWidget {
     required this.isPlaying,
     required this.onTap,
     required this.onMenu,
-    this.badge,
+    this.number,
+    this.value,
+    this.detail,
   });
 
   final Track track;
-  final String? badge;
+
+  /// Its place in the list, shown in the first column.
+  final int? number;
+
+  /// The figure in the last column, such as the plays or the time played,
+  /// with [detail] in small type under it.
+  final String? value;
+  final String? detail;
 
   /// Whether this is the track loaded in the player.
   final bool isNowPlaying;
@@ -639,7 +635,6 @@ class HomeTrackRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final badge = this.badge;
 
     Widget row = Material(
       type: MaterialType.transparency,
@@ -654,6 +649,7 @@ class HomeTrackRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
             child: Row(
               children: [
+                _NumberCell(number),
                 SizedBox.square(
                   dimension: 52,
                   child: Stack(
@@ -725,24 +721,7 @@ class HomeTrackRow extends StatelessWidget {
                     ),
                     child: _NowPlayingPill(playing: isPlaying),
                   ),
-                if (badge != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: context.feedChip,
-                      borderRadius: _pillRadius,
-                    ),
-                    child: Text(
-                      badge,
-                      maxLines: 1,
-                      style: FlexType.labelMedium.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
+                if (!isNowPlaying) _ValueCell(value: value, detail: detail),
                 _OverflowButton(
                   label: 'More for ${track.title}',
                   onTap: onMenu,
@@ -895,7 +874,7 @@ class _OverflowButton extends StatelessWidget {
           behavior: HitTestBehavior.opaque,
           onTap: onTap,
           child: SizedBox(
-            width: 40,
+            width: _menuWidth,
             height: 48,
             child: Align(
               alignment: Alignment.centerRight,
@@ -931,11 +910,15 @@ class HomeGroupRow extends StatelessWidget {
     required this.group,
     required this.isArtist,
     required this.onTap,
+    this.number,
   });
 
   final TrackGroupSummary group;
   final bool isArtist;
   final VoidCallback onTap;
+
+  /// Its place in the list, shown in the first column.
+  final int? number;
 
   @override
   Widget build(BuildContext context) {
@@ -953,6 +936,7 @@ class HomeGroupRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
             child: Row(
               children: [
+                _NumberCell(number),
                 Artwork(
                   path: group.artPath,
                   size: 52,
@@ -986,10 +970,143 @@ class HomeGroupRow extends StatelessWidget {
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
+                _ValueCell(value: playCountBadge(group.playCount)),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+// The list is a table: a number, the row's cover and names, then a figure
+// at the end. These widths keep the columns lined up with their headings.
+const _numberWidth = 28.0;
+const _valueWidth = 64.0;
+const _menuWidth = 40.0;
+
+/// The headings over the list's columns.
+class HomeListColumns extends StatelessWidget {
+  const HomeListColumns({
+    super.key,
+    required this.title,
+    required this.value,
+    this.menu = true,
+  });
+
+  /// What the rows are, such as "Song", and what their last column shows.
+  final String title;
+  final String value;
+
+  /// Whether the rows end in a menu button, which the headings leave room
+  /// for.
+  final bool menu;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final style = FlexType.labelMedium.copyWith(color: scheme.onSurfaceVariant);
+    return ExcludeSemantics(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
+        child: Row(
+          children: [
+            SizedBox(
+              width: _numberWidth,
+              child: Text('#', textAlign: TextAlign.center, style: style),
+            ),
+            Expanded(
+              child: Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+            SizedBox(
+              width: _valueWidth,
+              child: Text(
+                value,
+                maxLines: 1,
+                textAlign: TextAlign.end,
+                overflow: TextOverflow.ellipsis,
+                style: style,
+              ),
+            ),
+            if (menu) const SizedBox(width: _menuWidth),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NumberCell extends StatelessWidget {
+  const _NumberCell(this.number);
+
+  final int? number;
+
+  @override
+  Widget build(BuildContext context) {
+    final number = this.number;
+    return SizedBox(
+      width: _numberWidth,
+      child: number == null
+          ? null
+          : Text(
+              '$number',
+              maxLines: 1,
+              textAlign: TextAlign.center,
+              overflow: TextOverflow.visible,
+              softWrap: false,
+              style: FlexType.labelMedium.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+    );
+  }
+}
+
+class _ValueCell extends StatelessWidget {
+  const _ValueCell({required this.value, this.detail});
+
+  final String? value;
+  final String? detail;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final value = this.value;
+    final detail = this.detail;
+    return SizedBox(
+      width: _valueWidth,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (value != null)
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: FlexType.labelLarge.copyWith(
+                color: scheme.onSurface,
+                fontFeatures: const [FontFeature.tabularFigures()],
+              ),
+            ),
+          if (detail != null)
+            Text(
+              detail,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: FlexType.labelSmall.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+        ],
       ),
     );
   }

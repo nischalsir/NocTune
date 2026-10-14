@@ -41,6 +41,22 @@ void main() {
       ]);
     });
 
+    test('drops the singer marks of duet lyrics, such as "v1:"', () {
+      final lyrics = parseLyrics(
+        "[00:10.00]v1: I just can't say I don't love you\n"
+        "[00:15.00]v2:'Cause I love you, yeah\n"
+        '[00:20.00]v1: <00:20.00>Word <00:21.00>timed\n'
+        '[00:25.00]Not a mark: v1: stays\n',
+      )!;
+
+      expect(lyrics.lines.map((l) => l.text), [
+        "I just can't say I don't love you",
+        "'Cause I love you, yeah",
+        'Word timed',
+        'Not a mark: v1: stays',
+      ]);
+    });
+
     test('repeats a line that carries several timestamps', () {
       final lyrics = parseLyrics(
         '[00:30.00][01:30.00]Chorus\n[00:10.00]Verse\n',

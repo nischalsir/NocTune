@@ -2,11 +2,9 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
-/// The fill and the thin light rim shared by the player's glass controls.
-final kPlayerGlassFill = Colors.white.withValues(alpha: 0.07);
-const kPlayerGlassRim = BorderSide(color: Color(0x3DFFFFFF));
+import 'player_colors.dart';
 
-/// A round glass button for the dark player, with a thin light rim. It dips
+/// A round glass button for the player, with a thin rim. It dips
 /// while pressed. With [frosted] it also blurs what is behind it, for the
 /// buttons that sit on the cover. Frosted buttons under one [BackdropGroup]
 /// share a single reading of what is behind them.
@@ -31,7 +29,7 @@ class PlayerGlassButton extends StatefulWidget {
   final double size;
   final double iconSize;
 
-  /// Opacity of the white fill, when no [color] is given.
+  /// Strength of the glass on the dark player, when no [color] is given.
   final double fill;
   final double pressedScale;
 
@@ -81,9 +79,8 @@ class _PlayerGlassButtonState extends State<PlayerGlassButton> {
             curve: Curves.easeOutBack,
             child: _frost(
               Material(
-                color:
-                    widget.color ?? Colors.white.withValues(alpha: widget.fill),
-                shape: const CircleBorder(side: kPlayerGlassRim),
+                color: widget.color ?? context.playerGlass(widget.fill),
+                shape: CircleBorder(side: context.playerGlassRim),
                 clipBehavior: Clip.antiAlias,
                 child: InkWell(
                   onTap: widget.onTap,
@@ -94,7 +91,7 @@ class _PlayerGlassButtonState extends State<PlayerGlassButton> {
                       size: widget.iconSize,
                       color:
                           widget.foreground ??
-                          Colors.white.withValues(alpha: 0.94),
+                          context.playerInk.withValues(alpha: 0.94),
                     ),
                   ),
                 ),

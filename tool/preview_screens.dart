@@ -280,6 +280,7 @@ void main() {
             currentMediaItemProvider.overrideWith(
               (ref) => Stream.value(mediaItemFromTrack(playing)),
             ),
+            unsavedListeningProvider.overrideWithValue(Duration.zero),
             playbackPositionProvider.overrideWith(
               (ref) => Stream.value(const Duration(seconds: 63)),
             ),

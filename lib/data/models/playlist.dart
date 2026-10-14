@@ -92,8 +92,9 @@ class LibraryStats {
   /// How many times tracks have been played in this app, in total.
   final int playCount;
 
-  /// An estimate of the time spent listening: every play counted at the
-  /// track's full length.
+  /// Time spent listening in this app. Before version 5 of the database
+  /// only an estimate was kept, every play at the track's full length; that
+  /// estimate is included as it was.
   final Duration listenedDuration;
 }
 

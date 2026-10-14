@@ -56,6 +56,19 @@ ThemeData buildNocTheme(
       backgroundColor: palette.glassSolid,
       contentTextStyle: TextStyle(color: palette.textPrimary),
     ),
+    // Every menu looks like the Home list's: a solid rounded panel.
+    popupMenuTheme: PopupMenuThemeData(
+      color: brightness == Brightness.light
+          ? Colors.white
+          : scheme.surfaceContainerHigh,
+      surfaceTintColor: Colors.transparent,
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      menuPadding: const EdgeInsets.symmetric(vertical: 12),
+      labelTextStyle: WidgetStatePropertyAll(
+        FlexType.bodyLarge.copyWith(fontSize: 16, color: palette.textPrimary),
+      ),
+    ),
   );
 }
 

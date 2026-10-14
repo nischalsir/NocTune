@@ -24,6 +24,7 @@ import '../settings/settings_controller.dart';
 import 'audio_capabilities.dart';
 import 'noc_audio_handler.dart';
 import 'now_playing_route.dart';
+import 'player_colors.dart';
 import 'player_glass_button.dart';
 import 'player_seek_bar.dart';
 import 'queue_sheet.dart';
@@ -34,8 +35,9 @@ Future<void> showNowPlaying(BuildContext context) => Navigator.of(
   rootNavigator: true,
 ).push(NowPlayingRoute(child: const NowPlayingScreen()));
 
-/// The full-screen player. It is always dark: the cover, blurred and washed
-/// with its own colours, is the backdrop, and everything on it is white.
+/// The full-screen player. The cover, blurred and washed with its own
+/// colours, is the backdrop. It follows the app's theme: dark washes with
+/// everything on them in white, or light washes with it in near black.
 ///
 /// From the top: a bar with the way out and the track's actions, the cover,
 /// the title and artist beside the favourite and lyrics buttons, the seek
@@ -50,6 +52,10 @@ class NowPlayingScreen extends ConsumerStatefulWidget {
 }
 
 class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
+  // How far the square cover may be enlarged to fill the space above the
+  // title. Not at all: enlarged, its sides are cut off.
+  static const _maxCoverZoom = 1.0;
+
   bool _showLyrics = false;
   bool _lyricsFullscreen = false;
 
@@ -94,137 +100,154 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
       if (mounted) _measureCover();
     });
 
+    final brightness = switch (settings.themeMode) {
+      ThemeMode.light => Brightness.light,
+      ThemeMode.dark => Brightness.dark,
+      ThemeMode.system => MediaQuery.platformBrightnessOf(context),
+    };
+    final light = brightness == Brightness.light;
+
     return Theme(
       data: buildNocTheme(
-        Brightness.dark,
+        brightness,
         settings.accent,
-        coverAccent: cover.dark,
+        coverAccent: light ? cover.light : cover.dark,
       ),
       child: AnnotatedRegion<SystemUiOverlayStyle>(
-        // Always dark, so always light status bar icons.
-        value: SystemUiOverlayStyle.light.copyWith(
-          statusBarColor: Colors.transparent,
-          systemNavigationBarColor: Colors.transparent,
-        ),
-        child: Material(
-          color: Colors.black,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              // The backdrop cross-fades as the cover changes between tracks.
-              AnimatedSwitcher(
-                duration: reduceMotion
-                    ? Duration.zero
-                    : const Duration(milliseconds: 500),
-                child: _Backdrop(
-                  key: ValueKey(item?.artUri),
-                  path: item?.artUri?.toFilePath(),
-                ),
-              ),
-              if (item != null && !sideways)
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: _coverBottom ?? screen.height * 0.54,
-                  child: _ArtworkHero(
-                    path: item.artUri?.toFilePath(),
-                    visible: !lyricsOpen,
-                  ),
-                ),
-              // A veil that deepens the backdrop under the lyrics.
-              IgnorePointer(
-                child: AnimatedOpacity(
-                  opacity: lyricsOpen ? 1 : 0,
+        // Status bar icons that stand out from the player's washes.
+        value: (light ? SystemUiOverlayStyle.dark : SystemUiOverlayStyle.light)
+            .copyWith(
+              statusBarColor: Colors.transparent,
+              systemNavigationBarColor: Colors.transparent,
+            ),
+        // Below the theme, so the player's colours read the player's
+        // brightness rather than the app's.
+        child: Builder(
+          builder: (context) => Material(
+            color: context.playerShade,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // The backdrop cross-fades as the cover changes between tracks.
+                AnimatedSwitcher(
                   duration: reduceMotion
                       ? Duration.zero
-                      : const Duration(milliseconds: 320),
-                  child: const DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Color(0x9E000000),
-                          Color(0x85000000),
-                          Color(0x94000000),
-                          Color(0xB8000000),
-                        ],
-                        stops: [0, 0.35, 0.70, 1],
+                      : const Duration(milliseconds: 500),
+                  child: _Backdrop(
+                    key: ValueKey(item?.artUri),
+                    path: item?.artUri?.toFilePath(),
+                  ),
+                ),
+                if (item != null && !sideways)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    // Down to the title, but never taller than the cover is
+                    // when it is the screen's width, so it is not enlarged.
+                    height: math.min(
+                      _coverBottom ?? screen.height * 0.54,
+                      screen.width * _maxCoverZoom,
+                    ),
+                    child: _ArtworkHero(
+                      path: item.artUri?.toFilePath(),
+                      visible: !lyricsOpen,
+                    ),
+                  ),
+                // A veil that deepens the backdrop under the lyrics.
+                IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: lyricsOpen ? 1 : 0,
+                    duration: reduceMotion
+                        ? Duration.zero
+                        : const Duration(milliseconds: 320),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            context.playerShade.withAlpha(0x9E),
+                            context.playerShade.withAlpha(0x85),
+                            context.playerShade.withAlpha(0x94),
+                            context.playerShade.withAlpha(0xB8),
+                          ],
+                          stops: [0, 0.35, 0.70, 1],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-              SafeArea(
-                child: Column(
-                  children: [
-                    if (!(lyricsOpen && _lyricsFullscreen))
-                      _TopBar(
-                        item: item,
-                        track: track,
-                        lyricsOpen: lyricsOpen,
-                        onLeaveLyrics: () => _setLyrics(false),
-                      ),
-                    Expanded(
-                      child: item == null
-                          ? const _NothingPlaying()
-                          : AnimatedSwitcher(
-                              duration: reduceMotion
-                                  ? Duration.zero
-                                  : const Duration(milliseconds: 320),
-                              switchInCurve: Curves.easeOutCubic,
-                              switchOutCurve: Curves.easeInCubic,
-                              transitionBuilder: (child, animation) =>
-                                  FadeTransition(
-                                    opacity: animation,
-                                    child: ScaleTransition(
-                                      scale: Tween<double>(
-                                        begin: 0.96,
-                                        end: 1,
-                                      ).animate(animation),
-                                      child: child,
+                SafeArea(
+                  child: Column(
+                    children: [
+                      if (!(lyricsOpen && _lyricsFullscreen))
+                        _TopBar(
+                          item: item,
+                          track: track,
+                          lyricsOpen: lyricsOpen,
+                          onLeaveLyrics: () => _setLyrics(false),
+                        ),
+                      Expanded(
+                        child: item == null
+                            ? const _NothingPlaying()
+                            : AnimatedSwitcher(
+                                duration: reduceMotion
+                                    ? Duration.zero
+                                    : const Duration(milliseconds: 320),
+                                switchInCurve: Curves.easeOutCubic,
+                                switchOutCurve: Curves.easeInCubic,
+                                transitionBuilder: (child, animation) =>
+                                    FadeTransition(
+                                      opacity: animation,
+                                      child: ScaleTransition(
+                                        scale: Tween<double>(
+                                          begin: 0.96,
+                                          end: 1,
+                                        ).animate(animation),
+                                        child: child,
+                                      ),
                                     ),
-                                  ),
-                              child: lyricsOpen
-                                  ? Center(
-                                      key: const ValueKey('lyrics'),
-                                      child: ConstrainedBox(
-                                        constraints: const BoxConstraints(
-                                          maxWidth: 720,
-                                        ),
-                                        child: LyricsPanel(
-                                          track: track,
-                                          duration:
-                                              item.duration ?? track.duration,
-                                          isFullscreen: _lyricsFullscreen,
-                                          onToggleFullscreen: () => setState(
-                                            () => _lyricsFullscreen =
-                                                !_lyricsFullscreen,
+                                child: lyricsOpen
+                                    ? Center(
+                                        key: const ValueKey('lyrics'),
+                                        child: ConstrainedBox(
+                                          constraints: const BoxConstraints(
+                                            maxWidth: 720,
+                                          ),
+                                          child: LyricsPanel(
+                                            track: track,
+                                            duration:
+                                                item.duration ?? track.duration,
+                                            isFullscreen: _lyricsFullscreen,
+                                            onToggleFullscreen: () => setState(
+                                              () => _lyricsFullscreen =
+                                                  !_lyricsFullscreen,
+                                            ),
                                           ),
                                         ),
+                                      )
+                                    // The seek bar's wave holds still
+                                    // under the notification shade. The
+                                    // lyrics above do not: their motion
+                                    // is the content.
+                                    : StillWhenCovered(
+                                        key: const ValueKey('player'),
+                                        child: _NowPlaying(
+                                          item: item,
+                                          track: track,
+                                          onShowLyrics: () => _setLyrics(true),
+                                          detailsKey: _detailsKey,
+                                          sideways: sideways,
+                                        ),
                                       ),
-                                    )
-                                  // The seek bar's wave holds still
-                                  // under the notification shade. The
-                                  // lyrics above do not: their motion
-                                  // is the content.
-                                  : StillWhenCovered(
-                                      key: const ValueKey('player'),
-                                      child: _NowPlaying(
-                                        item: item,
-                                        track: track,
-                                        onShowLyrics: () => _setLyrics(true),
-                                        detailsKey: _detailsKey,
-                                        sideways: sideways,
-                                      ),
-                                    ),
-                            ),
-                    ),
-                  ],
+                              ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -246,20 +269,20 @@ class _NothingPlaying extends StatelessWidget {
             Icon(
               Icons.music_off_outlined,
               size: 42,
-              color: Colors.white.withValues(alpha: 0.90),
+              color: context.playerInk.withValues(alpha: 0.90),
             ),
             const SizedBox(height: 14),
             Text(
               'Nothing is playing',
               textAlign: TextAlign.center,
-              style: FlexType.headlineSmall.copyWith(color: Colors.white),
+              style: FlexType.headlineSmall.copyWith(color: context.playerInk),
             ),
             const SizedBox(height: 8),
             Text(
               'Pick a track from your library to start.',
               textAlign: TextAlign.center,
               style: FlexType.bodyMedium.copyWith(
-                color: Colors.white.withValues(alpha: 0.70),
+                color: context.playerInk.withValues(alpha: 0.70),
               ),
             ),
           ],
@@ -354,7 +377,7 @@ class _BackdropState extends State<_Backdrop> {
                 ),
               ),
             ),
-          const ColoredBox(color: Color(0x85000000)),
+          ColoredBox(color: context.playerShade.withAlpha(0x85)),
           pool(scheme.primary, const Alignment(-0.5, -0.6), 0.85, [
             0.58,
             0.22,
@@ -366,35 +389,35 @@ class _BackdropState extends State<_Backdrop> {
             0.50,
           ]),
           pool(
-            Color.lerp(scheme.tertiary, Colors.black, 0.35)!,
+            Color.lerp(scheme.tertiary, context.playerShade, 0.35)!,
             const Alignment(-0.7, 0.64),
             0.70,
             [0.42, 0.14, 0.55],
           ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Color(0x59000000),
-                  Color(0x26000000),
-                  Color(0x66000000),
-                  Color(0xB8000000),
+                  context.playerShade.withAlpha(0x59),
+                  context.playerShade.withAlpha(0x26),
+                  context.playerShade.withAlpha(0x66),
+                  context.playerShade.withAlpha(0xB8),
                 ],
                 stops: [0, 0.28, 0.65, 1],
               ),
             ),
           ),
-          const DecoratedBox(
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: RadialGradient(
                 center: Alignment(0, -0.2),
                 radius: 0.8,
                 colors: [
-                  Color(0x00000000),
-                  Color(0x00000000),
-                  Color(0x4D000000),
+                  context.playerShade.withAlpha(0),
+                  context.playerShade.withAlpha(0),
+                  context.playerShade.withAlpha(0x4D),
                 ],
                 stops: [0, 0.65, 1],
               ),
@@ -562,7 +585,9 @@ class _TopBar extends ConsumerWidget {
                                 weight: 540,
                                 letterSpacing: 0.4,
                               ).copyWith(
-                                color: Colors.white.withValues(alpha: 0.95),
+                                color: context.playerInk.withValues(
+                                  alpha: 0.95,
+                                ),
                               ),
                         ),
                         if (subtitle != null && subtitle.isNotEmpty)
@@ -576,7 +601,9 @@ class _TopBar extends ConsumerWidget {
                                   lineHeight: 18,
                                   weight: 420,
                                 ).copyWith(
-                                  color: Colors.white.withValues(alpha: 0.70),
+                                  color: context.playerInk.withValues(
+                                    alpha: 0.70,
+                                  ),
                                 ),
                           ),
                       ],
@@ -613,14 +640,14 @@ class _MenuCircle extends StatelessWidget {
       width: 44,
       height: 44,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.14),
+        color: context.playerInk.withValues(alpha: 0.14),
         shape: BoxShape.circle,
-        border: Border.fromBorderSide(kPlayerGlassRim),
+        border: Border.fromBorderSide(context.playerGlassRim),
       ),
       child: Icon(
         Icons.more_vert,
         size: 22,
-        color: Colors.white.withValues(alpha: 0.94),
+        color: context.playerInk.withValues(alpha: 0.94),
       ),
     );
   }
@@ -756,15 +783,15 @@ class _ArtworkHero extends StatelessWidget {
                   height: 132,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: Colors.white.withValues(alpha: 0.08),
+                    color: context.playerInk.withValues(alpha: 0.08),
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.22),
+                      color: context.playerInk.withValues(alpha: 0.22),
                     ),
                   ),
                   child: Icon(
                     Icons.music_note,
                     size: 56,
-                    color: Colors.white.withValues(alpha: 0.70),
+                    color: context.playerInk.withValues(alpha: 0.70),
                   ),
                 ),
               )
@@ -876,7 +903,7 @@ class _Details extends ConsumerWidget {
                         lineHeight: 32,
                         weight: 540,
                         letterSpacing: -0.2,
-                      ).copyWith(color: Colors.white),
+                      ).copyWith(color: context.playerInk),
                     ),
                   ),
                   const SizedBox(height: 4),
@@ -884,11 +911,14 @@ class _Details extends ConsumerWidget {
                     item.artist ?? 'Unknown artist',
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: FlexType.custom(
-                      size: 17,
-                      lineHeight: 24,
-                      weight: 420,
-                    ).copyWith(color: Colors.white.withValues(alpha: 0.72)),
+                    style:
+                        FlexType.custom(
+                          size: 17,
+                          lineHeight: 24,
+                          weight: 420,
+                        ).copyWith(
+                          color: context.playerInk.withValues(alpha: 0.72),
+                        ),
                   ),
                 ],
               ),
@@ -903,11 +933,11 @@ class _Details extends ConsumerWidget {
                   : 'Add to favourites',
               size: 46,
               color: track.isFavorite
-                  ? Colors.white.withValues(alpha: 0.92)
+                  ? context.playerInk.withValues(alpha: 0.92)
                   : null,
               foreground: track.isFavorite
                   ? scheme.primary
-                  : Colors.white.withValues(alpha: 0.85),
+                  : context.playerInk.withValues(alpha: 0.85),
               onTap: () => ref
                   .read(libraryRepositoryProvider)
                   .setFavorite(track.id, favorite: !track.isFavorite),
@@ -917,7 +947,7 @@ class _Details extends ConsumerWidget {
               icon: Icons.format_quote,
               label: 'Show lyrics',
               size: 46,
-              foreground: Colors.white.withValues(alpha: 0.90),
+              foreground: context.playerInk.withValues(alpha: 0.90),
               onTap: onShowLyrics,
             ),
           ],
@@ -1027,8 +1057,8 @@ class _PlayPillState extends State<_PlayPill> {
             duration: const Duration(milliseconds: 240),
             curve: Curves.easeOutBack,
             child: Material(
-              color: kPlayerGlassFill,
-              shape: const StadiumBorder(side: kPlayerGlassRim),
+              color: context.playerGlass(),
+              shape: StadiumBorder(side: context.playerGlassRim),
               clipBehavior: Clip.antiAlias,
               child: InkWell(
                 onTap: widget.onTap,
@@ -1037,11 +1067,11 @@ class _PlayPillState extends State<_PlayPill> {
                   height: 56,
                   child: Center(
                     child: widget.busy
-                        ? const SizedBox.square(
+                        ? SizedBox.square(
                             dimension: 28,
                             child: CircularProgressIndicator(
                               strokeWidth: 3,
-                              color: Colors.white,
+                              color: context.playerInk,
                             ),
                           )
                         : Padding(
@@ -1056,7 +1086,7 @@ class _PlayPillState extends State<_PlayPill> {
                                         ? Icons.pause
                                         : Icons.play_arrow,
                                     size: 28,
-                                    color: Colors.white,
+                                    color: context.playerInk,
                                   ),
                                   const SizedBox(width: 8),
                                   Text(
@@ -1065,7 +1095,7 @@ class _PlayPillState extends State<_PlayPill> {
                                       size: 16,
                                       lineHeight: 24,
                                       weight: 540,
-                                    ).copyWith(color: Colors.white),
+                                    ).copyWith(color: context.playerInk),
                                   ),
                                 ],
                               ),
@@ -1167,7 +1197,7 @@ class _ModeButton extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final foreground = active
         ? scheme.onPrimaryContainer
-        : Colors.white.withValues(alpha: 0.85);
+        : context.playerInk.withValues(alpha: 0.85);
     return Tooltip(
       message: label,
       excludeFromSemantics: true,
@@ -1179,9 +1209,9 @@ class _ModeButton extends StatelessWidget {
         child: Material(
           color: active
               ? scheme.primaryContainer.withValues(alpha: 0.86)
-              : kPlayerGlassFill,
+              : context.playerGlass(),
           shape: StadiumBorder(
-            side: active ? BorderSide.none : kPlayerGlassRim,
+            side: active ? BorderSide.none : context.playerGlassRim,
           ),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
@@ -1239,17 +1269,17 @@ class _QualityPill extends ConsumerWidget {
     final description = badges.atmos
         ? 'Dolby Atmos'
         : (badges.lossless ? 'Lossless quality' : 'Audio quality');
-    final color = Colors.white.withValues(alpha: 0.95);
+    final color = context.playerInk.withValues(alpha: 0.95);
 
     return Semantics(
       button: track != null,
       label: track == null ? null : '$description: $label',
       excludeSemantics: true,
       child: Material(
-        color: kPlayerGlassFill,
+        color: context.playerGlass(),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(24),
-          side: kPlayerGlassRim,
+          side: context.playerGlassRim,
         ),
         clipBehavior: Clip.antiAlias,
         child: InkWell(

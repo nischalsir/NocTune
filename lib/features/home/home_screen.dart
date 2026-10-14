@@ -43,6 +43,11 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class HomeScreenState extends ConsumerState<HomeScreen> {
+  // The list card shows about seven rows and scrolls the rest; a list this
+  // short or shorter is laid out whole instead.
+  static const _listHeight = 448.0;
+  static const _shortList = 6;
+
   HomeSort _sort = HomeSort.recent;
 
   // The search field keeps its text, cursor and keyboard as it moves between
@@ -279,6 +284,17 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     for (final row in rows) {
       if (row is TrackRow) queueIndex[row] = queueIndex.length;
     }
+    // The first column numbers the rows, leaving out the track in the
+    // player, which is marked by its own pill, and the day headings.
+    final numbers = <HomeRow, int>{};
+    for (final row in rows) {
+      if (row is DateHeaderRow || (row is TrackRow && row.isNowPlaying)) {
+        continue;
+      }
+      numbers[row] = numbers.length + 1;
+    }
+    final localizations = MaterialLocalizations.of(context);
+    final use24Hour = MediaQuery.alwaysUse24HourFormatOf(context);
 
     Widget buildRow(BuildContext context, int index) {
       final row = rows[index];
@@ -286,10 +302,24 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
         key: ValueKey(row.key),
         child: switch (row) {
           DateHeaderRow(:final label) => HomeDateHeader(label: label),
-          TrackRow(:final track, :final badge, :final isNowPlaying) =>
+          TrackRow(
+            :final track,
+            :final badge,
+            :final isNowPlaying,
+            :final playedAt,
+          ) =>
             HomeTrackRow(
               track: track,
-              badge: badge,
+              number: numbers[row],
+              // In the play log the last column is when it was played, with
+              // how many times that day under it; elsewhere, the plays.
+              value: playedAt == null
+                  ? badge
+                  : localizations.formatTimeOfDay(
+                      TimeOfDay.fromDateTime(playedAt),
+                      alwaysUse24HourFormat: use24Hour,
+                    ),
+              detail: playedAt == null ? null : badge,
               isNowPlaying: isNowPlaying,
               isPlaying: isPlaying,
               // The track in the player opens the player rather than
@@ -303,11 +333,13 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           AlbumRow(:final album) => HomeGroupRow(
             group: album,
+            number: numbers[row],
             isArtist: false,
             onTap: () => _openGroup(TrackGroup.album, album.name),
           ),
           ArtistRow(:final artist) => HomeGroupRow(
             group: artist,
+            number: numbers[row],
             isArtist: true,
             onTap: () => _openGroup(TrackGroup.artist, artist.name),
           ),
@@ -427,9 +459,39 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
                     else
                       SliverPadding(
                         padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                        sliver: SliverList.builder(
-                          itemCount: rows.length,
-                          itemBuilder: buildRow,
+                        sliver: SliverToBoxAdapter(
+                          child: Column(
+                            children: [
+                              HomeListColumns(
+                                title: switch (_sort) {
+                                  HomeSort.topArtists => 'Artist',
+                                  HomeSort.topAlbums => 'Album',
+                                  _ => 'Song',
+                                },
+                                value: _sort == HomeSort.recent
+                                    ? 'Played'
+                                    : 'Plays',
+                                menu:
+                                    _sort != HomeSort.topArtists &&
+                                    _sort != HomeSort.topAlbums,
+                              ),
+                              // A table of its own height that scrolls
+                              // inside the card, so the page stays the same
+                              // length however much has been played. Short
+                              // lists take only the room they need.
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxHeight: _listHeight,
+                                ),
+                                child: ListView.builder(
+                                  shrinkWrap: rows.length <= _shortList,
+                                  padding: EdgeInsets.zero,
+                                  itemCount: rows.length,
+                                  itemBuilder: buildRow,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                   ],

@@ -66,6 +66,8 @@ final _timeTag = RegExp(r'^(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?$');
 final _offsetTag = RegExp(r'^offset\s*:\s*([+-]?\d+)$', caseSensitive: false);
 final _metadataTag = RegExp(r'^[a-zA-Z#]+\s*:');
 final _wordTime = RegExp(r'<(\d{1,3}):(\d{1,2})(?:[.:](\d{1,3}))?>');
+// Who sings the line in duet lyrics converted from Apple Music, e.g. "v1:".
+final _singerMark = RegExp(r'^v\d+:\s*');
 
 /// How many untimed lines directly under a timed one are taken as part of
 /// it. More than this is not a wrapped lyric but stray text.
@@ -91,7 +93,8 @@ class _Timed {
 /// Understands `[mm:ss]`, `[mm:ss.xx]` and `[mm:ss.xxx]` stamps, several
 /// stamps on one line, the `[offset:±ms]` tag, and skips information tags
 /// such as `[ar:…]`. Word-level `<mm:ss.xx>` stamps are kept as the times of
-/// the line's words.
+/// the line's words. The singer marks of duet lyrics (`v1:`, `v2:` at the
+/// start of a line) are dropped.
 ///
 /// Files in the wild are untidy, so for synced lyrics:
 /// - lines that share a timestamp (a lyric and its translation, say) become
@@ -133,6 +136,7 @@ Lyrics? parseLyrics(String source) {
       }
       rest = rest.substring(match.end).trimLeft();
     }
+    rest = rest.replaceFirst(_singerMark, '');
 
     final (:text, :words, :end) = _splitWords(rest);
     if (times.isNotEmpty) {

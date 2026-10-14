@@ -206,10 +206,12 @@ void main() {
     final (_, container) = await _pump(tester);
     await _reveal(tester, find.text('Wave seek bar'));
     final toggle = find.descendant(
-      of: find.ancestor(
-        of: find.text('Wave seek bar'),
-        matching: find.byType(ListTile),
-      ),
+      of: find
+          .ancestor(
+            of: find.text('Wave seek bar'),
+            matching: find.byType(InkWell),
+          )
+          .first,
       matching: find.byType(CupertinoSwitch),
     );
     expect(tester.widget<CupertinoSwitch>(toggle).value, isTrue);

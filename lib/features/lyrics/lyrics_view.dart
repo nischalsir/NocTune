@@ -15,6 +15,7 @@ import '../../core/motion.dart';
 import '../../core/theme/flex_type.dart';
 import '../../data/models/track.dart';
 import '../playback/noc_audio_handler.dart';
+import '../playback/player_colors.dart';
 import '../playback/player_glass_button.dart';
 import '../playback/player_seek_bar.dart';
 import '../settings/settings_controller.dart';
@@ -114,7 +115,6 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
         key: ValueKey('synced-${track.id}'),
         trackId: track.id,
         lyrics: found.lyrics,
-        origin: found.origin,
         scale: scale,
       );
     } else {
@@ -179,7 +179,7 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
                             : null,
                         foreground: _showSizeSlider || scale != 1
                             ? Theme.of(context).colorScheme.primary
-                            : Colors.white.withValues(alpha: 0.90),
+                            : context.playerInk.withValues(alpha: 0.90),
                         onTap: () =>
                             setState(() => _showSizeSlider = !_showSizeSlider),
                       ),
@@ -192,7 +192,7 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
                             ? 'Exit fullscreen lyrics'
                             : 'Fullscreen lyrics',
                         pressedScale: 0.82,
-                        foreground: Colors.white.withValues(alpha: 0.90),
+                        foreground: context.playerInk.withValues(alpha: 0.90),
                         onTap: widget.onToggleFullscreen,
                       ),
                     ],
@@ -228,18 +228,18 @@ class _Loading extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const SizedBox.square(
+          SizedBox.square(
             dimension: 42,
             child: CircularProgressIndicator(
               strokeWidth: 3.5,
-              color: Colors.white,
+              color: context.playerInk,
             ),
           ),
           const SizedBox(height: 16),
           Text(
             'Finding lyrics…',
             style: FlexType.bodyLarge.copyWith(
-              color: Colors.white.withValues(alpha: 0.70),
+              color: context.playerInk.withValues(alpha: 0.70),
             ),
           ),
         ],
@@ -266,13 +266,13 @@ class _Empty extends StatelessWidget {
             Icon(
               Icons.lyrics,
               size: 42,
-              color: Colors.white.withValues(alpha: 0.90),
+              color: context.playerInk.withValues(alpha: 0.90),
             ),
             const SizedBox(height: 14),
             Text(
               failed ? "Couldn't read the lyrics" : 'No lyrics',
               textAlign: TextAlign.center,
-              style: FlexType.headlineSmall.copyWith(color: Colors.white),
+              style: FlexType.headlineSmall.copyWith(color: context.playerInk),
             ),
             const SizedBox(height: 14),
             Text(
@@ -282,7 +282,7 @@ class _Empty extends StatelessWidget {
                         'can add them from an .lrc or text file.',
               textAlign: TextAlign.center,
               style: FlexType.bodyMedium.copyWith(
-                color: Colors.white.withValues(alpha: 0.70),
+                color: context.playerInk.withValues(alpha: 0.70),
               ),
             ),
             const SizedBox(height: 20),
@@ -316,14 +316,14 @@ class _PlainLyrics extends StatelessWidget {
               Icon(
                 Icons.sync_disabled,
                 size: 16,
-                color: Colors.white.withValues(alpha: 0.90),
+                color: context.playerInk.withValues(alpha: 0.90),
               ),
               const SizedBox(width: 8),
               Flexible(
                 child: Text(
                   'Lyrics not time-synced',
                   style: FlexType.labelSmall.copyWith(
-                    color: Colors.white.withValues(alpha: 0.70),
+                    color: context.playerInk.withValues(alpha: 0.70),
                   ),
                 ),
               ),
@@ -343,7 +343,7 @@ class _PlainLyrics extends StatelessWidget {
                 width: 102,
                 round: 18,
                 letterSpacing: 0.1,
-              ).copyWith(color: Colors.white.withValues(alpha: 0.94)),
+              ).copyWith(color: context.playerInk.withValues(alpha: 0.94)),
             ),
           ),
         ],
@@ -404,13 +404,11 @@ class _SyncedLyrics extends ConsumerStatefulWidget {
     super.key,
     required this.trackId,
     required this.lyrics,
-    required this.origin,
     required this.scale,
   });
 
   final int trackId;
   final Lyrics lyrics;
-  final LyricsOrigin origin;
   final double scale;
 
   @override
@@ -691,27 +689,6 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
       padding: const EdgeInsets.only(top: 8),
       child: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-              decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.16),
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Text(
-                // Says which kind of timing the file really has.
-                '${widget.lyrics.wordSynced ? 'WORD SYNC' : 'LINE SYNC'} '
-                '• ${widget.origin.label}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: FlexType.labelSmall.copyWith(
-                  letterSpacing: 0.6,
-                  color: Colors.white.withValues(alpha: 0.92),
-                ),
-              ),
-            ),
-          ),
           Expanded(
             child: LayoutBuilder(
               builder: (context, box) {
@@ -987,8 +964,8 @@ class _LyricRowState extends State<_LyricRow> {
                         child: LyricFill(
                           text: shown,
                           style: widget.style.copyWith(
-                            color: Colors.white,
-                            shadows: _LyricTextState.glow,
+                            color: context.playerInk,
+                            shadows: _LyricTextState.glowOf(context),
                           ),
                           units: lyricUnits(
                             widget.line,
@@ -1095,7 +1072,12 @@ class _LyricText extends StatefulWidget {
 
 class _LyricTextState extends State<_LyricText>
     with SingleTickerProviderStateMixin {
-  static const glow = [Shadow(color: Color(0x80FFFFFF), blurRadius: 8)];
+  /// A soft light around the line being sung. Only on the dark player: on
+  /// the light one it would only smudge the dark text.
+  static List<Shadow>? glowOf(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark
+      ? const [Shadow(color: Color(0x80FFFFFF), blurRadius: 8)]
+      : null;
 
   late final _mix = AnimationController(
     vsync: this,
@@ -1152,8 +1134,8 @@ class _LyricTextState extends State<_LyricText>
           child: Text(
             widget.text,
             style: widget.style.copyWith(
-              color: Colors.white.withValues(alpha: white),
-              shadows: widget.glow ? glow : null,
+              color: context.playerInk.withValues(alpha: white),
+              shadows: widget.glow ? glowOf(context) : null,
             ),
           ),
         )
@@ -1174,9 +1156,12 @@ class _LyricTextState extends State<_LyricText>
           : Duration.zero,
       curve: Curves.fastOutSlowIn,
       builder: (context, brightness, _) {
-        // One sharp layer carries its brightness in its colour, which costs
-        // nothing. Anything else is drawn in white and dimmed as a whole.
-        final inColour = from == null && widget.softness == 0;
+        // One sharp layer at full brightness is simply drawn. Anything else
+        // is drawn solid and dimmed as a whole: dimmed through its colour,
+        // letters that overlap, as Devanagari ones do along their top
+        // line, would show lighter seams where they cross.
+        final inColour =
+            from == null && widget.softness == 0 && brightness >= 1;
         return Opacity(
           opacity: inColour ? 1 : brightness,
           child: Stack(
@@ -1266,7 +1251,7 @@ class _SoftTextState extends State<_SoftText> {
           padding: widget.padding,
           child: Text(
             widget.text,
-            style: widget.style.copyWith(color: Colors.white),
+            style: widget.style.copyWith(color: context.playerInk),
           ),
         ),
       ),
@@ -1290,7 +1275,7 @@ class _SizeSlider extends ConsumerWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.35),
+          color: context.playerShade.withValues(alpha: 0.35),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Column(
@@ -1302,7 +1287,7 @@ class _SizeSlider extends ConsumerWidget {
                   child: Text(
                     'Lyrics size: ${(scale * 100).round()}%',
                     style: FlexType.labelMedium.copyWith(
-                      color: Colors.white.withValues(alpha: 0.90),
+                      color: context.playerInk.withValues(alpha: 0.90),
                     ),
                   ),
                 ),
@@ -1327,7 +1312,7 @@ class _SizeSlider extends ConsumerWidget {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
-                      color: Colors.white.withValues(alpha: 0.70),
+                      color: context.playerInk.withValues(alpha: 0.70),
                     ),
                   ),
                 ),
@@ -1347,7 +1332,7 @@ class _SizeSlider extends ConsumerWidget {
                     style: TextStyle(
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
-                      color: Colors.white.withValues(alpha: 0.95),
+                      color: context.playerInk.withValues(alpha: 0.95),
                     ),
                   ),
                 ),
@@ -1388,7 +1373,7 @@ class _Transport extends ConsumerWidget {
         : position;
     final remaining = duration - shown;
     final timeStyle = FlexType.labelSmall.copyWith(
-      color: Colors.white.withValues(alpha: 0.85),
+      color: context.playerInk.withValues(alpha: 0.85),
       fontFeatures: const [FontFeature.tabularFigures()],
     );
     NocAudioHandler handler() => ref.read(audioHandlerProvider);
@@ -1408,14 +1393,14 @@ class _Transport extends ConsumerWidget {
           ),
           const SizedBox(width: 16),
           if (busy)
-            const SizedBox.square(
+            SizedBox.square(
               dimension: 56,
               child: Center(
                 child: SizedBox.square(
                   dimension: 24,
                   child: CircularProgressIndicator(
                     strokeWidth: 2.5,
-                    color: Colors.white,
+                    color: context.playerInk,
                   ),
                 ),
               ),

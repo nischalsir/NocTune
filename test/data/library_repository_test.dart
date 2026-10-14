@@ -426,13 +426,16 @@ void main() {
     );
 
     test(
-      'listening time counts each play at the length of its track',
+      'listening time is the time actually listened, not track lengths',
       () async {
+        await repository.addListenedTime(ids['A']!, const Duration(seconds: 40));
+        await repository.addListenedTime(ids['C']!, const Duration(seconds: 15));
+        await repository.addListenedTime(ids['C']!, const Duration(seconds: 5));
+
         final stats = await repository.stats();
 
         expect(stats.playCount, 4);
-        // A once (100 s), B once (200 s), C twice (300 s each).
-        expect(stats.listenedDuration, const Duration(seconds: 900));
+        expect(stats.listenedDuration, const Duration(seconds: 60));
       },
     );
 
@@ -453,6 +456,7 @@ void main() {
 
     test('clearing the history resets plays and nothing else', () async {
       await repository.setFavorite(ids['A']!, favorite: true);
+      await repository.addListenedTime(ids['A']!, const Duration(seconds: 40));
 
       await repository.clearListeningHistory();
 

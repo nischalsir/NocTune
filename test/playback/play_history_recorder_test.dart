@@ -16,6 +16,7 @@ void main() {
   late StreamController<bool> playing;
   late PlayHistoryRecorder recorder;
   late Map<String, MediaItem> media;
+  late DateTime now;
 
   setUpAll(sqfliteFfiInit);
 
@@ -42,10 +43,12 @@ void main() {
     };
     items = StreamController<MediaItem?>();
     playing = StreamController<bool>();
+    now = DateTime(2026, 10, 14, 9);
     recorder = PlayHistoryRecorder(
       repository: repository,
       mediaItems: items.stream,
       playing: playing.stream,
+      now: () => now,
     );
   });
 
@@ -93,6 +96,78 @@ void main() {
 
     expect(await counts(), {'A': 2, 'B': 1});
     expect((await repository.recentlyPlayed()).first.title, 'A');
+  });
+
+  test('playing on the track the last session was partway through is not '
+      'another play', () async {
+    recorder.dispose();
+    items = StreamController<MediaItem?>();
+    playing = StreamController<bool>();
+    final restored = media['A']!.extras![kTrackIdExtra] as int;
+    recorder = PlayHistoryRecorder(
+      repository: repository,
+      mediaItems: items.stream,
+      playing: playing.stream,
+      resumedTrackId: restored,
+      now: () => now,
+    );
+
+    // Launch: the track comes back paused, then the user presses play.
+    items.add(media['A']);
+    playing.add(false);
+    await pumpEventQueue();
+    playing.add(true);
+    expect(await counts(), {'A': 0, 'B': 0});
+
+    // Moving on and coming back to it later is a new play.
+    items.add(media['B']);
+    await pumpEventQueue();
+    items.add(media['A']);
+    expect(await counts(), {'A': 1, 'B': 1});
+  });
+
+  Future<Duration> listened() async {
+    await pumpEventQueue();
+    return (await repository.stats()).listenedDuration;
+  }
+
+  test('adds only the time listened when a track is skipped', () async {
+    items.add(media['A']);
+    playing.add(true);
+    await pumpEventQueue();
+    now = now.add(const Duration(seconds: 40));
+    items.add(media['B']);
+
+    expect(await listened(), const Duration(seconds: 40));
+  });
+
+  test('pausing and resuming adds each stretch once', () async {
+    items.add(media['A']);
+    playing.add(true);
+    await pumpEventQueue();
+    now = now.add(const Duration(seconds: 30));
+    playing.add(false);
+    await pumpEventQueue();
+    // Time spent paused is not listening.
+    now = now.add(const Duration(minutes: 5));
+    playing.add(true);
+    await pumpEventQueue();
+    now = now.add(const Duration(seconds: 20));
+    expect(recorder.unsaved, const Duration(seconds: 20));
+    playing.add(false);
+
+    expect(await listened(), const Duration(seconds: 50));
+    expect(recorder.unsaved, Duration.zero);
+  });
+
+  test('a track only cued up adds no listening time', () async {
+    items.add(media['A']);
+    playing.add(false);
+    await pumpEventQueue();
+    now = now.add(const Duration(minutes: 3));
+    items.add(media['B']);
+
+    expect(await listened(), Duration.zero);
   });
 
   test('stores a length the player measured for an unmeasured file', () async {

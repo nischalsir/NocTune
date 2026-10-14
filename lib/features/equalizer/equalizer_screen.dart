@@ -43,6 +43,9 @@ class EqualizerScreen extends ConsumerWidget {
                 // Read out as one switch with its title.
                 child: MergeSemantics(
                   child: ListTile(
+                    // The same inset as the preamp card, so the switch ends
+                    // where its figure does.
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                     title: Text(on ? 'On' : 'Off'),
                     subtitle: Text(
                       on
@@ -131,6 +134,8 @@ class EqualizerScreen extends ConsumerWidget {
                       ),
                       Slider(
                         key: const ValueKey('equalizer-preamp'),
+                        // The track starts and ends with the text.
+                        padding: const EdgeInsets.symmetric(vertical: 12),
                         value: settings.preampDb,
                         min: EqualizerSettings.minPreampDb,
                         max: EqualizerSettings.maxPreampDb,
@@ -156,26 +161,30 @@ class EqualizerScreen extends ConsumerWidget {
                 ignoring: !on,
                 child: Opacity(
                   opacity: on ? 1 : 0.5,
-                  child: Wrap(
-                    spacing: 4,
-                    children: [
-                      TextButton(
-                        onPressed: () async {
-                          final name = await _askName(context);
-                          if (name != null) controller.save(name);
-                        },
-                        child: const Text('Save as preset'),
-                      ),
-                      if (savedName != null)
+                  // The buttons' words start on the cards' text edge.
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Wrap(
+                      spacing: 4,
+                      children: [
                         TextButton(
-                          onPressed: () => controller.delete(savedName),
-                          child: Text('Delete "$savedName"'),
+                          onPressed: () async {
+                            final name = await _askName(context);
+                            if (name != null) controller.save(name);
+                          },
+                          child: const Text('Save as preset'),
                         ),
-                      TextButton(
-                        onPressed: controller.reset,
-                        child: const Text('Reset'),
-                      ),
-                    ],
+                        if (savedName != null)
+                          TextButton(
+                            onPressed: () => controller.delete(savedName),
+                            child: Text('Delete "$savedName"'),
+                          ),
+                        TextButton(
+                          onPressed: controller.reset,
+                          child: const Text('Reset'),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),

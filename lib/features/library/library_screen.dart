@@ -7,7 +7,6 @@ import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../core/widgets/frosted.dart';
-import '../../core/widgets/glass_circle.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/repositories/library_repository.dart';
 import 'collection_screen.dart';
@@ -34,8 +33,9 @@ enum LibrarySection {
 /// The whole library, browsable by track, album, artist, playlist, genre or
 /// folder, with the favourites a tap away and a search of its own.
 ///
-/// From the top: round glass buttons for searching, bringing music in and
-/// sorting, the title, the chips, and the list they choose.
+/// From the top: the title, a wide search button with scanning and
+/// sorting on its right, each with a word saying what it does, the chips,
+/// and the list they choose. The chosen chip is kept across launches.
 class LibraryScreen extends ConsumerStatefulWidget {
   const LibraryScreen({super.key});
 
@@ -44,7 +44,18 @@ class LibraryScreen extends ConsumerStatefulWidget {
 }
 
 class _LibraryScreenState extends ConsumerState<LibraryScreen> {
-  LibrarySection _section = LibrarySection.tracks;
+  static const _sectionKey = 'library_section';
+
+  late LibrarySection _section =
+      LibrarySection.values.asNameMap()[ref
+          .read(sharedPreferencesProvider)
+          .getString(_sectionKey)] ??
+      LibrarySection.tracks;
+
+  void _choose(LibrarySection section) {
+    setState(() => _section = section);
+    ref.read(sharedPreferencesProvider).setString(_sectionKey, section.name);
+  }
 
   // The search takes the place of the buttons and title while it is open,
   // and its results the place of the list once something is typed.
@@ -139,24 +150,37 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
             else ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    _HeaderButton(
-                      icon: Icons.search_rounded,
-                      label: 'Search the library',
-                      onTap: () => setState(() => _searching = true),
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    'Your library',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
                     ),
-                    const SizedBox(width: 8),
-                    _HeaderButton(
-                      icon: Icons.file_open_outlined,
-                      label: 'Import files',
-                      onTap: scanning ? null : scanController.importFiles,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                child: Row(
+                  children: [
+                    // Wide, like the search field it opens into.
+                    Expanded(
+                      child: _HeaderButton(
+                        icon: Icons.search_rounded,
+                        label: 'Search',
+                        tooltip: 'Search the library',
+                        wide: true,
+                        onTap: () => setState(() => _searching = true),
+                      ),
                     ),
                     const SizedBox(width: 8),
                     _HeaderButton(
                       icon: Icons.refresh_rounded,
-                      label: 'Rescan library',
+                      label: 'Scan',
+                      tooltip: 'Rescan library',
                       onTap: scanning ? null : scanController.scan,
                     ),
                     if (_section == LibrarySection.tracks) ...[
@@ -179,24 +203,13 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                               ),
                             ),
                         ],
-                        child: const GlassCircle(Icons.sort_rounded),
+                        child: const _HeaderPill(
+                          icon: Icons.sort_rounded,
+                          label: 'Sort',
+                        ),
                       ),
                     ],
                   ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                child: Semantics(
-                  header: true,
-                  child: Text(
-                    'Your library',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: text.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
                 ),
               ),
             ],
@@ -212,7 +225,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                       _SectionChip(
                         label: section.label,
                         selected: section == _section,
-                        onTap: () => setState(() => _section = section),
+                        onTap: () => _choose(section),
                       ),
                       // The favourites are a page of their own, opened from
                       // their place among the chips.
@@ -273,32 +286,76 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
   }
 }
 
-/// A round glass button at the top of the library. Without [onTap] it is
-/// dimmed and does nothing.
+/// A glass button at the top of the library: an icon and the word for
+/// what it does. Without [onTap] it is dimmed and does nothing.
 class _HeaderButton extends StatelessWidget {
   const _HeaderButton({
     required this.icon,
     required this.label,
+    required this.tooltip,
     required this.onTap,
+    this.wide = false,
   });
 
   final IconData icon;
   final String label;
+  final String tooltip;
   final VoidCallback? onTap;
+
+  /// Fills the width it is given, its word in the quieter colour of a
+  /// field's hint, as the search does.
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
     final onTap = this.onTap;
+    final pill = _HeaderPill(icon: icon, label: label, wide: wide);
     return Tooltip(
-      message: label,
+      message: tooltip,
       excludeFromSemantics: true,
       child: onTap == null
-          ? Opacity(opacity: 0.4, child: GlassCircle(icon))
-          : Pressable(
-              semanticLabel: label,
-              onTap: onTap,
-              child: GlassCircle(icon),
+          ? Opacity(opacity: 0.4, child: pill)
+          : Pressable(semanticLabel: tooltip, onTap: onTap, child: pill),
+    );
+  }
+}
+
+/// The face of a header button, in the glass finish of the chips below it.
+class _HeaderPill extends StatelessWidget {
+  const _HeaderPill({
+    required this.icon,
+    required this.label,
+    this.wide = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool wide;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final color = wide ? palette.textSecondary : palette.textPrimary;
+    return Frosted(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 9, 16, 9),
+        child: Row(
+          mainAxisSize: wide ? MainAxisSize.max : MainAxisSize.min,
+          children: [
+            Icon(icon, size: 20, color: color),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: Theme.of(context).textTheme.labelLarge
+                    ?.copyWith(color: color),
+              ),
             ),
+          ],
+        ),
+      ),
     );
   }
 }

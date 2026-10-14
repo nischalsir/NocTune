@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/theme/flex_type.dart';
+import 'player_colors.dart';
 
 /// The seek bar of the player and the lyrics view, for a dark backdrop.
 ///
@@ -72,6 +73,7 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final ink = context.playerInk;
     final total = widget.duration;
     final position = ref.watch(playbackPositionProvider).value ?? Duration.zero;
     final playing = ref.watch(
@@ -140,6 +142,7 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
                           primary: primary,
                           secondary: _luminous(scheme.secondary, 0.52),
                           tertiary: _luminous(scheme.tertiary, 0.48),
+                          track: ink.withValues(alpha: 0.22),
                         ),
                       ),
                     )
@@ -147,9 +150,8 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
                       size: Size(width, 44),
                       painter: _BarPainter(
                         fraction: fraction,
-                        color: enabled
-                            ? primary
-                            : Colors.white.withValues(alpha: 0.34),
+                        color: enabled ? primary : ink.withValues(alpha: 0.34),
+                        track: ink.withValues(alpha: 0.20),
                       ),
                     ),
             ),
@@ -161,7 +163,7 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
 
     final timeStyle = FlexType.custom(size: 12, lineHeight: 16, weight: 480)
         .copyWith(
-          color: Colors.white.withValues(alpha: 0.85),
+          color: context.playerInk.withValues(alpha: 0.85),
           fontFeatures: const [FontFeature.tabularFigures()],
         );
     return Column(
@@ -201,10 +203,17 @@ Color _luminous(Color color, double minLightness) {
 
 /// A thick rounded track split around a tall handle, with a dot at the end.
 class _BarPainter extends CustomPainter {
-  const _BarPainter({required this.fraction, required this.color});
+  const _BarPainter({
+    required this.fraction,
+    required this.color,
+    required this.track,
+  });
 
   final double fraction;
   final Color color;
+
+  /// The part of the track not yet played.
+  final Color track;
 
   static const _trackHeight = 14.0;
   static const _thumbWidth = 5.0;
@@ -240,7 +249,7 @@ class _BarPainter extends CustomPainter {
           Rect.fromLTRB(inactiveStart, top, size.width, top + _trackHeight),
           radius,
         ),
-        Paint()..color = Colors.white.withValues(alpha: 0.20),
+        Paint()..color = track,
       );
       final endX = size.width - _trackHeight / 2;
       if (endX > inactiveStart + 4) {
@@ -266,7 +275,7 @@ class _BarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(_BarPainter old) =>
-      old.fraction != fraction || old.color != color;
+      old.fraction != fraction || old.color != color || old.track != track;
 }
 
 class _WavePainter extends CustomPainter {
@@ -277,6 +286,7 @@ class _WavePainter extends CustomPainter {
     required this.primary,
     required this.secondary,
     required this.tertiary,
+    required this.track,
   }) : super(repaint: drift);
 
   final Animation<double> drift;
@@ -287,6 +297,9 @@ class _WavePainter extends CustomPainter {
   final Color primary;
   final Color secondary;
   final Color tertiary;
+
+  /// The flat line ahead of the thumb.
+  final Color track;
 
   static const _trackThickness = 4.5;
   static const _thumbRadius = 7.5;
@@ -307,7 +320,7 @@ class _WavePainter extends CustomPainter {
       Offset(thumbX, centerY),
       Offset(size.width, centerY),
       Paint()
-        ..color = Colors.white.withValues(alpha: 0.22)
+        ..color = track
         ..strokeWidth = _trackThickness
         ..strokeCap = StrokeCap.round,
     );
@@ -423,5 +436,6 @@ class _WavePainter extends CustomPainter {
       old.calm != calm ||
       old.primary != primary ||
       old.secondary != secondary ||
-      old.tertiary != tertiary;
+      old.tertiary != tertiary ||
+      old.track != track;
 }

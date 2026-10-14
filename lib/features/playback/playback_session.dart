@@ -29,6 +29,12 @@ class PlaybackSession {
 
   bool _wasPlaying = false;
 
+  /// The track the last session stopped partway through, which
+  /// [restoreAndTrack] brings back. The position only moves on while
+  /// playing, so a track with one was already counted as played.
+  int? get resumedTrackId =>
+      (_prefs.getInt(_positionKey) ?? 0) > 0 ? _prefs.getInt(_trackKey) : null;
+
   /// Reloads the saved queue, paused where it was left, then starts saving.
   Future<void> restoreAndTrack() async {
     final ids = [

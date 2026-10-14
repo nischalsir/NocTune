@@ -7,6 +7,7 @@ import '../data/models/playlist.dart';
 import '../data/models/track.dart';
 import '../data/repositories/library_repository.dart';
 import '../features/playback/noc_audio_handler.dart';
+import '../features/playback/play_history_recorder.dart';
 import '../features/playback/playback_mapping.dart';
 
 // ---- Services created in main() before the first frame ----
@@ -20,6 +21,10 @@ final sharedPreferencesProvider = Provider<SharedPreferences>(
 );
 
 final audioHandlerProvider = Provider<NocAudioHandler>(
+  (ref) => throw UnimplementedError('Overridden in main()'),
+);
+
+final playHistoryRecorderProvider = Provider<PlayHistoryRecorder>(
   (ref) => throw UnimplementedError('Overridden in main()'),
 );
 
@@ -56,9 +61,21 @@ LibraryRepository _liveRepository(Ref ref) {
 
 typedef TrackOrder = ({TrackSort sort, bool ascending});
 
+/// The order of the track list, kept across launches.
 class TrackOrderController extends Notifier<TrackOrder> {
+  static const _sortKey = 'library_sort';
+  static const _ascendingKey = 'library_sort_ascending';
+
   @override
-  TrackOrder build() => (sort: TrackSort.title, ascending: true);
+  TrackOrder build() {
+    final prefs = ref.watch(sharedPreferencesProvider);
+    return (
+      sort:
+          TrackSort.values.asNameMap()[prefs.getString(_sortKey)] ??
+          TrackSort.title,
+      ascending: prefs.getBool(_ascendingKey) ?? true,
+    );
+  }
 
   /// Picks a sort; choosing the current one again flips its direction.
   void select(TrackSort sort) {
@@ -66,6 +83,9 @@ class TrackOrderController extends Notifier<TrackOrder> {
       sort: sort,
       ascending: sort == state.sort ? !state.ascending : true,
     );
+    ref.read(sharedPreferencesProvider)
+      ..setString(_sortKey, state.sort.name)
+      ..setBool(_ascendingKey, state.ascending);
   }
 }
 
@@ -178,6 +198,13 @@ final queueProvider = StreamProvider<List<MediaItem>>(
 final playbackPositionProvider = StreamProvider<Duration>(
   (ref) => ref.watch(audioHandlerProvider).positionStream,
 );
+
+/// Listening to the current track not stored yet, refreshed as the
+/// position ticks so a running total counts up live.
+final unsavedListeningProvider = Provider<Duration>((ref) {
+  ref.watch(playbackPositionProvider.select((p) => p.value?.inSeconds));
+  return ref.watch(playHistoryRecorderProvider).unsaved;
+});
 
 /// The position at a finer grain, for the lyrics highlight. Only listened
 /// to while lyrics are on screen.

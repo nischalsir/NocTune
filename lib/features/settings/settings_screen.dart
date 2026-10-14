@@ -151,16 +151,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
           child: ListView(
             padding: EdgeInsets.fromLTRB(
               16,
-              4,
+              8,
               16,
               MediaQuery.paddingOf(context).bottom + 24,
             ),
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(0, 12, 0, 0),
-                child: Semantics(
-                  header: true,
-                  child: Text('Settings', style: text.headlineSmall),
+              // As the Library's title, on the same edge as the cards.
+              Semantics(
+                header: true,
+                child: Text(
+                  'Settings',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: text.headlineMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
 
@@ -225,6 +230,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     child: Column(
                       children: [
                         Slider(
+                          // The track starts and ends with the text.
+                          padding: EdgeInsets.zero,
                           value: settings.navigationGlassClarity,
                           min: AppSettings.minGlassClarity,
                           divisions: 15,
@@ -295,6 +302,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       children: [
                         Expanded(
                           child: Slider(
+                            padding: EdgeInsets.zero,
                             value: settings.lyricsScale,
                             min: SettingsController.minLyricsScale,
                             max: SettingsController.maxLyricsScale,
@@ -314,7 +322,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ],
                     ),
                   ),
-                  const ListTile(
+                  const _Tile(
                     leading: _TileIcon(Icons.lyrics_rounded),
                     title: Text('Where lyrics come from'),
                     subtitle: Text(
@@ -329,7 +337,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _Group(
                 title: 'Audio',
                 children: [
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.surround_sound_rounded),
                     title: const Text('Dolby Atmos'),
                     subtitle: Text(switch (atmosDecoder) {
@@ -343,7 +351,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       null => 'Checking what this device can decode…',
                     }),
                   ),
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.graphic_eq_rounded),
                     title: const Text('Equaliser'),
                     subtitle: Text(ref.watch(equalizerProvider).summary),
@@ -361,7 +369,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 _Group(
                   title: 'Notification',
                   children: [
-                    ListTile(
+                    _Tile(
                       leading: const _TileIcon(Icons.notifications_rounded),
                       title: const Text('Playback notification'),
                       subtitle: Text(
@@ -385,7 +393,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 title: 'Library',
                 children: [
                   if (stats != null)
-                    ListTile(
+                    _Tile(
                       leading: const _TileIcon(Icons.library_music_rounded),
                       title: Text(
                         '${formatCount(stats.trackCount)} tracks · '
@@ -397,7 +405,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         'music on this device',
                       ),
                     ),
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.refresh_rounded),
                     title: const Text('Rescan library'),
                     subtitle: const Text(
@@ -405,7 +413,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                     onTap: ref.read(scanControllerProvider.notifier).scan,
                   ),
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.copy_all_rounded),
                     title: const Text('Find duplicates'),
                     subtitle: const Text('Lists tracks stored more than once'),
@@ -416,7 +424,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ),
                   ),
-                  ListTile(
+                  _Tile(
                     leading: _TileIcon(
                       Icons.history_toggle_off_rounded,
                       color: Theme.of(context).colorScheme.error,
@@ -434,7 +442,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _Group(
                 title: 'Privacy',
                 children: [
-                  const ListTile(
+                  const _Tile(
                     leading: _TileIcon(Icons.lock_rounded),
                     title: Text('Everything stays on this device'),
                     subtitle: Text(
@@ -443,7 +451,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       'works with no connection at all.',
                     ),
                   ),
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.cloud_off_rounded),
                     title: const Text('Network use'),
                     subtitle: Text(
@@ -462,7 +470,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               _Group(
                 title: 'About',
                 children: [
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.info_rounded),
                     title: const Text('NocTune'),
                     subtitle: Text(
@@ -473,7 +481,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     ),
                   ),
                   if (updatesConfigured)
-                    ListTile(
+                    _Tile(
                       leading: const _TileIcon(Icons.system_update_rounded),
                       title: const Text('Check for updates'),
                       subtitle: Text(
@@ -484,7 +492,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       enabled: !_checkingForUpdate,
                       onTap: _checkForUpdate,
                     ),
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.description_rounded),
                     title: const Text('Open-source licences'),
                     subtitle: const Text(
@@ -499,7 +507,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       applicationLegalese: '© 2026 Nischal Pandey',
                     ),
                   ),
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.code_rounded),
                     title: const Text('Source code'),
                     subtitle: const Text('github.com/nischalsir/NocTune'),
@@ -509,11 +517,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       fallback: 'github.com/nischalsir/NocTune',
                     ),
                   ),
-                  const ListTile(
+                  const _Tile(
                     leading: _TileIcon(Icons.person_rounded),
                     title: Text('Developed by Nischal Pandey'),
                   ),
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.camera_alt_rounded),
                     title: const Text('Instagram'),
                     subtitle: const Text('@nischal_sir'),
@@ -523,7 +531,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       fallback: 'Instagram: @nischal_sir',
                     ),
                   ),
-                  ListTile(
+                  _Tile(
                     leading: const _TileIcon(Icons.mail_rounded),
                     title: const Text('Email'),
                     subtitle: const Text('nischalpandey.dev@gmail.com'),
@@ -565,7 +573,7 @@ class _SwitchTile extends StatelessWidget {
   Widget build(BuildContext context) {
     // Read out as one switch with its title, not a row and a switch.
     return MergeSemantics(
-      child: ListTile(
+      child: _Tile(
         leading: _TileIcon(icon),
         title: Text(title),
         subtitle: Text(subtitle),
@@ -576,6 +584,76 @@ class _SwitchTile extends StatelessWidget {
           activeTrackColor: Theme.of(context).colorScheme.primary,
         ),
       ),
+    );
+  }
+}
+
+/// One row of a card: its icon, its title with a line or two under it, and
+/// a switch or an arrow at the end. Laid out as [_Block] is, so every icon
+/// and every control is level with its row's title, whatever is under it.
+class _Tile extends StatelessWidget {
+  const _Tile({
+    required this.leading,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.enabled = true,
+  });
+
+  final Widget leading;
+  final Widget title;
+  final Widget? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final subtitle = this.subtitle;
+    final trailing = this.trailing;
+    final row = Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          leading,
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 40),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: DefaultTextStyle.merge(
+                      style: text.bodyLarge,
+                      child: title,
+                    ),
+                  ),
+                ),
+                if (subtitle != null)
+                  DefaultTextStyle.merge(
+                    style: text.bodyMedium?.copyWith(
+                      color: context.noc.textSecondary,
+                    ),
+                    child: subtitle,
+                  ),
+              ],
+            ),
+          ),
+          if (trailing != null) ...[
+            const SizedBox(width: 12),
+            SizedBox(height: 40, child: Center(child: trailing)),
+          ],
+        ],
+      ),
+    );
+    return Opacity(
+      opacity: enabled ? 1 : 0.5,
+      child: InkWell(onTap: enabled ? onTap : null, child: row),
     );
   }
 }
@@ -595,7 +673,7 @@ class _Group extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.only(bottom: 8),
             child: Semantics(
               header: true,
               child: Text(

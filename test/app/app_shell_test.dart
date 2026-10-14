@@ -114,6 +114,7 @@ Future<void> _pumpApp(
           ),
         ),
         currentTrackProvider.overrideWith((ref) => currentTrack),
+        unsavedListeningProvider.overrideWithValue(Duration.zero),
         playbackPositionProvider.overrideWith(
           (ref) => Stream.value(Duration.zero),
         ),

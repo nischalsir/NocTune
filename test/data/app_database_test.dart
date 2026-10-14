@@ -183,4 +183,56 @@ void main() {
       await db.close();
     },
   );
+
+  test(
+    'a version 4 library carries its estimated listening time over',
+    () async {
+      final path =
+          '${Directory.systemTemp.createTempSync('noctune_db').path}/v4';
+      final v4 = await AppDatabase.open(path: path, factory: databaseFactoryFfi);
+      // Built at version 4 by hand: the current schema minus listened_ms.
+      await v4.close();
+      final old = await databaseFactoryFfi.openDatabase(path);
+      await old.execute('DROP TABLE tracks');
+      await old.execute('''
+        CREATE TABLE tracks(
+          id INTEGER PRIMARY KEY AUTOINCREMENT, uri TEXT NOT NULL UNIQUE,
+          file_name TEXT NOT NULL, folder TEXT NOT NULL,
+          title TEXT NOT NULL, artist TEXT, album TEXT, album_artist TEXT,
+          genre TEXT, duration_ms INTEGER NOT NULL DEFAULT 0,
+          size_bytes INTEGER NOT NULL DEFAULT 0, codec TEXT,
+          sample_rate INTEGER, bit_depth INTEGER, bitrate INTEGER,
+          track_no INTEGER, disc_no INTEGER, year INTEGER,
+          date_added INTEGER NOT NULL, date_modified INTEGER NOT NULL,
+          art_path TEXT, is_favorite INTEGER NOT NULL DEFAULT 0,
+          play_count INTEGER NOT NULL DEFAULT 0, last_played_at INTEGER,
+          reader_version INTEGER NOT NULL DEFAULT 1)''');
+      await old.insert('tracks', {
+        'uri': '/music/a.flac',
+        'file_name': 'a.flac',
+        'folder': '/music',
+        'title': 'Played',
+        'duration_ms': 180000,
+        'play_count': 3,
+        'date_added': 1,
+        'date_modified': 2,
+      });
+      await old.setVersion(4);
+      await old.close();
+
+      final db = await AppDatabase.open(path: path, factory: databaseFactoryFfi);
+      final repository = LibraryRepository(db);
+
+      // Three plays of a 3-minute track, as the old estimate had it.
+      expect((await repository.stats()).listenedDuration.inMinutes, 9);
+      final id = (await repository.tracks()).single.id;
+      await repository.addListenedTime(id, const Duration(seconds: 40));
+      expect(
+        (await repository.stats()).listenedDuration,
+        const Duration(minutes: 9, seconds: 40),
+      );
+      expect((await repository.tracks()).single.playCount, 3);
+      await db.close();
+    },
+  );
 }

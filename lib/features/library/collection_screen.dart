@@ -25,7 +25,7 @@ import 'track_picker.dart';
 import 'track_tile.dart';
 
 /// One thing the page's own menu offers.
-typedef _MenuItem = (String label, VoidCallback run);
+typedef _MenuItem = (IconData icon, String label, VoidCallback run);
 
 /// A page for the tracks of one album, artist, genre, folder or playlist, or
 /// for the favourites.
@@ -173,8 +173,29 @@ class _CollectionPage extends ConsumerWidget {
                       tooltip: menuTooltip,
                       onSelected: (run) => run(),
                       itemBuilder: (context) => [
-                        for (final (label, run) in menu)
-                          PopupMenuItem(value: run, child: Text(label)),
+                        for (final (icon, label, run) in menu)
+                          PopupMenuItem(
+                            value: run,
+                            height: 40,
+                            child: Row(
+                              children: [
+                                Icon(
+                                  icon,
+                                  color: Theme.of(context)
+                                      .colorScheme
+                                      .onSurfaceVariant,
+                                ),
+                                const SizedBox(width: 12),
+                                Flexible(
+                                  child: Text(
+                                    label,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                       ],
                       child: const GlassCircle(
                         Icons.more_horiz_rounded,
@@ -515,13 +536,15 @@ class FavouritesScreen extends ConsumerWidget {
       menuTooltip: 'Favourites options',
       menu: [
         (
+          Icons.image_outlined,
           'Change cover',
           () async {
             final picked = await ref.read(coverStoreProvider).pick();
             if (picked != null) await setCover(picked);
           },
         ),
-        if (cover != null) ('Remove cover', () => setCover(null)),
+        if (cover != null)
+          (Icons.hide_image_outlined, 'Remove cover', () => setCover(null)),
       ],
     );
   }
@@ -579,16 +602,19 @@ class PlaylistScreen extends ConsumerWidget {
       ),
       menuTooltip: 'Playlist options',
       menu: [
-        ('Add tracks', addTracks),
+        (Icons.add_rounded, 'Add tracks', addTracks),
         (
+          Icons.image_outlined,
           'Change cover',
           () async {
             final picked = await ref.read(coverStoreProvider).pick();
             if (picked != null) await setCover(picked);
           },
         ),
-        if (current.coverPath != null) ('Remove cover', () => setCover(null)),
+        if (current.coverPath != null)
+          (Icons.hide_image_outlined, 'Remove cover', () => setCover(null)),
         (
+          Icons.edit_outlined,
           'Rename',
           () async {
             final name = await askPlaylistName(
@@ -601,6 +627,7 @@ class PlaylistScreen extends ConsumerWidget {
           },
         ),
         (
+          Icons.delete_outline_rounded,
           'Delete playlist',
           () async {
             if (!await _confirmDelete(context, current.name)) return;

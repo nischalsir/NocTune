@@ -205,6 +205,15 @@ class LibraryRepository {
     _changes.add(null);
   }
 
+  /// Adds time spent listening to a track.
+  Future<void> addListenedTime(int trackId, Duration listened) async {
+    await _db.rawUpdate(
+      'UPDATE tracks SET listened_ms = listened_ms + ? WHERE id = ?',
+      [listened.inMilliseconds, trackId],
+    );
+    _changes.add(null);
+  }
+
   /// The play log, newest first: one entry for every time a track was played.
   Future<List<PlayedTrack>> playLog({int limit = 300}) async {
     final rows = await _db.rawQuery(
@@ -275,12 +284,15 @@ class LibraryRepository {
     return rows.map(TrackGroupSummary.fromRow).toList();
   }
 
-  /// Forgets what has been played: the log, the counts and "last played".
-  /// Tracks, favourites and playlists are untouched.
+  /// Forgets what has been played: the log, the counts, the listening time
+  /// and "last played". Tracks, favourites and playlists are untouched.
   Future<void> clearListeningHistory() async {
     final batch = _db.batch()
       ..delete('plays')
-      ..rawUpdate('UPDATE tracks SET play_count = 0, last_played_at = NULL');
+      ..rawUpdate(
+        'UPDATE tracks SET play_count = 0, listened_ms = 0, '
+        'last_played_at = NULL',
+      );
     await batch.commit(noResult: true);
     _changes.add(null);
   }
@@ -291,7 +303,7 @@ class LibraryRepository {
       'COUNT(DISTINCT artist) AS artists, '
       'COALESCE(SUM(duration_ms), 0) AS duration_ms, '
       'COALESCE(SUM(play_count), 0) AS plays, '
-      'COALESCE(SUM(duration_ms * play_count), 0) AS listened_ms FROM tracks',
+      'COALESCE(SUM(listened_ms), 0) AS listened_ms FROM tracks',
     )).single;
     return LibraryStats(
       trackCount: row['tracks']! as int,

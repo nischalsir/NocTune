@@ -66,6 +66,7 @@ void main() {
     WidgetTester tester, {
     String? current,
     bool playing = true,
+    Map<String, Object> saved = const {},
   }) async {
     // Wide enough that every section chip is on screen without scrolling.
     tester.view.physicalSize = const Size(900, 844);
@@ -103,7 +104,7 @@ void main() {
         : (await tester.runAsync(repository.tracks))!
               .firstWhere((track) => track.title == current);
     handler = _FakeHandler();
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues(saved);
     final preferences = await SharedPreferences.getInstance();
 
     await tester.pumpWidget(
@@ -323,5 +324,68 @@ void main() {
     expect(find.text('Road trip'), findsOneWidget);
     expect(find.text('This playlist is empty'), findsOneWidget);
     expect(find.text('Add tracks'), findsOneWidget);
+  });
+
+  testWidgets('the title is at the top, over buttons that say what they do', (
+    tester,
+  ) async {
+    await pump(tester);
+
+    final title = tester.getTopLeft(find.text('Your library'));
+    for (final label in ['Search', 'Scan', 'Sort']) {
+      expect(find.text(label), findsOneWidget);
+      expect(tester.getTopLeft(find.text(label)).dy, greaterThan(title.dy));
+    }
+    expect(find.byTooltip('Import files'), findsNothing);
+    // Search is the wide one; Scan and Sort sit to its right.
+    final search = tester.getRect(find.byTooltip('Search the library'));
+    final scan = tester.getRect(find.byTooltip('Rescan library'));
+    final sort = tester.getRect(find.byTooltip('Sort tracks'));
+    expect(search.width, greaterThan(scan.width * 2));
+    expect(scan.left, greaterThan(search.right));
+    expect(sort.left, greaterThan(scan.right));
+  });
+
+  testWidgets('remembers the sort order and the tab it was left on', (
+    tester,
+  ) async {
+    await pump(tester);
+
+    await tester.tap(find.text('Sort'));
+    await settle(tester);
+    await tester.tap(find.text('Artist'));
+    await settle(tester);
+    await tester.tap(find.text('Sort'));
+    await settle(tester);
+    await tester.tap(find.text('Artist ↑'));
+    await settle(tester);
+    await tester.tap(find.text('Albums'));
+    await settle(tester);
+
+    final preferences = await SharedPreferences.getInstance();
+    expect(preferences.getString('library_sort'), 'artist');
+    expect(preferences.getBool('library_sort_ascending'), isFalse);
+    expect(preferences.getString('library_section'), 'albums');
+  });
+
+  testWidgets('opens as it was left last time', (tester) async {
+    await pump(
+      tester,
+      saved: {
+        'library_sort': 'artist',
+        'library_sort_ascending': false,
+        'library_section': 'albums',
+      },
+    );
+
+    expect(find.text('Aurora · 2 tracks'), findsOneWidget);
+
+    await tester.tap(find.text('Tracks'));
+    await settle(tester);
+    // Artist, Z to A: Nova's track comes before Aurora's.
+    expect(
+      tester.getTopLeft(find.text('Three')).dy,
+      lessThan(tester.getTopLeft(find.text('One')).dy),
+    );
   });
 }

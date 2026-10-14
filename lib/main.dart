@@ -56,17 +56,18 @@ Future<void> main() async {
   // These two live for the whole process, not just while the UI is showing,
   // so listening history and the saved session stay correct in the background.
   final repository = LibraryRepository(database);
-  PlayHistoryRecorder(
+  final session = PlaybackSession(
+    preferences: preferences,
+    repository: repository,
+    handler: audioHandler,
+  );
+  final recorder = PlayHistoryRecorder(
     repository: repository,
     mediaItems: audioHandler.mediaItem,
     playing: audioHandler.playbackState
         .map((state) => state.playing)
         .distinct(),
-  );
-  final session = PlaybackSession(
-    preferences: preferences,
-    repository: repository,
-    handler: audioHandler,
+    resumedTrackId: session.resumedTrackId,
   );
   // The equaliser as the user left it. It finishes once a first track is
   // loaded, so it is not waited for here.
@@ -78,6 +79,7 @@ Future<void> main() async {
         libraryRepositoryProvider.overrideWithValue(repository),
         sharedPreferencesProvider.overrideWithValue(preferences),
         audioHandlerProvider.overrideWithValue(audioHandler),
+        playHistoryRecorderProvider.overrideWithValue(recorder),
         appPathsProvider.overrideWithValue((
           artworkDir: p.join(cacheDir.path, 'artwork'),
           musicDir: documentsDir.path,

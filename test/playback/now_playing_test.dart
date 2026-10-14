@@ -448,10 +448,9 @@ void main() {
       await open(tester, _syncedLyrics);
 
       expect(find.text('Second line'), findsOneWidget);
-      expect(
-        find.text('LINE SYNC • Embedded in the audio file'),
-        findsOneWidget,
-      );
+      // No label about the timing or where the lyrics came from.
+      expect(find.textContaining('SYNC'), findsNothing);
+      expect(find.textContaining('Embedded in the audio file'), findsNothing);
       // The lyrics view brings its own transport and times.
       expect(find.byTooltip('Play'), findsOneWidget);
       expect(find.byTooltip('Previous'), findsOneWidget);
@@ -481,26 +480,6 @@ void main() {
       final filling = tester.widgetList<LyricFill>(find.byType(LyricFill));
       expect(filling.map((fill) => fill.text), contains('Second line'));
       expect(filling.map((fill) => fill.text), isNot(contains('Third')));
-      // It says what kind of timing the file has.
-      expect(find.textContaining('LINE SYNC'), findsOneWidget);
-    });
-
-    testWidgets('files that time each word are labelled as such', (
-      tester,
-    ) async {
-      await open(
-        tester,
-        LoadedLyrics(
-          parseLyrics(
-            '[00:10.00]<00:10.00>First <00:11.00>line\n'
-            '[01:00.00]<01:00.00>Second <01:01.50>line\n[02:00.00]Third',
-          )!,
-          LyricsOrigin.sidecar,
-        ),
-      );
-
-      expect(find.textContaining('WORD SYNC'), findsOneWidget);
-      expect(find.textContaining('LINE SYNC'), findsNothing);
     });
 
     testWidgets('with reduced motion the line lights up at once', (
