@@ -9,7 +9,9 @@ import '../../core/widgets/pill_button.dart';
 import '../../data/models/track.dart';
 import '../library/track_menu.dart';
 import '../library/track_tile.dart';
+import '../online/download_action.dart';
 import '../online/external_search.dart';
+import '../online/online_album_screen.dart';
 import '../online/online_playback.dart';
 import '../online/online_search.dart';
 import '../online/online_source.dart';
@@ -215,7 +217,7 @@ class _Results extends ConsumerWidget {
         onPlayed();
         return;
       }
-      _say(
+      say(
         context,
         '${track.title} needs an internet connection. '
         'Download it while online to play it offline.',
@@ -241,7 +243,7 @@ class _Results extends ConsumerWidget {
             children: [
               const SizedBox(width: 8),
               _Badge(track.source),
-              _DownloadAction(
+              DownloadAction(
                 track: track,
                 downloaded: downloaded,
                 offline: offline,
@@ -340,9 +342,7 @@ class _AlbumRow extends StatelessWidget {
 /// Opens the page with [album]'s tracks.
 void openOnlineAlbum(BuildContext context, OnlineAlbum album) {
   Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => Scaffold(appBar: AppBar(title: Text(album.title))),
-    ),
+    MaterialPageRoute<void>(builder: (_) => OnlineAlbumScreen(album: album)),
   );
 }
 
@@ -373,7 +373,7 @@ class _ElsewhereButtons extends ConsumerWidget {
       String name,
     ) async {
       final opened = await search(ref.read(linkOpenerProvider), query);
-      if (!opened && context.mounted) _say(context, "Couldn't open $name.");
+      if (!opened && context.mounted) say(context, "Couldn't open $name.");
     }
 
     return SafeArea(
@@ -400,95 +400,6 @@ class _ElsewhereButtons extends ConsumerWidget {
       ),
     );
   }
-}
-
-void _say(BuildContext context, String message) {
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(message)));
-}
-
-/// The end of an online result's row: a download button, or how it stands.
-class _DownloadAction extends ConsumerWidget {
-  const _DownloadAction({
-    required this.track,
-    required this.downloaded,
-    required this.offline,
-    required this.status,
-  });
-
-  final OnlineTrack track;
-  final bool downloaded;
-  final bool offline;
-  final DownloadStatus? status;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final palette = context.noc;
-    if (downloaded) {
-      return _Mark(
-        Icons.download_done_rounded,
-        'Downloaded',
-        color: palette.accent,
-      );
-    }
-    if (offline) {
-      return _Mark(
-        Icons.cloud_off_rounded,
-        'Needs an internet connection',
-        color: palette.textTertiary,
-      );
-    }
-    if (status == DownloadStatus.downloading) {
-      return const Padding(
-        padding: EdgeInsets.all(14),
-        child: SizedBox.square(
-          dimension: 20,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
-      );
-    }
-    if (track.downloadUrl == null) return const SizedBox(width: 12);
-    final failed = status == DownloadStatus.failed;
-    return IconButton(
-      tooltip: failed
-          ? "Couldn't download ${track.title}. Try again"
-          : 'Download ${track.title}',
-      onPressed: () async {
-        final saved = await ref
-            .read(onlineDownloadsProvider.notifier)
-            .download(track);
-        if (!saved && context.mounted) {
-          _say(
-            context,
-            "${track.title} couldn't be downloaded. Check the connection "
-            'and try again.',
-          );
-        }
-      },
-      icon: Icon(
-        failed ? Icons.refresh_rounded : Icons.download_rounded,
-        color: failed ? palette.textSecondary : null,
-      ),
-    );
-  }
-}
-
-class _Mark extends StatelessWidget {
-  const _Mark(this.icon, this.label, {required this.color});
-
-  final IconData icon;
-  final String label;
-  final Color color;
-
-  @override
-  Widget build(BuildContext context) => Tooltip(
-    message: label,
-    child: Padding(
-      padding: const EdgeInsets.all(12),
-      child: Icon(icon, color: color, semanticLabel: label),
-    ),
-  );
 }
 
 class _Heading extends StatelessWidget {
