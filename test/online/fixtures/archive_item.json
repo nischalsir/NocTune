@@ -1,0 +1,65 @@
+{
+  "metadata": {
+    "identifier": "samh2024-05-01.179350.ps1.s2.e.sbd.wilson.jenkins.richteratmosphere.flac2448",
+    "title": "Stu Allen and Mars Hotel Live at Ashkenaz on 2024-05-01",
+    "creator": "Stu Allen and Mars Hotel",
+    "mediatype": "etree",
+    "collection": [
+      "StuAllenandMarsHotel",
+      "etree"
+    ]
+  },
+  "files": [
+    {
+      "name": "01.Iko Iko.flac",
+      "source": "original",
+      "format": "24bit Flac",
+      "title": "//Iko Iko >",
+      "track": "01",
+      "length": "306.15",
+      "creator": "Stu Allen and Mars Hotel",
+      "album": "2024-05-01",
+      "size": "59037824"
+    },
+    {
+      "name": "02.Might as Well.mp3",
+      "source": "derivative",
+      "format": "VBR MP3",
+      "title": "Might as Well",
+      "track": "02",
+      "length": "05:55",
+      "creator": "Stu Allen and Mars Hotel",
+      "album": "2024-05-01",
+      "size": "8345831"
+    },
+    {
+      "name": "__ia_thumb.jpg",
+      "source": "original",
+      "format": "Item Tile",
+      "size": "20055"
+    },
+    {
+      "name": "01.Iko Iko.mp3",
+      "source": "derivative",
+      "format": "VBR MP3",
+      "title": "//Iko Iko >",
+      "track": "01",
+      "length": "05:06",
+      "creator": "Stu Allen and Mars Hotel",
+      "album": "2024-05-01",
+      "size": "7427151"
+    },
+    {
+      "name": "03.Crowd - Set Break Announcement.mp3",
+      "source": "derivative",
+      "format": "VBR MP3",
+      "title": "Crowd - Set Break Announcement",
+      "track": "03",
+      "length": "00:12",
+      "creator": "Stu Allen and Mars Hotel",
+      "album": "2024-05-01",
+      "size": "393038",
+      "private": "true"
+    }
+  ]
+}
