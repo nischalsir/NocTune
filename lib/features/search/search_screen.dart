@@ -3,18 +3,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/theme/noc_palette.dart';
+import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/pill_button.dart';
 import '../../data/models/track.dart';
 import '../library/track_menu.dart';
 import '../library/track_tile.dart';
+import '../online/external_search.dart';
 import '../online/online_playback.dart';
 import '../online/online_search.dart';
 import '../online/online_source.dart';
 import 'search_history.dart';
 
 /// Searches the library by title, artist, album and file name as you type,
-/// and free music on Jamendo when the build has a Jamendo client id. With
-/// nothing typed it lists the searches made lately, to run again.
+/// and free music online: Jamendo (when the build has a client id), Audius
+/// and the Internet Archive, each unless switched off. Buttons open the same
+/// search in Spotify and YouTube Music. With nothing typed it lists the
+/// searches made lately, to run again.
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
 
@@ -67,7 +72,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Widget build(BuildContext context) {
     final palette = context.noc;
     final history = ref.watch(searchHistoryProvider);
-    final online = ref.watch(_asksOnlineProvider);
+    final online = ref.watch(onlineSourcesProvider).isNotEmpty;
 
     return SafeArea(
       bottom: false,
@@ -107,7 +112,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     title: 'Search your library',
                     message: online
                         ? 'Find a track by its title, artist, album or '
-                              'file name, and free music on Jamendo.'
+                              'file name, and free music online.'
                         : 'Find a track by its title, artist, album or '
                               'file name.',
                   )
@@ -123,15 +128,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 }
 
-/// Whether searches also go to Jamendo.
-final _asksOnlineProvider = Provider<bool>(
-  (ref) =>
-      ref.watch(jamendoSourceProvider) != null &&
-      ref.watch(onlineSearchEnabledProvider),
-);
-
-/// The library's matches, then Jamendo's. Each part loads and fails on its
-/// own, so a slow or failing Jamendo never holds back the library.
+/// The library's matches, then one list from every online source, mixed in
+/// turn. Each part loads and fails on its own, so a slow or failing source
+/// never holds back the library or the other sources.
 class _Results extends ConsumerWidget {
   const _Results({required this.query, required this.onPlayed});
 
@@ -141,10 +140,11 @@ class _Results extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final local = ref.watch(searchResultsProvider(query));
-    final online = ref.watch(
-      onlineSourceSearchProvider((OnlineSourceId.jamendo, query)),
-    );
-    final asksOnline = ref.watch(_asksOnlineProvider);
+    final sources = ref.watch(onlineSourcesProvider);
+    final answers = [
+      for (final source in sources)
+        (source.id, ref.watch(onlineSourceSearchProvider((source.id, query)))),
+    ];
     final currentId = ref.watch(currentTrackIdProvider);
     final currentUri = ref.watch(currentMediaItemProvider).value?.id;
     final playing = ref.watch(
@@ -155,30 +155,61 @@ class _Results extends ConsumerWidget {
     final paths = ref.watch(appPathsProvider);
 
     final localTracks = local.value ?? const <Track>[];
-    final results = online.value;
-    final onlineTracks = results?.tracks ?? const <OnlineTrack>[];
-    final offline = results?.failure == OnlineFailure.offline;
-    final onlineLoading = asksOnline && online.isLoading;
-    final note = onlineLoading || results == null ? null : _note(results);
+    final results = [
+      for (final (id, answer) in answers)
+        if (answer.value case final results?) (id, results),
+    ];
+    final items = interleave([
+      for (final (_, results) in results) results.items,
+    ]);
+    final songs = items.whereType<OnlineTrack>().toList();
+    final loading = answers.any((answer) => answer.$2.isLoading);
+    final failed = results.any((answer) => answer.$2.failure != null);
+    final offline = results.any(
+      (answer) => answer.$2.failure == OnlineFailure.offline,
+    );
+    final notes = [
+      if (offline)
+        results.any((answer) => answer.$2.fromCache)
+            ? "You're offline. These are from an earlier search; only "
+                  'downloaded songs can play.'
+            : "You're offline. Online results appear once you're connected; "
+                  'songs you downloaded are in your library.',
+      for (final (id, results) in results)
+        switch (results.failure) {
+          OnlineFailure.rateLimited =>
+            '${id.label} is busy right now. Try again in a minute.',
+          OnlineFailure.unavailable =>
+            "${id.label} couldn't be reached right now.",
+          _ => null,
+        },
+    ].nonNulls;
 
     if (local.hasValue &&
         localTracks.isEmpty &&
-        !onlineLoading &&
-        onlineTracks.isEmpty &&
-        results?.failure == null) {
-      return EmptyState(
-        icon: Icons.music_off_outlined,
-        title: 'No matches',
-        message: asksOnline
-            ? 'Nothing in your library or on Jamendo matches "$query".'
-            : 'Nothing in your library matches "$query".',
+        !loading &&
+        items.isEmpty &&
+        !failed) {
+      return Column(
+        children: [
+          Expanded(
+            child: EmptyState(
+              icon: Icons.music_off_outlined,
+              title: 'No matches',
+              message: sources.isNotEmpty
+                  ? 'Nothing in your library or online matches "$query".'
+                  : 'Nothing in your library matches "$query".',
+            ),
+          ),
+          _ElsewhereButtons(query: query),
+        ],
       );
     }
 
-    Future<void> playOnline(BuildContext context, int index) async {
+    Future<void> playOnline(BuildContext context, OnlineTrack track) async {
       final outcome = await ref
           .read(onlinePlayerProvider)
-          .play(onlineTracks, index, offline: offline);
+          .play(songs, songs.indexOf(track), offline: offline);
       if (!context.mounted) return;
       if (outcome == OnlinePlayOutcome.started) {
         onPlayed();
@@ -186,13 +217,12 @@ class _Results extends ConsumerWidget {
       }
       _say(
         context,
-        '${onlineTracks[index].title} needs an internet connection. '
+        '${track.title} needs an internet connection. '
         'Download it while online to play it offline.',
       );
     }
 
-    Widget onlineRow(BuildContext context, int index) {
-      final track = onlineTracks[index];
+    Widget songRow(BuildContext context, OnlineTrack track) {
       final file = downloadedFile(paths, track);
       final downloaded = file.existsSync();
       final copy = Uri.file(file.path).toString();
@@ -205,12 +235,19 @@ class _Results extends ConsumerWidget {
               currentUri == '${track.streamUrl}' ||
               (downloaded && currentUri == copy),
           playing: playing,
-          onTap: () => playOnline(context, index),
-          action: _DownloadAction(
-            track: track,
-            downloaded: downloaded,
-            offline: offline,
-            status: downloads[track.key],
+          onTap: () => playOnline(context, track),
+          action: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(width: 8),
+              _Badge(track.source),
+              _DownloadAction(
+                track: track,
+                downloaded: downloaded,
+                offline: offline,
+                status: downloads[track.key],
+              ),
+            ],
           ),
         ),
       );
@@ -232,37 +269,137 @@ class _Results extends ConsumerWidget {
           },
           onMenu: () => showTrackMenu(context, ref, track),
         ),
-      if (asksOnline) (_) => const _Heading('Free music on Jamendo'),
-      if (onlineLoading) (_) => const _Progress('Searching Jamendo…'),
-      if (note != null) (_) => _Note(note),
-      if (!onlineLoading)
-        for (var index = 0; index < onlineTracks.length; index++)
-          (context) => onlineRow(context, index),
-      if (!onlineLoading && onlineTracks.isNotEmpty)
-        (_) => const _Note(
-          'Free music shared by its artists under Creative Commons licences.',
-        ),
+      if (sources.isNotEmpty) (_) => const _Heading('Online'),
+      for (final note in notes) (_) => _Note(note),
+      for (final item in items)
+        switch (item) {
+          final OnlineTrack track => (context) => songRow(context, track),
+          final OnlineAlbum album => (context) => _AlbumRow(album: album),
+        },
+      if (loading) (_) => const _Progress('Searching…'),
+      (_) => _ElsewhereButtons(query: query),
     ];
     return ListView.builder(
       itemCount: rows.length,
       itemBuilder: (context, index) => rows[index](context),
     );
   }
+}
 
-  /// What to say above Jamendo's results, if anything.
-  static String? _note(OnlineResults results) => switch (results.failure) {
-    null when results.tracks.isEmpty => 'No free tracks on Jamendo match.',
-    null => null,
-    OnlineFailure.offline when results.fromCache =>
-      "You're offline. These are from an earlier search; only downloaded "
-          'songs can play.',
-    OnlineFailure.offline =>
-      "You're offline. Jamendo's results appear once you're connected; "
-          'songs you downloaded are in your library.',
-    OnlineFailure.rateLimited =>
-      'Jamendo is busy right now. Try again in a minute.',
-    OnlineFailure.unavailable => "Jamendo couldn't be reached right now.",
-  };
+/// An album or show found online; opens to its tracks.
+class _AlbumRow extends StatelessWidget {
+  const _AlbumRow({required this.album});
+
+  final OnlineAlbum album;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final kind = album.kind == OnlineAlbumKind.show ? 'show' : 'album';
+    return InkWell(
+      onTap: () => openOnlineAlbum(context, album),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+        child: Row(
+          children: [
+            Artwork(path: null, url: album.imageUrl, size: 48),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    album.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.titleSmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    [?album.creator, kind].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            _Badge(album.source),
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Icon(Icons.chevron_right_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Opens the page with [album]'s tracks.
+void openOnlineAlbum(BuildContext context, OnlineAlbum album) {
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Scaffold(appBar: AppBar(title: Text(album.title))),
+    ),
+  );
+}
+
+/// Which service a result is from.
+class _Badge extends StatelessWidget {
+  const _Badge(this.source);
+
+  final OnlineSourceId source;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    source.badge,
+    style: Theme.of(context).textTheme.labelSmall
+        ?.copyWith(color: context.noc.textTertiary, letterSpacing: 0.6),
+  );
+}
+
+/// Opens the same search in Spotify and in YouTube Music, in their apps.
+class _ElsewhereButtons extends ConsumerWidget {
+  const _ElsewhereButtons({required this.query});
+
+  final String query;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    Future<void> open(
+      Future<bool> Function(LinkOpener open, String words) search,
+      String name,
+    ) async {
+      final opened = await search(ref.read(linkOpenerProvider), query);
+      if (!opened && context.mounted) _say(context, "Couldn't open $name.");
+    }
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+        child: Row(
+          children: [
+            Expanded(
+              child: PillButton(
+                label: 'Search on Spotify',
+                onTap: () => open(searchOnSpotify, 'Spotify'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: PillButton(
+                label: 'Search on YouTube Music',
+                onTap: () => open(searchOnYouTubeMusic, 'YouTube Music'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 void _say(BuildContext context, String message) {
