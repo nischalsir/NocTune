@@ -13,6 +13,23 @@ Release channels:
 
 ### Added
 
+- Search also finds music on Audius and the Internet Archive, beside
+  Jamendo, in one "Online" list under the library's matches: each
+  source's first result, then each one's second, and so on, each row
+  marked with its source. Each source loads and fails on its own, with
+  its own line. Audius songs stream (and download where the artist allows
+  it, saved as the type they uploaded, such as FLAC, in `Audius/`). An
+  Internet Archive result is a show or album that opens to a page with its
+  tracks, Play all, Download all and a download button per track, saved in
+  `Internet Archive/<name>/`; the page also works offline once opened.
+  Only Creative Commons and public-domain recordings and Live Music
+  Archive shows with MP3s are searched. Neither source needs a key.
+- Search: "Search on Spotify" and "Search on YouTube Music" buttons open
+  the same words in those apps (or their websites). No Spotify or YouTube
+  API is used and nothing from them is shown in NocTune.
+- Settings › Online: "Search online music" covers all sources, with a
+  switch for each under it. Online search no longer needs a Jamendo
+  client id; without one, Jamendo alone is left out.
 - Search (the Search tab) also finds free, Creative Commons music on
   Jamendo, listed under the library's matches. A result streams when
   tapped, its cover saved to the artwork cache first so the player shows
@@ -46,6 +63,10 @@ Release channels:
 
 ### Changed
 
+- Jamendo: a search that comes back empty is asked once more a second
+  later, because Jamendo sometimes answers a search it can match with
+  nothing. Saved searches now keep 20 per source; the earlier saved
+  searches are cleared once.
 - Updates: a copy of NocTune that has fallen three or more releases behind
   must update; the popup then offers only "Update now" and cannot be
   dismissed. One or two behind stays optional. It works from the release
@@ -61,6 +82,14 @@ Release channels:
   offline, not starting one that needs the internet, and downloads that
   work, fail or are not allowed. The search page with library and Jamendo
   results together, a failing Jamendo, and offline.
+- Audius and Internet Archive: searching (with recorded answers), which
+  tracks and items are left out, file order and lengths, encoded
+  addresses, and their failures. The mixed order, the saved searches per
+  source, the switches, and an old saved Jamendo search still reading
+  back. Download paths and names per source, an Audius FLAC saved as
+  `.flac`, and Download all. The search page with several sources, one
+  failing, and the Spotify and YouTube Music buttons; the Archive page
+  online, offline and failing; the Settings switches.
 - The taste mix, the decoder settings and their rows, the what's-new rule.
 - The release list is read (pre-releases left out) and the rule is checked
   at one, two and three releases behind, on the automatic check and the

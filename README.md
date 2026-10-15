@@ -28,16 +28,24 @@ are listed in the [changelog](CHANGELOG.md).
 - **Decoder and output rate (Android):** Android's own decoders or FFmpeg,
   which decodes with headroom so loud files are not clipped, and the sample
   rate handed to Android (the file's own, 48, 96 or 192 kHz).
-- **Free music online:** search also finds free, Creative Commons music on
-  [Jamendo](https://www.jamendo.com). It streams, or downloads into the
-  library to play offline. Without a connection, search shows downloaded
-  songs and marks results that need the internet.
+- **Free music online:** search also finds music on
+  [Jamendo](https://www.jamendo.com) (Creative Commons),
+  [Audius](https://audius.co) (put up by its artists) and the
+  [Internet Archive](https://archive.org) (Creative Commons and
+  public-domain recordings, and Live Music Archive shows), in one list.
+  Songs stream, or download into the library to play offline where the
+  source allows it; an Archive show or album opens to its track list.
+  Without a connection, search shows downloaded songs and marks results
+  that need the internet. Buttons open the same search in Spotify and
+  YouTube Music, in their own apps.
 - **Mixed for you:** a Home shelf of library songs picked from what you
   play, worked out on the device.
 - **Private:** no account, no ads, and nothing is uploaded. The network is
-  used for an optional update check and, in builds with a Jamendo client id,
-  for Jamendo search (what you type is sent to Jamendo; it can be switched
-  off in Settings › Online).
+  used for an optional update check and for online search: what you type
+  is sent to Jamendo (in builds with a client id), Audius and the Internet
+  Archive. Settings › Online switches each source, or all of them, off.
+  The Spotify and YouTube Music buttons only open those apps; NocTune uses
+  neither service's API and shows nothing from them.
 
 ## Screenshots
 
@@ -71,12 +79,19 @@ Android compiles against SDK 37. Kotlin incremental compilation is turned off
 in `android/gradle.properties` because the project and the pub cache may sit
 on different Windows drives.
 
-## Jamendo
+## Online sources
 
-Online search is **off in a build without a Jamendo client id**. Get a free
-one at [devportal.jamendo.com](https://devportal.jamendo.com) (for
-non-commercial use) and add
-`--dart-define=NOCTUNE_JAMENDO_CLIENT_ID=<client id>` to the build command.
+- **Jamendo** is left out of a build without a Jamendo client id. Get a
+  free one at [devportal.jamendo.com](https://devportal.jamendo.com) (for
+  non-commercial use) and add
+  `--dart-define=NOCTUNE_JAMENDO_CLIENT_ID=<client id>` to the build
+  command.
+- **Audius** needs no key; requests carry `app_name=NocTune`. Downloads are
+  offered only where the artist allows them, and keep the type the artist
+  uploaded (often FLAC).
+- **Internet Archive** needs no key. Search is limited to Creative Commons
+  and public-domain audio and to Live Music Archive shows with MP3s, never
+  items the Archive only streams.
 
 ## Update checks
 
