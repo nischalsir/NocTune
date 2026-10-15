@@ -6,7 +6,7 @@ import 'package:noctune/app/providers.dart';
 import 'package:noctune/data/models/track.dart';
 import 'package:noctune/data/repositories/library_repository.dart';
 import 'package:noctune/features/library/scan/scan_controller.dart';
-import 'package:noctune/features/online/jamendo_client.dart';
+import 'package:noctune/features/online/online_source.dart';
 import 'package:noctune/features/online/online_playback.dart';
 import 'package:noctune/features/playback/playback_mapping.dart';
 import 'package:path/path.dart' as p;

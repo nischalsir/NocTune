@@ -5,7 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../app/providers.dart';
-import 'jamendo_client.dart';
+import 'jamendo_source.dart';
+import 'online_source.dart';
 
 /// What an online search found, and whether it is fresh.
 @immutable
@@ -70,11 +71,11 @@ class OnlineSearchCache {
   static String _normal(String query) => query.trim().toLowerCase();
 }
 
-/// The Jamendo client, or null in a build without a client id.
-final jamendoClientProvider = Provider<JamendoClient?>(
+/// Jamendo, or null in a build without a client id.
+final jamendoSourceProvider = Provider<JamendoSource?>(
   (ref) => kJamendoClientId.isEmpty
       ? null
-      : JamendoClient(clientId: kJamendoClientId),
+      : JamendoSource(clientId: kJamendoClientId),
 );
 
 /// Whether search also asks Jamendo. On by default; the switch is in
@@ -108,7 +109,7 @@ final onlineSearchDelayProvider = Provider<Duration>(
 final onlineSearchProvider = FutureProvider.autoDispose
     .family<OnlineResults?, String>((ref, query) async {
       final words = query.trim();
-      final client = ref.watch(jamendoClientProvider);
+      final client = ref.watch(jamendoSourceProvider);
       if (words.isEmpty ||
           client == null ||
           !ref.watch(onlineSearchEnabledProvider)) {
@@ -119,7 +120,7 @@ final onlineSearchProvider = FutureProvider.autoDispose
 
       final cache = OnlineSearchCache(ref.read(sharedPreferencesProvider));
       try {
-        final tracks = await client.search(words);
+        final tracks = (await client.search(words)).cast<OnlineTrack>();
         await cache.put(words, tracks);
         return OnlineResults(tracks);
       } on OnlineSearchException catch (error) {

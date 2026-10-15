@@ -404,7 +404,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                 ],
               ),
 
-              if (ref.watch(jamendoClientProvider) != null)
+              if (ref.watch(jamendoSourceProvider) != null)
                 _Group(
                   title: 'Online',
                   children: [

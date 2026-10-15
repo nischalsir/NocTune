@@ -3,7 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:noctune/features/online/jamendo_client.dart';
+import 'package:noctune/features/online/jamendo_source.dart';
+import 'package:noctune/features/online/online_source.dart';
 
 String _body({
   String status = 'success',
@@ -43,9 +44,10 @@ Map<String, Object?> _track({
 void main() {
   late List<Uri> asked;
 
-  JamendoClient client(FutureOr<JamendoResponse> Function(Uri url) answer) =>
-      JamendoClient(
+  JamendoSource client(FutureOr<OnlineResponse> Function(Uri url) answer) =>
+      JamendoSource(
         clientId: 'test-id',
+        retryDelay: Duration.zero,
         fetch: (url) async {
           asked.add(url);
           return answer(url);
@@ -65,7 +67,8 @@ void main() {
     expect(url.queryParameters['client_id'], 'test-id');
     expect(url.queryParameters['search'], 'night roads');
 
-    final track = results.single;
+    final track = results.single as OnlineTrack;
+    expect(track.source, OnlineSourceId.jamendo);
     expect(track.id, '1204669');
     expect(track.title, 'Wanderer');
     expect(track.artist, 'Lena Orsa');
@@ -105,7 +108,7 @@ void main() {
           (status: 200, body: _body(results: [_track(downloadAllowed: false)])),
     ).search('x');
 
-    expect(results.single.downloadUrl, isNull);
+    expect((results.single as OnlineTrack).downloadUrl, isNull);
   });
 
   test('no connection is reported as offline', () async {
@@ -197,14 +200,49 @@ void main() {
     }
   });
 
-  test('a track survives being saved and read back', () {
-    final track = OnlineTrack.fromJamendo(_track())!;
-    final copy = OnlineTrack.fromJson(track.toJson());
+  test('a track survives being saved and read back', () async {
+    final track =
+        (await client((_) => (status: 200, body: _body(results: [_track()])))
+                    .search('x'))
+                .single
+            as OnlineTrack;
+    final copy = OnlineItem.fromJson(track.toJson()) as OnlineTrack;
 
+    expect(copy.source, OnlineSourceId.jamendo);
     expect(copy.id, track.id);
     expect(copy.title, track.title);
     expect(copy.streamUrl, track.streamUrl);
     expect(copy.downloadUrl, track.downloadUrl);
     expect(copy.duration, track.duration);
+  });
+
+  test('asks once more when Jamendo answers with nothing', () async {
+    var calls = 0;
+    final results = await client((_) {
+      calls++;
+      return (status: 200, body: _body(results: calls == 1 ? [] : [_track()]));
+    }).search('jazz');
+
+    expect(calls, 2);
+    expect(results, hasLength(1));
+  });
+
+  test('two empty answers are no match, not an error', () async {
+    final results = await client((_) => (status: 200, body: _body()))
+        .search('zzz');
+
+    expect(asked, hasLength(2));
+    expect(results, isEmpty);
+  });
+
+  test('old cached JSON without a source reads as Jamendo', () {
+    final track = OnlineItem.fromJson({
+      'id': '9',
+      'title': 'Wanderer',
+      'stream': 'https://prod-1.storage.jamendo.com/?trackid=9',
+    }) as OnlineTrack;
+
+    expect(track.source, OnlineSourceId.jamendo);
+    expect(track.key, 'jamendo:9');
   });
 }

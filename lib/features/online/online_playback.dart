@@ -8,7 +8,7 @@ import '../../app/providers.dart';
 import '../../data/models/track.dart';
 import '../../data/repositories/library_repository.dart';
 import '../library/scan/scan_controller.dart';
-import 'jamendo_client.dart';
+import 'online_source.dart';
 
 /// Saves the file at [url] as [target]. Replaced with a fake in tests.
 typedef FileFetcher = Future<void> Function(Uri url, File target);

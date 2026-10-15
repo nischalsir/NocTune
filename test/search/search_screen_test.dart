@@ -9,7 +9,8 @@ import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/data/models/track.dart';
 import 'package:noctune/data/repositories/library_repository.dart';
-import 'package:noctune/features/online/jamendo_client.dart';
+import 'package:noctune/features/online/jamendo_source.dart';
+import 'package:noctune/features/online/online_source.dart';
 import 'package:noctune/features/online/online_playback.dart';
 import 'package:noctune/features/online/online_search.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
@@ -32,7 +33,7 @@ class _FakeHandler extends Fake implements NocAudioHandler {
 class _Repository extends Fake implements LibraryRepository {}
 
 /// Jamendo's answer with one track per title.
-JamendoResponse _jamendo(List<String> titles) => (
+OnlineResponse _jamendo(List<String> titles) => (
   status: 200,
   body: jsonEncode({
     'headers': {'status': 'success', 'code': 0},
@@ -76,7 +77,7 @@ void main() {
   Future<_FakeHandler> pump(
     WidgetTester tester, {
     List<String> remembered = const [],
-    JamendoFetch? jamendo,
+    OnlineFetch? jamendo,
     Map<String, Object> cached = const {},
   }) async {
     SharedPreferences.setMockInitialValues({
@@ -96,10 +97,14 @@ void main() {
           )),
           onlineSearchDelayProvider.overrideWithValue(Duration.zero),
           libraryRepositoryProvider.overrideWithValue(_Repository()),
-          jamendoClientProvider.overrideWithValue(
+          jamendoSourceProvider.overrideWithValue(
             jamendo == null
                 ? null
-                : JamendoClient(clientId: 'test', fetch: jamendo),
+                : JamendoSource(
+                    clientId: 'test',
+                    retryDelay: Duration.zero,
+                    fetch: jamendo,
+                  ),
           ),
           // Covers are not fetched in tests.
           fileFetcherProvider.overrideWithValue(
@@ -266,19 +271,23 @@ void main() {
     testWidgets('offline, saved results are marked and not started', (
       tester,
     ) async {
-      final saved =
-          (jsonDecode(_jamendo(['Night Drive']).body)
-                  as Map<String, Object?>)['results']!
-              as List;
       final handler = await pump(
         tester,
         jamendo: (_) async => throw const SocketException('offline'),
         cached: {
           'online_search_cache': jsonEncode({
             'night': [
-              OnlineTrack.fromJamendo(
-                (saved.single as Map).cast<String, Object?>(),
-              )!.toJson(),
+              OnlineTrack(
+                id: '1',
+                title: 'Night Drive',
+                artist: 'Lena Orsa',
+                streamUrl: Uri.parse(
+                  'https://prod-1.storage.jamendo.com/?trackid=1',
+                ),
+                downloadUrl: Uri.parse(
+                  'https://prod-1.storage.jamendo.com/download/1',
+                ),
+              ).toJson(),
             ],
           }),
         },

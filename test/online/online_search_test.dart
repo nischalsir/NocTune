@@ -4,7 +4,8 @@ import 'dart:io';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:noctune/app/providers.dart';
-import 'package:noctune/features/online/jamendo_client.dart';
+import 'package:noctune/features/online/jamendo_source.dart';
+import 'package:noctune/features/online/online_source.dart';
 import 'package:noctune/features/online/online_search.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -23,7 +24,7 @@ final _found = jsonEncode({
 
 void main() {
   late SharedPreferences prefs;
-  late JamendoResponse Function() answer;
+  late OnlineResponse Function() answer;
   late int requests;
 
   ProviderContainer container({bool configured = true}) {
@@ -31,10 +32,11 @@ void main() {
       overrides: [
         sharedPreferencesProvider.overrideWithValue(prefs),
         onlineSearchDelayProvider.overrideWithValue(Duration.zero),
-        jamendoClientProvider.overrideWithValue(
+        jamendoSourceProvider.overrideWithValue(
           configured
-              ? JamendoClient(
+              ? JamendoSource(
                   clientId: 'id',
+                  retryDelay: Duration.zero,
                   fetch: (_) async {
                     requests++;
                     return answer();

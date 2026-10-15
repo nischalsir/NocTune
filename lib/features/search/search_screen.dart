@@ -7,9 +7,9 @@ import '../../core/widgets/empty_state.dart';
 import '../../data/models/track.dart';
 import '../library/track_menu.dart';
 import '../library/track_tile.dart';
-import '../online/jamendo_client.dart';
 import '../online/online_playback.dart';
 import '../online/online_search.dart';
+import '../online/online_source.dart';
 import 'search_history.dart';
 
 /// Searches the library by title, artist, album and file name as you type,
@@ -126,7 +126,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 /// Whether searches also go to Jamendo.
 final _asksOnlineProvider = Provider<bool>(
   (ref) =>
-      ref.watch(jamendoClientProvider) != null &&
+      ref.watch(jamendoSourceProvider) != null &&
       ref.watch(onlineSearchEnabledProvider),
 );
 
