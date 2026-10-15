@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:noctune/features/online/jamendo_source.dart';
+import 'package:noctune/features/online/online_search.dart';
 import 'package:noctune/app/providers.dart';
 import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
@@ -45,6 +47,7 @@ const _installed = AppVersion(1, 2, 0, 3);
 Future<(_FakeRepository, ProviderContainer)> _pump(
   WidgetTester tester, {
   Future<String> Function(Uri url)? fetch,
+  bool jamendo = false,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -68,6 +71,9 @@ Future<(_FakeRepository, ProviderContainer)> _pump(
           ),
         ),
         deviceDecodesAtmosProvider.overrideWith((ref) => false),
+        jamendoSourceProvider.overrideWithValue(
+          jamendo ? JamendoSource(clientId: 'test') : null,
+        ),
         scanControllerProvider.overrideWith(_IdleScanController.new),
         installedVersionProvider.overrideWith((ref) => _installed),
         updateServiceProvider.overrideWith(
@@ -105,6 +111,81 @@ Future<void> _reveal(WidgetTester tester, Finder finder) async {
 }
 
 void main() {
+  group('Online', () {
+    final main = find.text('Search online music');
+    final audius = find.text('Audius');
+
+    testWidgets('shows without a Jamendo id, with Audius and the Archive', (
+      tester,
+    ) async {
+      await _pump(tester);
+      await _reveal(tester, find.text('Internet Archive'));
+
+      expect(main, findsOneWidget);
+      expect(audius, findsOneWidget);
+      expect(find.text('Jamendo'), findsNothing);
+      expect(
+        find.textContaining(
+          'Search also finds music on Audius and the '
+          'Internet Archive',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('with a Jamendo id, Jamendo has a switch too', (tester) async {
+      await _pump(tester, jamendo: true);
+      await _reveal(tester, find.text('Internet Archive'));
+
+      expect(find.text('Jamendo'), findsOneWidget);
+      expect(
+        find.textContaining(
+          'Search also finds music on Jamendo, Audius and '
+          'the Internet Archive',
+        ),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('turning Audius off is saved', (tester) async {
+      await _pump(tester);
+      await _reveal(tester, audius);
+
+      await tester.tap(audius);
+      await tester.pumpAndSettle();
+
+      final preferences = await SharedPreferences.getInstance();
+      expect(preferences.getBool('online_source_audius'), isFalse);
+    });
+
+    testWidgets('source switches do nothing while the main switch is off', (
+      tester,
+    ) async {
+      await _pump(tester);
+      await _reveal(tester, audius);
+
+      await tester.ensureVisible(main);
+      await tester.pumpAndSettle();
+      await tester.tap(main);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(audius);
+      await tester.pumpAndSettle();
+      await tester.tap(audius, warnIfMissed: false);
+      await tester.pumpAndSettle();
+
+      final preferences = await SharedPreferences.getInstance();
+      expect(preferences.getBool('online_search_enabled'), isFalse);
+      expect(preferences.getBool('online_source_audius'), isNull);
+      final audiusSwitch = tester.widget<CupertinoSwitch>(
+        find.descendant(
+          of: find.ancestor(of: audius, matching: find.byType(MergeSemantics)),
+          matching: find.byType(CupertinoSwitch),
+        ),
+      );
+      expect(audiusSwitch.onChanged, isNull);
+    });
+  });
+
   testWidgets('groups its settings under clear headings', (tester) async {
     await _pump(tester);
 
