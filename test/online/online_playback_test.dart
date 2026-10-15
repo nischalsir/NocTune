@@ -40,6 +40,25 @@ OnlineTrack _online(String id, {bool downloadable = true}) => OnlineTrack(
   duration: const Duration(minutes: 3),
 );
 
+OnlineTrack _audius(String id) => OnlineTrack(
+  source: OnlineSourceId.audius,
+  id: id,
+  title: 'Beat $id',
+  streamUrl: Uri.parse('https://api.audius.co/v1/tracks/$id/stream'),
+  downloadUrl: Uri.parse('https://api.audius.co/v1/tracks/$id/download'),
+);
+
+OnlineTrack _archive(String file, {String album = 'Live at Ashkenaz'}) =>
+    OnlineTrack(
+      source: OnlineSourceId.archive,
+      id: 'samh2024/$file',
+      title: file,
+      album: album,
+      streamUrl: Uri.parse('https://archive.org/download/samh2024/$file'),
+      downloadUrl: Uri.parse('https://archive.org/download/samh2024/$file'),
+      imageUrl: Uri.parse('https://archive.org/services/img/samh2024'),
+    );
+
 void main() {
   late Directory root;
   late AppPaths paths;
@@ -48,10 +67,18 @@ void main() {
   late List<Uri> fetched;
   late bool fetchFails;
 
+  /// Downloads whose address contains one of these fail.
+  late Set<String> failing;
+
+  /// What a download's file starts with.
+  late List<int> head;
+
   Future<void> fakeFetch(Uri url, File target) async {
     fetched.add(url);
-    if (fetchFails) throw const SocketException('offline');
-    await target.writeAsString('data from $url');
+    if (fetchFails || failing.any('$url'.contains)) {
+      throw const SocketException('offline');
+    }
+    await target.writeAsBytes([...head, ...'data from $url'.codeUnits]);
   }
 
   OnlinePlayer player() => OnlinePlayer(
@@ -72,6 +99,8 @@ void main() {
     played = [];
     fetched = [];
     fetchFails = false;
+    failing = {};
+    head = 'ID3'.codeUnits;
   });
   tearDown(() => root.deleteSync(recursive: true));
 
@@ -154,6 +183,55 @@ void main() {
     expect(played, isEmpty);
   });
 
+  String inMusic(File file) => p.relative(file.path, from: paths.musicDir);
+
+  test('Jamendo paths are unchanged', () {
+    expect(
+      inMusic(downloadedFile(paths, _online('7'))),
+      p.join('Jamendo', 'jamendo-7.mp3'),
+    );
+    expect(p.basename(coverFile(paths, _online('7')).path), 'jamendo-7.jpg');
+  });
+
+  test('an Archive track goes in a folder named after its item', () {
+    final track = _archive('set 1/01 Iko.mp3', album: 'Live: 1977/05/08?');
+
+    expect(
+      inMusic(downloadedFile(paths, track)),
+      p.join('Internet Archive', 'Live_ 1977_05_08_', 'set 1_01 Iko.mp3'),
+    );
+    expect(p.basename(coverFile(paths, track).path), 'archive-samh2024.jpg');
+    expect(streamedTrack(track).folder, 'Internet Archive');
+  });
+
+  test('a name that cleans to nothing uses the identifier', () {
+    expect(
+      inMusic(downloadedFile(paths, _archive('a.mp3', album: ' ... '))),
+      p.join('Internet Archive', 'samh2024', 'a.mp3'),
+    );
+  });
+
+  test('Audius files and covers are named by id', () {
+    expect(
+      inMusic(downloadedFile(paths, _audius('KlK59'))),
+      p.join('Audius', 'audius-KlK59.mp3'),
+    );
+    expect(
+      p.basename(coverFile(paths, _audius('KlK59')).path),
+      'audius-KlK59.jpg',
+    );
+    expect(streamedTrack(_audius('KlK59')).folder, 'Audius');
+  });
+
+  test('the file type is read from its first bytes', () {
+    expect(audioExtension('fLaC'.codeUnits), 'flac');
+    expect(audioExtension('RIFF'.codeUnits), 'wav');
+    expect(audioExtension('OggS'.codeUnits), 'ogg');
+    expect(audioExtension([0, 0, 0, 32, ...'ftypM4A '.codeUnits]), 'm4a');
+    expect(audioExtension('ID3'.codeUnits), 'mp3');
+    expect(audioExtension(const []), 'mp3');
+  });
+
   group('downloads', () {
     late ProviderContainer container;
     late _QuietScan scan;
@@ -196,9 +274,76 @@ void main() {
       expect(file.existsSync(), isFalse);
       expect(File('${file.path}.part').existsSync(), isFalse);
       expect(
-        container.read(onlineDownloadsProvider)['7'],
+        container.read(onlineDownloadsProvider)['jamendo:7'],
         DownloadStatus.failed,
       );
+    });
+
+    test('an Audius FLAC is saved as .flac and counts as downloaded', () async {
+      head = 'fLaC'.codeUnits;
+
+      final saved = await container
+          .read(onlineDownloadsProvider.notifier)
+          .download(_audius('x'));
+
+      expect(saved, isTrue);
+      final flac = File(p.join(paths.musicDir, 'Audius', 'audius-x.flac'));
+      expect(flac.existsSync(), isTrue);
+      expect(downloadedFile(paths, _audius('x')).path, flac.path);
+      expect(player().isDownloaded(_audius('x')), isTrue);
+    });
+
+    test('downloads are keyed by source', () async {
+      fetchFails = true;
+      final downloads = container.read(onlineDownloadsProvider.notifier);
+
+      await downloads.download(_online('x'));
+
+      expect(container.read(onlineDownloadsProvider), {
+        'jamendo:x': DownloadStatus.failed,
+      });
+      expect(container.read(onlineDownloadsProvider)[_audius('x').key], isNull);
+    });
+
+    test(
+      'download all goes in order, carries on after a failure, scans once',
+      () async {
+        final tracks = [
+          _archive('a.mp3'),
+          _archive('b.mp3'),
+          _archive('c.mp3'),
+        ];
+        failing = {'b.mp3'};
+
+        final failed = await container
+            .read(onlineDownloadsProvider.notifier)
+            .downloadAll(tracks);
+
+        expect(failed, 1);
+        expect(fetched.map((url) => p.basename(url.path)), [
+          'a.mp3',
+          'b.mp3',
+          'c.mp3',
+        ]);
+        expect(downloadedFile(paths, tracks[0]).existsSync(), isTrue);
+        expect(downloadedFile(paths, tracks[1]).existsSync(), isFalse);
+        expect(downloadedFile(paths, tracks[2]).existsSync(), isTrue);
+        expect(scan.refreshes, 1);
+        expect(container.read(onlineDownloadsProvider), {
+          tracks[1].key: DownloadStatus.failed,
+        });
+      },
+    );
+
+    test('download all skips what is already downloaded', () async {
+      final tracks = [_archive('a.mp3'), _archive('b.mp3')];
+      download(tracks[0]);
+
+      await container
+          .read(onlineDownloadsProvider.notifier)
+          .downloadAll(tracks);
+
+      expect(fetched.map((url) => p.basename(url.path)), ['b.mp3']);
     });
 
     test('a track Jamendo does not allow to download is not fetched', () async {

@@ -210,7 +210,7 @@ class _Results extends ConsumerWidget {
             track: track,
             downloaded: downloaded,
             offline: offline,
-            status: downloads[track.id],
+            status: downloads[track.key],
           ),
         ),
       );
