@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:noctune/app/providers.dart';
@@ -340,6 +341,64 @@ void main() {
       expect(flac.existsSync(), isTrue);
       expect(downloadedFile(paths, _audius('x')).path, flac.path);
       expect(player().isDownloaded(_audius('x')), isTrue);
+    });
+
+    test('an unsynchronised ID3 tag is undone, so its title is read', () async {
+      // An ID3v2.3 tag as the Internet Archive writes it: a UTF-16 title
+      // whose byte-order mark (FF FE) is stuffed with a 00 after the FF.
+      final title = [
+        0xFF,
+        0xFE,
+        for (final unit in 'Mexicali Blues'.codeUnits) ...[unit, 0],
+      ];
+      final frame = [
+        ...'TIT2'.codeUnits,
+        0,
+        0,
+        0,
+        1 + title.length,
+        0,
+        0,
+        1,
+        ...title,
+      ];
+      final stuffed = [
+        for (final byte in frame) ...(byte == 0xFF ? [0xFF, 0] : [byte]),
+      ];
+      final audio = [0xFF, 0xFB, 0x90, 0x64, ...List.filled(400, 0)];
+      head = [
+        ...'ID3'.codeUnits,
+        3,
+        0,
+        0x80,
+        0,
+        0,
+        0,
+        stuffed.length,
+        ...stuffed,
+        ...audio,
+      ];
+      final track = _archive('03MexicaliBlues.mp3');
+
+      await container.read(onlineDownloadsProvider.notifier).download(track);
+
+      final file = downloadedFile(paths, track);
+      final bytes = file.readAsBytesSync();
+      expect(bytes[5] & 0x80, 0, reason: 'the flag is cleared');
+      expect(bytes.sublist(10, 10 + frame.length), frame);
+      expect(readMetadata(file).title, 'Mexicali Blues');
+    });
+
+    test('a tag that is not unsynchronised is left alone', () async {
+      head = [...'ID3'.codeUnits, 3, 0, 0, 0, 0, 0, 4, 1, 2, 0xFF, 0];
+      final track = _archive('plain.mp3');
+
+      await container.read(onlineDownloadsProvider.notifier).download(track);
+
+      expect(
+        downloadedFile(paths, track).readAsBytesSync().sublist(0, head.length),
+        head,
+      );
     });
 
     test('downloads are keyed by source', () async {

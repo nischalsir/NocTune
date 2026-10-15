@@ -26,6 +26,10 @@ Release channels:
   Music Archive shows that have MP3s are searched. Neither source needs a
   key. One source that can't be reached never stops the others' songs
   from playing.
+- Downloaded MP3s whose ID3 tag is saved "unsynchronised" (as the Internet
+  Archive saves them) have the tag rewritten in plain form, so the library
+  reads their title, artist, album and cover instead of showing the file
+  name.
 - Search: "Search on Spotify" and "Search on YouTube Music" buttons open
   the same words in those apps (or their websites). No Spotify or YouTube
   API is used and nothing from them is shown in NocTune.

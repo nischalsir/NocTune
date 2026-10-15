@@ -104,6 +104,55 @@ String _cut(String text, int length) {
       : String.fromCharCodes(characters.take(length)).trimRight();
 }
 
+/// Rewrites an ID3v2.2 or v2.3 tag saved "unsynchronised" (a 00 stuffed
+/// after every FF) in plain form, as the library's tag reader can't read
+/// the stuffed one. The Internet Archive's MP3s are tagged this way. Leaves
+/// any other file as it is.
+void undoId3Unsync(File file) {
+  final raf = file.openSync();
+  final List<int> header;
+  final List<int> tag;
+  try {
+    header = raf.readSync(10);
+    if (header.length < 10 ||
+        String.fromCharCodes(header, 0, 3) != 'ID3' ||
+        (header[3] != 2 && header[3] != 3) ||
+        header[5] & 0x80 == 0) {
+      return;
+    }
+    final size = header[6] << 21 | header[7] << 14 | header[8] << 7 | header[9];
+    tag = raf.readSync(size);
+    if (tag.length < size) return;
+  } finally {
+    raf.closeSync();
+  }
+  final plain = <int>[];
+  for (var i = 0; i < tag.length; i++) {
+    plain.add(tag[i]);
+    if (tag[i] == 0xFF && i + 1 < tag.length && tag[i + 1] == 0) i++;
+  }
+  // The tag keeps its size in the header, so the bytes saved go to padding.
+  plain.addAll(List.filled(tag.length - plain.length, 0));
+  final copy = File('${file.path}.tags');
+  final out = copy.openSync(mode: FileMode.write);
+  final source = file.openSync();
+  try {
+    out
+      ..writeFromSync([...header.take(5), header[5] & ~0x80, ...header.skip(6)])
+      ..writeFromSync(plain);
+    source.setPositionSync(10 + tag.length);
+    while (true) {
+      final chunk = source.readSync(1 << 16);
+      if (chunk.isEmpty) break;
+      out.writeFromSync(chunk);
+    }
+  } finally {
+    source.closeSync();
+    out.closeSync();
+  }
+  copy.renameSync(file.path);
+}
+
 /// The type of an audio file, from its first bytes.
 String audioExtension(List<int> head) {
   bool startsWith(String magic, [int at = 0]) =>
@@ -277,7 +326,8 @@ class OnlineDownloads extends Notifier<Map<String, DownloadStatus>> {
     try {
       part.parent.createSync(recursive: true);
       await ref.read(fileFetcherProvider)(url, part);
-      part.renameSync(_finalPath(part, track));
+      final file = part.renameSync(_finalPath(part, track));
+      if (file.path.endsWith('.mp3')) undoId3Unsync(file);
     } on Exception {
       if (part.existsSync()) part.deleteSync();
       state = {...state, track.key: DownloadStatus.failed};
