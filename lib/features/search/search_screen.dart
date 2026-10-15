@@ -141,7 +141,9 @@ class _Results extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final local = ref.watch(searchResultsProvider(query));
-    final online = ref.watch(onlineSearchProvider(query));
+    final online = ref.watch(
+      onlineSourceSearchProvider((OnlineSourceId.jamendo, query)),
+    );
     final asksOnline = ref.watch(_asksOnlineProvider);
     final currentId = ref.watch(currentTrackIdProvider);
     final currentUri = ref.watch(currentMediaItemProvider).value?.id;

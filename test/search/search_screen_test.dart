@@ -275,8 +275,8 @@ void main() {
         tester,
         jamendo: (_) async => throw const SocketException('offline'),
         cached: {
-          'online_search_cache': jsonEncode({
-            'night': [
+          'online_search_cache_v2': jsonEncode({
+            'jamendo:night': [
               OnlineTrack(
                 id: '1',
                 title: 'Night Drive',
