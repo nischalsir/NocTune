@@ -235,6 +235,14 @@ Future<Object?> fetchJson(OnlineFetch fetch, Uri url) async {
     throw const OnlineSearchException(OnlineFailure.offline);
   } on HttpException catch (error) {
     throw OnlineSearchException(OnlineFailure.unavailable, error.message);
+  } on IOException catch (error) {
+    throw OnlineSearchException(OnlineFailure.unavailable, '$error');
+  } on FormatException {
+    // A body that isn't text.
+    throw const OnlineSearchException(
+      OnlineFailure.unavailable,
+      'An unreadable answer',
+    );
   }
   if (response.status == 429) {
     throw const OnlineSearchException(OnlineFailure.rateLimited);

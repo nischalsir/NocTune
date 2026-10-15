@@ -61,7 +61,8 @@ void main() {
       url.queryParameters['q'],
       '(grateful dead) AND ((mediatype:audio AND '
       '(licenseurl:*creativecommons.org* OR licenseurl:*publicdomain*)) OR '
-      '(collection:etree AND format:"VBR MP3")) AND NOT collection:stream_only',
+      'collection:etree) AND (format:"VBR MP3" OR format:"128Kbps MP3" OR '
+      'format:"64Kbps MP3") AND NOT collection:stream_only',
     );
     expect(url.queryParametersAll['fl[]'], [
       'identifier',
@@ -72,6 +73,15 @@ void main() {
     ]);
     expect(url.queryParameters['rows'], '20');
     expect(url.queryParameters['output'], 'json');
+  });
+
+  test('characters with a meaning in the query are escaped', () async {
+    await answering(_search).search(r'ac/dc (live) "best" -1 a:b');
+
+    expect(
+      asked.single.queryParameters['q'],
+      startsWith(r'(ac\/dc \(live\) \"best\" \-1 a\:b) AND '),
+    );
   });
 
   test('results are albums and shows with covers', () async {

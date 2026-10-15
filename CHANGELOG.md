@@ -21,9 +21,11 @@ Release channels:
   it, saved as the type they uploaded, such as FLAC, in `Audius/`). An
   Internet Archive result is a show or album that opens to a page with its
   tracks, Play all, Download all and a download button per track, saved in
-  `Internet Archive/<name>/`; the page also works offline once opened.
-  Only Creative Commons and public-domain recordings and Live Music
-  Archive shows with MP3s are searched. Neither source needs a key.
+  `Internet Archive/<name> [<item id>]/`; the page also works offline once
+  opened. Only Creative Commons and public-domain recordings and Live
+  Music Archive shows that have MP3s are searched. Neither source needs a
+  key. One source that can't be reached never stops the others' songs
+  from playing.
 - Search: "Search on Spotify" and "Search on YouTube Music" buttons open
   the same words in those apps (or their websites). No Spotify or YouTube
   API is used and nothing from them is shown in NocTune.
@@ -85,10 +87,9 @@ Release channels:
 - Audius and Internet Archive: searching (with recorded answers), which
   tracks and items are left out, file order and lengths, encoded
   addresses, and their failures. The mixed order, the saved searches per
-  source, the switches, and an old saved Jamendo search still reading
-  back. Download paths and names per source, an Audius FLAC saved as
+  source, the switches, and the old saved searches being cleared. Download paths and names per source, an Audius FLAC saved as
   `.flac`, and Download all. The search page with several sources, one
-  failing, and the Spotify and YouTube Music buttons; the Archive page
+  failing or unreachable, and the Spotify and YouTube Music buttons; the Archive page
   online, offline and failing; the Settings switches.
 - The taste mix, the decoder settings and their rows, the what's-new rule.
 - The release list is read (pre-releases left out) and the rule is checked

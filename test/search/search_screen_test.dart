@@ -435,6 +435,47 @@ void main() {
       expect(handler.played, ['J1']);
     });
 
+    testWidgets('one source offline does not stop the others', (tester) async {
+      final handler = await pump(
+        tester,
+        jamendo: (_) async => _jamendo(['J1']),
+        audius: (_) async => throw const SocketException('blocked'),
+      );
+
+      await tester.enterText(find.byType(TextField), 'zz');
+      await tester.pumpAndSettle();
+      expect(find.textContaining("You're offline."), findsNothing);
+      expect(
+        find.text("Audius couldn't be reached right now."),
+        findsOneWidget,
+      );
+      expect(find.byTooltip('Needs an internet connection'), findsNothing);
+
+      await tester.runAsync(() async {
+        await tester.tap(find.text('J1'));
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      });
+      await tester.pumpAndSettle();
+      expect(handler.played, ['J1']);
+    });
+
+    testWidgets('a source that fails unexpectedly says so', (tester) async {
+      await pump(
+        tester,
+        jamendo: (_) async => _jamendo(['J1']),
+        audius: (_) async => throw ArgumentError('surprise'),
+      );
+
+      await tester.enterText(find.byType(TextField), 'zz');
+      await tester.pumpAndSettle();
+
+      expect(find.text('J1'), findsOneWidget);
+      expect(
+        find.text("Audius couldn't be reached right now."),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('tapping a song queues only the songs', (tester) async {
       final handler = await pump(
         tester,

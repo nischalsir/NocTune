@@ -237,6 +237,42 @@ void main() {
     expect(find.text('01.Iko Iko'), findsOneWidget);
   });
 
+  testWidgets('offline, Play all starts at the first downloaded track', (
+    tester,
+  ) async {
+    await pump(tester);
+    final tracks = await ArchiveSource(
+      fetch: (_) async => (status: 200, body: _item),
+    ).tracks(_show);
+    downloadedFile(paths, tracks[2])
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('mp3');
+    answer = () => throw const SocketException('offline');
+    await tester.pumpWidget(const SizedBox());
+    final preferences = await SharedPreferences.getInstance();
+    final handler = await pump(
+      tester,
+      saved: {
+        for (final key in preferences.getKeys()) key: preferences.get(key)!,
+      },
+    );
+
+    await tapAndWait(tester, find.text('Play all'));
+
+    expect(handler.played, ['03.Tuning']);
+  });
+
+  testWidgets('an unexpected failure offers Try again', (tester) async {
+    answer = () => throw ArgumentError('surprise');
+    await pump(tester);
+
+    expect(
+      find.text("Internet Archive couldn't be reached right now."),
+      findsOneWidget,
+    );
+    expect(find.text('Try again'), findsOneWidget);
+  });
+
   testWidgets('an item with nothing to play says so', (tester) async {
     answer = () => (status: 200, body: jsonEncode({'files': []}));
     await pump(tester);

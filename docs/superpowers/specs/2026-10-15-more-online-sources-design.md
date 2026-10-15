@@ -74,8 +74,11 @@ imported file:
   downloaded are still recognised.
 - Audius: `Audius/audius-<id>.<ext>`, with the extension taken from the
   file's first bytes (see Audius below).
-- Archive: `Internet Archive/<item title>/<file name>`, with characters
-  Windows or Android won't accept replaced by `_`.
+- Archive: `Internet Archive/<item title> [<identifier>]/<file name>`,
+  with characters Windows or Android won't accept replaced by `_` and the
+  title cut to 100 characters. The identifier is there because the Live
+  Music Archive often has several recordings of one show under the same
+  title (changed after review, 2026-10-15).
 
 **Download all** downloads the item's tracks one after another. Each row
 shows its own progress, and a failed track can be retried on its own. After
@@ -117,9 +120,13 @@ no key.
 **Internet Archive:** `GET https://archive.org/advancedsearch.php` with
 `rows=20`, `output=json` and fields `identifier, title, creator, mediatype,
 licenseurl`, for the query
-`(<words>) AND ((mediatype:audio AND (licenseurl:*creativecommons.org* OR licenseurl:*publicdomain*)) OR (collection:etree AND format:"VBR MP3")) AND NOT collection:stream_only`.
-- Creative Commons or public-domain audio, plus Live Music Archive shows that
-  have MP3s. Nothing stream-only.
+`(<words>) AND ((mediatype:audio AND (licenseurl:*creativecommons.org* OR licenseurl:*publicdomain*)) OR collection:etree) AND (format:"VBR MP3" OR format:"128Kbps MP3" OR format:"64Kbps MP3") AND NOT collection:stream_only`,
+with the characters that mean something in a query (`\ + - ! ( ) : ^ [ ] " { } ~ * ? | & /`)
+escaped in the words, so `ac/dc` or `rock (live` is searched as typed.
+- Creative Commons or public-domain audio, plus Live Music Archive shows,
+  and only items that have MP3s. Nothing stream-only. (Changed after the
+  phone check: 17 of the first 20 "lofi" results were scans and PDFs filed
+  as audio.)
 - An item opens with `GET https://archive.org/metadata/<identifier>`. Its
   tracks are its files with format `VBR MP3`. If there are none, the files
   with format `128Kbps MP3` or `64Kbps MP3` are used instead, preferring the

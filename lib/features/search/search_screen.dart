@@ -159,7 +159,11 @@ class _Results extends ConsumerWidget {
     final localTracks = local.value ?? const <Track>[];
     final results = [
       for (final (id, answer) in answers)
-        if (answer.value case final results?) (id, results),
+        if (answer.value case final results?)
+          (id, results)
+        // Never expected: the search catches its failures. Shown as one.
+        else if (answer.hasError)
+          (id, const OnlineResults([], failure: OnlineFailure.unavailable)),
     ];
     final items = interleave([
       for (final (_, results) in results) results.items,
@@ -167,11 +171,16 @@ class _Results extends ConsumerWidget {
     final songs = items.whereType<OnlineTrack>().toList();
     final loading = answers.any((answer) => answer.$2.isLoading);
     final failed = results.any((answer) => answer.$2.failure != null);
-    final offline = results.any(
-      (answer) => answer.$2.failure == OnlineFailure.offline,
-    );
+    // The sources that couldn't be reached. Only when none could is the
+    // phone taken to be offline; otherwise one source is blocked or slow,
+    // and the others play as usual.
+    final offline = {
+      for (final (id, results) in results)
+        if (results.failure == OnlineFailure.offline) id,
+    };
+    final allOffline = offline.isNotEmpty && offline.length == results.length;
     final notes = [
-      if (offline)
+      if (allOffline)
         results.any((answer) => answer.$2.fromCache)
             ? "You're offline. These are from an earlier search; only "
                   'downloaded songs can play.'
@@ -181,6 +190,8 @@ class _Results extends ConsumerWidget {
         switch (results.failure) {
           OnlineFailure.rateLimited =>
             '${id.label} is busy right now. Try again in a minute.',
+          OnlineFailure.offline when !allOffline =>
+            "${id.label} couldn't be reached right now.",
           OnlineFailure.unavailable =>
             "${id.label} couldn't be reached right now.",
           _ => null,
@@ -228,9 +239,10 @@ class _Results extends ConsumerWidget {
       final file = downloadedFile(paths, track);
       final downloaded = file.existsSync();
       final copy = Uri.file(file.path).toString();
+      final unreachable = offline.contains(track.source);
       return Opacity(
         // Can't play right now: no connection and no copy on the device.
-        opacity: offline && !downloaded ? 0.5 : 1,
+        opacity: unreachable && !downloaded ? 0.5 : 1,
         child: TrackTile(
           track: streamedTrack(track),
           isCurrent:
@@ -246,7 +258,7 @@ class _Results extends ConsumerWidget {
               DownloadAction(
                 track: track,
                 downloaded: downloaded,
-                offline: offline,
+                offline: unreachable,
                 status: downloads[track.key],
               ),
             ],

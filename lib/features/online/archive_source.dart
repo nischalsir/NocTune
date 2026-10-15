@@ -2,7 +2,8 @@ import 'online_source.dart';
 
 /// Searches the Internet Archive for recordings that may be shared: those
 /// under a Creative Commons licence or in the public domain, and Live Music
-/// Archive shows with MP3s. Never the ones the Archive only streams.
+/// Archive shows. Only items with MP3s, and never the ones the Archive only
+/// streams.
 class ArchiveSource implements OnlineSource {
   ArchiveSource({this.fetch = fetchOverHttps});
 
@@ -20,10 +21,13 @@ class ArchiveSource implements OnlineSource {
 
   @override
   Future<List<OnlineItem>> search(String words) async {
+    // Many items filed as audio hold only scans or text, so an item must
+    // have one of the MP3s [tracks] plays.
     final query =
-        '(${words.trim()}) AND ((mediatype:audio AND '
+        '(${_escape(words.trim())}) AND ((mediatype:audio AND '
         '(licenseurl:*creativecommons.org* OR licenseurl:*publicdomain*)) OR '
-        '(collection:etree AND format:"VBR MP3")) AND NOT collection:stream_only';
+        'collection:etree) AND (format:"VBR MP3" OR format:"128Kbps MP3" OR '
+        'format:"64Kbps MP3") AND NOT collection:stream_only';
     final json = await fetchJson(
       fetch,
       Uri.https('archive.org', '/advancedsearch.php', {
@@ -67,6 +71,13 @@ class ArchiveSource implements OnlineSource {
       for (final file in chosen) _track(album, file['name'] as String, file),
     ];
   }
+
+  /// [words] with the characters that mean something in a query escaped,
+  /// so `ac/dc` or `rock (live` is searched as typed.
+  static String _escape(String words) => words.replaceAllMapped(
+    RegExp(r'[\\+\-!():^\[\]"{}~*?|&/]'),
+    (match) => '\\${match[0]}',
+  );
 
   static const _unreadable = OnlineSearchException(
     OnlineFailure.unavailable,

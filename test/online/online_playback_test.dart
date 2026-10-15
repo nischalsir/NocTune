@@ -113,7 +113,7 @@ void main() {
   test('online, a result streams with its cover saved first', () async {
     final results = [_online('1'), _online('2')];
 
-    final outcome = await player().play(results, 1, offline: false);
+    final outcome = await player().play(results, 1);
 
     expect(outcome, OnlinePlayOutcome.started);
     final (tracks, index) = played.single;
@@ -132,7 +132,7 @@ void main() {
   test('a cover that fails to load does not stop playback', () async {
     fetchFails = true;
 
-    await player().play([_online('1')], 0, offline: false);
+    await player().play([_online('1')], 0);
 
     expect(played.single.$1.single.artPath, isNull);
   });
@@ -151,7 +151,7 @@ void main() {
       dateModified: DateTime(2026),
     );
 
-    await player().play([result], 0, offline: false);
+    await player().play([result], 0);
 
     final track = played.single.$1.single;
     expect(track.id, 42);
@@ -162,7 +162,11 @@ void main() {
     final results = [_online('1'), _online('2')];
     download(results[1]);
 
-    final outcome = await player().play(results, 1, offline: true);
+    final outcome = await player().play(
+      results,
+      1,
+      offline: {OnlineSourceId.jamendo},
+    );
 
     expect(outcome, OnlinePlayOutcome.started);
     final (tracks, index) = played.single;
@@ -177,7 +181,11 @@ void main() {
   });
 
   test('offline, a result that is not downloaded is not started', () async {
-    final outcome = await player().play([_online('1')], 0, offline: true);
+    final outcome = await player().play(
+      [_online('1')],
+      0,
+      offline: {OnlineSourceId.jamendo},
+    );
 
     expect(outcome, OnlinePlayOutcome.needsConnection);
     expect(played, isEmpty);
@@ -198,7 +206,11 @@ void main() {
 
     expect(
       inMusic(downloadedFile(paths, track)),
-      p.join('Internet Archive', 'Live_ 1977_05_08_', 'set 1_01 Iko.mp3'),
+      p.join(
+        'Internet Archive',
+        'Live_ 1977_05_08_ [samh2024]',
+        'set 1_01 Iko.mp3',
+      ),
     );
     expect(p.basename(coverFile(paths, track).path), 'archive-samh2024.jpg');
     expect(streamedTrack(track).folder, 'Internet Archive');
@@ -209,6 +221,30 @@ void main() {
       inMusic(downloadedFile(paths, _archive('a.mp3', album: ' ... '))),
       p.join('Internet Archive', 'samh2024', 'a.mp3'),
     );
+  });
+
+  test('two items with the same title get their own folders', () {
+    final other = OnlineTrack(
+      source: OnlineSourceId.archive,
+      id: 'gd77b/a.mp3',
+      title: 'a',
+      album: 'Live at Ashkenaz',
+      streamUrl: Uri.parse('https://archive.org/download/gd77b/a.mp3'),
+    );
+
+    expect(
+      downloadedFile(paths, _archive('a.mp3')).path,
+      isNot(downloadedFile(paths, other).path),
+    );
+  });
+
+  test('a very long title is cut short', () {
+    final folder = p.basename(
+      downloadedFile(paths, _archive('a.mp3', album: 'ॐ' * 300)).parent.path,
+    );
+
+    expect(folder, endsWith(' [samh2024]'));
+    expect(folder.length, lessThanOrEqualTo(100 + ' [samh2024]'.length));
   });
 
   test('Audius files and covers are named by id', () {
@@ -230,6 +266,19 @@ void main() {
     expect(audioExtension([0, 0, 0, 32, ...'ftypM4A '.codeUnits]), 'm4a');
     expect(audioExtension('ID3'.codeUnits), 'mp3');
     expect(audioExtension(const []), 'mp3');
+  });
+
+  test('only the offline source is held to its downloads', () async {
+    final results = [_online('1'), _audius('a')];
+
+    final outcome = await player().play(
+      results,
+      0,
+      offline: {OnlineSourceId.audius},
+    );
+
+    expect(outcome, OnlinePlayOutcome.started);
+    expect(played.single.$1.map((track) => track.title), ['Song 1']);
   });
 
   group('downloads', () {

@@ -47,10 +47,13 @@ File downloadedFile(AppPaths paths, OnlineTrack track) {
       return File(p.join(folder, 'audius-${track.id}.mp3'));
     case OnlineSourceId.archive:
       final (identifier, name) = _archiveParts(track);
+      // Shows are often shared several times under one title, so the
+      // item's own name keeps each in its own folder.
+      final title = safeName(track.album ?? '', fallback: '');
       return File(
         p.join(
           folder,
-          safeName(track.album ?? '', fallback: identifier),
+          title.isEmpty ? identifier : '${_cut(title, 100)} [$identifier]',
           safeName(name, fallback: identifier),
         ),
       );
@@ -90,6 +93,15 @@ String safeName(String name, {required String fallback}) {
       .trim()
       .replaceAll(RegExp(r'[. ]+$'), '');
   return cleaned.isEmpty ? fallback : cleaned;
+}
+
+/// [text] cut to at most [length] characters, so the folder name stays
+/// within what a file system allows.
+String _cut(String text, int length) {
+  final characters = text.runes.toList();
+  return characters.length <= length
+      ? text
+      : String.fromCharCodes(characters.take(length)).trimRight();
 }
 
 /// The type of an audio file, from its first bytes.
@@ -159,23 +171,23 @@ class OnlinePlayer {
   bool isDownloaded(OnlineTrack track) =>
       downloadedFile(paths, track).existsSync();
 
-  /// Plays [tracks] from [index]. [offline] when the search that found them
-  /// could not get online: only downloaded tracks are queued then, and one
+  /// Plays [tracks] from [index]. [offline] names the sources that could
+  /// not be reached: their tracks are queued only when downloaded, and one
   /// that isn't downloaded is not started.
   Future<OnlinePlayOutcome> play(
     List<OnlineTrack> tracks,
     int index, {
-    required bool offline,
+    Set<OnlineSourceId> offline = const {},
   }) async {
+    bool reachable(OnlineTrack track) =>
+        !offline.contains(track.source) || isDownloaded(track);
     final tapped = tracks[index];
-    if (offline && !isDownloaded(tapped)) {
-      return OnlinePlayOutcome.needsConnection;
-    }
-    final queued = [
-      for (final track in tracks)
-        if (!offline || isDownloaded(track)) track,
-    ];
-    if (!offline) await _fetchCovers(queued);
+    if (!reachable(tapped)) return OnlinePlayOutcome.needsConnection;
+    final queued = tracks.where(reachable).toList();
+    await _fetchCovers([
+      for (final track in queued)
+        if (!offline.contains(track.source)) track,
+    ]);
     final playable = [for (final track in queued) await _playable(track)];
     await playTracks(playable, queued.indexOf(tapped));
     return OnlinePlayOutcome.started;

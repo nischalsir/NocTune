@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -33,6 +35,11 @@ class OnlineAlbumScreen extends ConsumerWidget {
       body: NocBackdrop(
         child: SafeArea(
           child: switch (results.value) {
+            // Never expected: fetching catches its failures. Shown as one.
+            null when results.hasError => _Empty(
+              album: album,
+              failure: OnlineFailure.unavailable,
+            ),
             null => const Center(child: CircularProgressIndicator()),
             final results when results.items.isEmpty => _Empty(
               album: album,
@@ -74,7 +81,7 @@ class _Tracks extends ConsumerWidget {
     Future<void> play(int index) async {
       final outcome = await ref
           .read(onlinePlayerProvider)
-          .play(tracks, index, offline: offline);
+          .play(tracks, index, offline: {if (offline) OnlineSourceId.archive});
       if (outcome == OnlinePlayOutcome.needsConnection && context.mounted) {
         say(
           context,
@@ -120,7 +127,18 @@ class _Tracks extends ConsumerWidget {
                   filled: true,
                   icon: Icons.play_arrow_rounded,
                   label: 'Play all',
-                  onTap: () => play(0),
+                  // Offline, from the first track that is on the device.
+                  onTap: () => play(
+                    offline
+                        ? max(
+                            0,
+                            tracks.indexWhere(
+                              (track) =>
+                                  downloadedFile(paths, track).existsSync(),
+                            ),
+                          )
+                        : 0,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
