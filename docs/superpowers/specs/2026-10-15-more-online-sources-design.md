@@ -72,7 +72,8 @@ imported file:
 
 - Jamendo: `Jamendo/jamendo-<id>.mp3`. Same as now, so songs already
   downloaded are still recognised.
-- Audius: `Audius/audius-<id>.mp3`.
+- Audius: `Audius/audius-<id>.<ext>`, with the extension taken from the
+  file's first bytes (see Audius below).
 - Archive: `Internet Archive/<item title>/<file name>`, with characters
   Windows or Android won't accept replaced by `_`.
 
@@ -105,8 +106,11 @@ no key.
 - Downloadable only when `is_downloadable == true` and
   `is_download_gated != true`, from
   `https://api.audius.co/v1/tracks/<id>/download?app_name=NocTune`.
-  **Not yet tried.** The first implementation step checks it. If it doesn't
-  return the audio file, Audius tracks get no download button.
+  Checked on 2026-10-15: 200 with the artist's **original upload**, which
+  can be FLAC (or WAV, etc.) even when the suggested file name ends in
+  `.mp3`. So the saved file's extension is chosen from its first bytes, not
+  from the name: `fLaC` gives `.flac`, `RIFF` `.wav`, `OggS` `.ogg`,
+  `ftyp` at offset 4 `.m4a`, and anything else `.mp3`.
 - Cover: `artwork["480x480"]`. Artist: `user.name`. Length: `duration`
   (seconds). Genre and licence are not shown.
 
