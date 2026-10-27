@@ -121,4 +121,34 @@ void main() {
     );
     expect(busy.latest('drake'), throwsA(isA<OnlineSearchException>()));
   });
+
+  test('lists the songs of an official edition', () async {
+    final songs =
+        await source(
+          (url) => {
+            'body':
+                '{"releases": ['
+                '{"status": "Bootleg", "media": [{"tracks": [{"title": "X"}]}]},'
+                '{"status": "Official", "media": ['
+                '{"tracks": [{"title": "One", "length": 61000}]},'
+                '{"tracks": [{"title": "Two", "artist-credit": ['
+                '{"name": "Drake", "joinphrase": " & "},'
+                '{"name": "Future", "joinphrase": ""}]}]}]}]}',
+          },
+        ).tracks(
+          const Release(
+            id: 'rg',
+            title: 'Disc',
+            artist: 'Drake',
+            type: 'Album',
+            date: '2026',
+          ),
+        );
+
+    expect(asked.single.queryParameters['release-group'], 'rg');
+    expect(songs.map((song) => song.title), ['One', 'Two']);
+    expect(songs.first.artist, 'Drake');
+    expect(songs.first.length, const Duration(seconds: 61));
+    expect(songs.last.artist, 'Drake & Future');
+  });
 }

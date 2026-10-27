@@ -213,6 +213,12 @@ final latestReleasesProvider = FutureProvider.autoDispose
       }
     });
 
+/// The songs on a release, from MusicBrainz.
+final releaseTracksProvider = FutureProvider.autoDispose
+    .family<List<ReleaseTrack>, Release>(
+      (ref, release) => ref.read(musicBrainzSourceProvider).tracks(release),
+    );
+
 /// The first of each list, then the second of each, and so on, so every
 /// source's best matches are near the top.
 List<OnlineItem> interleave(List<List<OnlineItem>> lists) => [

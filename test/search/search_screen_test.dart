@@ -190,6 +190,7 @@ void main() {
           ),
           audioHandlerProvider.overrideWithValue(handler),
           currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
+          allTracksProvider.overrideWith((ref) => library),
           searchResultsProvider.overrideWith(
             (ref, query) => [
               for (final track in library)
@@ -557,17 +558,23 @@ void main() {
     testWidgets('lists the newest releases of the artist searched for', (
       tester,
     ) async {
-      await pump(
+      final handler = await pump(
         tester,
         musicBrainz: (url) async => (
           status: 200,
           body: url.path.endsWith('/artist')
               ? '{"artists": [{"id": "a1", "name": "Aurora", "score": 100}]}'
-              : '{"release-groups": ['
+              : url.path.endsWith('/release-group')
+              ? '{"release-groups": ['
                     '{"id": "r1", "title": "Older", "primary-type": "Album",'
                     ' "first-release-date": "2025-03-01"},'
-                    '{"id": "r2", "title": "Newest", "primary-type": "Single",'
-                    ' "first-release-date": "2026-10-02"}]}',
+                    '{"id": "r2", "title": "Newest", "primary-type": "Album",'
+                    ' "first-release-date": "2026-10-02"}]}'
+              : '{"releases": [{"status": "Official", "media": [{"tracks": ['
+                    '{"title": "Balenci (feat. Kid)", "length": 200000,'
+                    ' "artist-credit": [{"name": "Aurora", "joinphrase":'
+                    ' " feat. "}, {"name": "Kid", "joinphrase": ""}]},'
+                    '{"title": "Brand New", "length": 180000}]}]}]}',
         ),
       );
 
@@ -575,18 +582,41 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Latest from Aurora'), findsOneWidget);
-      expect(find.text('Single · 2026-10-02'), findsOneWidget);
+      expect(find.text('Album · 2026-10-02'), findsOneWidget);
       expect(
         tester.getTopLeft(find.text('Newest')).dy,
         lessThan(tester.getTopLeft(find.text('Older')).dy),
       );
 
+      // Opens to its songs; the one in the library plays from there.
       await tester.tap(find.text('Newest'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Open in Spotify'));
-      await tester.pumpAndSettle();
 
+      expect(find.text('Balenci (feat. Kid)'), findsOneWidget);
+      expect(
+        find.text('Aurora feat. Kid · In your library · 3:20'),
+        findsOneWidget,
+      );
+      expect(find.text('Play the 1 song you have'), findsOneWidget);
+
+      await tester.tap(find.text('Balenci (feat. Kid)'));
+      await tester.pumpAndSettle();
+      expect(handler.played, ['Balenci']);
+
+      // The whole release opens in Spotify.
+      await tester.tap(find.text('Spotify'));
+      await tester.pumpAndSettle();
       expect(opened.single, Uri.parse('spotify:search:Aurora%20Newest'));
+
+      // A song not in the library opens elsewhere.
+      await tester.tap(find.text('Brand New'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open in YouTube Music'));
+      await tester.pumpAndSettle();
+      expect(
+        opened.last,
+        Uri.https('music.youtube.com', '/search', {'q': 'Aurora Brand New'}),
+      );
     });
 
     testWidgets('a link that does not open says so', (tester) async {

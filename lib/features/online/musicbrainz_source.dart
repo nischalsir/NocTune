@@ -28,6 +28,28 @@ class Release {
   /// The front cover from the Cover Art Archive, when it has one.
   Uri get coverUrl =>
       Uri.https('coverartarchive.org', '/release-group/$id/front-250');
+
+  @override
+  bool operator ==(Object other) => other is Release && other.id == id;
+
+  @override
+  int get hashCode => id.hashCode;
+}
+
+/// One song on a [Release].
+@immutable
+class ReleaseTrack {
+  const ReleaseTrack({
+    required this.title,
+    required this.artist,
+    this.length = Duration.zero,
+  });
+
+  final String title;
+  final String artist;
+
+  /// Zero when MusicBrainz doesn't know it.
+  final Duration length;
 }
 
 /// Finds an artist's newest releases on MusicBrainz, the open music
@@ -98,6 +120,45 @@ class MusicBrainzSource {
     return (name, releases.take(limit).toList());
   }
 
+  /// The songs on [release], in order, from one of its official editions.
+  /// Throws [OnlineSearchException] when MusicBrainz can't be asked.
+  Future<List<ReleaseTrack>> tracks(Release release) async {
+    final json = await fetchJson(
+      fetch,
+      _url('release', {
+        'release-group': release.id,
+        'inc': 'recordings artist-credits',
+        'limit': '5',
+      }),
+    );
+    final editions = json is Map<String, Object?> ? json['releases'] : null;
+    if (editions is! List) {
+      throw const OnlineSearchException(
+        OnlineFailure.unavailable,
+        'An unreadable answer',
+      );
+    }
+    final all = editions.whereType<Map<String, Object?>>();
+    final edition =
+        all.where((edition) => edition['status'] == 'Official').firstOrNull ??
+        all.firstOrNull;
+    final media = edition?['media'];
+    if (media is! List) return const [];
+    return [
+      for (final disc in media.whereType<Map<String, Object?>>())
+        if (disc['tracks'] case final List tracks)
+          for (final track in tracks.whereType<Map<String, Object?>>())
+            if (text(track['title']) case final title?)
+              ReleaseTrack(
+                title: title,
+                artist: _credit(track['artist-credit'], release.artist),
+                length: Duration(
+                  milliseconds: (track['length'] as num?)?.toInt() ?? 0,
+                ),
+              ),
+    ];
+  }
+
   Future<List<Release>> _releases(String query, String artist) async {
     await Future<void>.delayed(gap);
     final json = await fetchJson(
@@ -131,20 +192,25 @@ class MusicBrainzSource {
         (secondary is List && secondary.any(_skipped.contains))) {
       return null;
     }
-    final credit = json['artist-credit'];
+    return Release(
+      id: id,
+      title: title,
+      artist: _credit(json['artist-credit'], artist),
+      type: type!,
+      date: date,
+    );
+  }
+
+  /// The names in an artist credit, as `A feat. B`; [fallback] when it
+  /// names no one.
+  static String _credit(Object? credit, String fallback) {
     final credited = credit is List
         ? [
             for (final part in credit.whereType<Map<String, Object?>>())
               '${part['name'] ?? ''}${part['joinphrase'] ?? ''}',
           ].join()
         : '';
-    return Release(
-      id: id,
-      title: title,
-      artist: credited.trim().isEmpty ? artist : credited,
-      type: type!,
-      date: date,
-    );
+    return credited.trim().isEmpty ? fallback : credited;
   }
 
   static Uri _url(String entity, Map<String, String> query) =>
