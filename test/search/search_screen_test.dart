@@ -13,6 +13,7 @@ import 'package:noctune/features/online/archive_source.dart';
 import 'package:noctune/features/online/audius_source.dart';
 import 'package:noctune/features/online/external_search.dart';
 import 'package:noctune/features/online/jamendo_source.dart';
+import 'package:noctune/features/online/musicbrainz_source.dart';
 import 'package:noctune/features/online/online_source.dart';
 import 'package:noctune/features/online/online_playback.dart';
 import 'package:noctune/features/online/online_search.dart';
@@ -120,13 +121,15 @@ void main() {
   /// [jamendo], [audius] and [archive] answer online searches. Without
   /// [jamendo] the build has no Jamendo client id, as by default; without
   /// [audius] or [archive] that source is switched off, so tests never go
-  /// online. [opens] says whether a link opens.
+  /// online. [musicBrainz] answers the artist lookup; without it no artist
+  /// is found. [opens] says whether a link opens.
   Future<_FakeHandler> pump(
     WidgetTester tester, {
     List<String> remembered = const [],
     OnlineFetch? jamendo,
     OnlineFetch? audius,
     OnlineFetch? archive,
+    OnlineFetch? musicBrainz,
     bool Function(Uri url)? opens,
     Map<String, Object> cached = const {},
   }) async {
@@ -167,6 +170,14 @@ void main() {
           archiveSourceProvider.overrideWithValue(
             ArchiveSource(
               fetch: archive ?? (_) async => throw StateError('not asked'),
+            ),
+          ),
+          musicBrainzSourceProvider.overrideWithValue(
+            MusicBrainzSource(
+              gap: Duration.zero,
+              fetch:
+                  musicBrainz ??
+                  (_) async => (status: 200, body: '{"artists": []}'),
             ),
           ),
           linkOpenerProvider.overrideWithValue((url) async {
@@ -541,6 +552,41 @@ void main() {
       );
       expect(find.text('Search on Spotify'), findsOneWidget);
       expect(find.text('Search on YouTube Music'), findsOneWidget);
+    });
+
+    testWidgets('lists the newest releases of the artist searched for', (
+      tester,
+    ) async {
+      await pump(
+        tester,
+        musicBrainz: (url) async => (
+          status: 200,
+          body: url.path.endsWith('/artist')
+              ? '{"artists": [{"id": "a1", "name": "Aurora", "score": 100}]}'
+              : '{"release-groups": ['
+                    '{"id": "r1", "title": "Older", "primary-type": "Album",'
+                    ' "first-release-date": "2025-03-01"},'
+                    '{"id": "r2", "title": "Newest", "primary-type": "Single",'
+                    ' "first-release-date": "2026-10-02"}]}',
+        ),
+      );
+
+      await tester.enterText(find.byType(TextField), 'aurora');
+      await tester.pumpAndSettle();
+
+      expect(find.text('Latest from Aurora'), findsOneWidget);
+      expect(find.text('Single · 2026-10-02'), findsOneWidget);
+      expect(
+        tester.getTopLeft(find.text('Newest')).dy,
+        lessThan(tester.getTopLeft(find.text('Older')).dy),
+      );
+
+      await tester.tap(find.text('Newest'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open in Spotify'));
+      await tester.pumpAndSettle();
+
+      expect(opened.single, Uri.parse('spotify:search:Aurora%20Newest'));
     });
 
     testWidgets('a link that does not open says so', (tester) async {

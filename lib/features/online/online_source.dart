@@ -206,10 +206,14 @@ typedef OnlineResponse = ({int status, String body});
 /// Downloads one answer from a service. Replaced with a fake in tests.
 typedef OnlineFetch = Future<OnlineResponse> Function(Uri url);
 
-Future<OnlineResponse> fetchOverHttps(Uri url) async {
+Future<OnlineResponse> fetchOverHttps(
+  Uri url, {
+  Map<String, String> headers = const {},
+}) async {
   final client = HttpClient()..connectionTimeout = const Duration(seconds: 6);
   try {
     final request = await client.getUrl(url);
+    headers.forEach(request.headers.set);
     final response = await request.close().timeout(const Duration(seconds: 8));
     final body = await response
         .transform(utf8.decoder)

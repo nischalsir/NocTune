@@ -11,6 +11,7 @@ import '../library/track_menu.dart';
 import '../library/track_tile.dart';
 import '../online/download_action.dart';
 import '../online/external_search.dart';
+import '../online/musicbrainz_source.dart';
 import '../online/online_album_screen.dart';
 import '../online/online_playback.dart';
 import '../online/online_search.dart';
@@ -19,8 +20,9 @@ import 'search_history.dart';
 
 /// Searches the library by title, artist, album and file name as you type,
 /// and free music online: Jamendo (when the build has a client id), Audius
-/// and the Internet Archive, each unless switched off. Buttons open the same
-/// search in Spotify and YouTube Music. With nothing typed it lists the
+/// and the Internet Archive, each unless switched off. When the words name an
+/// artist, their newest releases from MusicBrainz, to open in Spotify or
+/// YouTube Music. Buttons open the same search in those apps. With nothing typed it lists the
 /// searches made lately, to run again.
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
@@ -142,6 +144,8 @@ class _Results extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final local = ref.watch(searchResultsProvider(query));
+    final latest = ref.watch(latestReleasesProvider(query));
+    final (artist, releases) = latest.value ?? ('', const <Release>[]);
     final sources = ref.watch(onlineSourcesProvider);
     final answers = [
       for (final source in sources)
@@ -202,7 +206,9 @@ class _Results extends ConsumerWidget {
         localTracks.isEmpty &&
         !loading &&
         items.isEmpty &&
-        !failed) {
+        !failed &&
+        !latest.isLoading &&
+        releases.isEmpty) {
       return Column(
         children: [
           Expanded(
@@ -283,6 +289,8 @@ class _Results extends ConsumerWidget {
           },
           onMenu: () => showTrackMenu(context, ref, track),
         ),
+      if (releases.isNotEmpty) (_) => _Heading('Latest from $artist'),
+      for (final release in releases) (_) => _ReleaseRow(release: release),
       if (sources.isNotEmpty) (_) => const _Heading('Online'),
       for (final note in notes) (_) => _Note(note),
       for (final item in items)
@@ -349,6 +357,111 @@ class _AlbumRow extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A new release by the artist searched for. MusicBrainz has no audio, so
+/// it opens in Spotify or YouTube Music.
+class _ReleaseRow extends ConsumerWidget {
+  const _ReleaseRow({required this.release});
+
+  final Release release;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final text = Theme.of(context).textTheme;
+    return InkWell(
+      onTap: () => _showReleaseSheet(context, ref, release),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 4, 8),
+        child: Row(
+          children: [
+            Artwork(path: null, url: release.coverUrl, size: 48),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    release.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.titleSmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    [release.type, release.date].join(' · '),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(12),
+              child: Icon(Icons.open_in_new_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Offers to open [release] in Spotify or YouTube Music.
+Future<void> _showReleaseSheet(
+  BuildContext context,
+  WidgetRef ref,
+  Release release,
+) {
+  final words = '${release.artist} ${release.title}';
+  return showModalBottomSheet<void>(
+    context: context,
+    useRootNavigator: true,
+    showDragHandle: true,
+    backgroundColor: context.noc.glassSolid,
+    builder: (sheetContext) {
+      Future<void> open(
+        Future<bool> Function(LinkOpener open, String words) search,
+        String name,
+      ) async {
+        Navigator.of(sheetContext).pop();
+        final opened = await search(ref.read(linkOpenerProvider), words);
+        if (!opened && context.mounted) say(context, "Couldn't open $name.");
+      }
+
+      return SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(
+                release.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              subtitle: Text(
+                '${release.artist} · ${release.type} · ${release.date}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const Divider(),
+            ListTile(
+              leading: const Icon(Icons.open_in_new_rounded),
+              title: const Text('Open in Spotify'),
+              onTap: () => open(searchOnSpotify, 'Spotify'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.open_in_new_rounded),
+              title: const Text('Open in YouTube Music'),
+              onTap: () => open(searchOnYouTubeMusic, 'YouTube Music'),
+            ),
+          ],
+        ),
+      );
+    },
+  );
 }
 
 /// Opens the page with [album]'s tracks.

@@ -9,6 +9,7 @@ import '../../app/providers.dart';
 import 'archive_source.dart';
 import 'audius_source.dart';
 import 'jamendo_source.dart';
+import 'musicbrainz_source.dart';
 import 'online_source.dart';
 
 /// What one source found for a search, and whether it is fresh.
@@ -187,6 +188,28 @@ final onlineSourceSearchProvider = FutureProvider.autoDispose
           failure: error.failure,
           fromCache: saved != null,
         );
+      }
+    });
+
+final musicBrainzSourceProvider = Provider<MusicBrainzSource>(
+  (ref) => MusicBrainzSource(),
+);
+
+/// The artist a search names and their newest releases, from MusicBrainz.
+/// Null when online search is off, the words don't clearly name an artist,
+/// or MusicBrainz can't be reached: the section is then left out.
+final latestReleasesProvider = FutureProvider.autoDispose
+    .family<(String, List<Release>)?, String>((ref, query) async {
+      final words = query.trim();
+      if (words.isEmpty || !ref.watch(onlineSearchEnabledProvider)) {
+        return null;
+      }
+      await Future<void>.delayed(ref.read(onlineSearchDelayProvider));
+      if (!ref.mounted) return null;
+      try {
+        return await ref.read(musicBrainzSourceProvider).latest(words);
+      } on OnlineSearchException {
+        return null;
       }
     });
 
