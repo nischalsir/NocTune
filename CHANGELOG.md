@@ -9,10 +9,29 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
-## Unreleased
+## 1.10.0 (build 19) - 2026-10-27
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller. On the owner's phone, searching several sources at once,
+Audius playing with the screen locked, and the Internet Archive page were
+seen working while they were built, and a build with the artist releases
+was installed. The release page, the Jamendo download, the Spotify and
+YouTube Music buttons and the Settings switches have not been tried on a
+phone.
 
 ### Added
 
+- Search: when the words name an artist, "Latest from <artist>" lists
+  their newest albums, EPs and singles from MusicBrainz, the open music
+  database, newest first, with covers from the Cover Art Archive.
+  Compilations, live albums, remixes and demos are left out. A release
+  opens to its own page: cover, date, Spotify and YouTube Music buttons,
+  and the songs of an official edition. Songs already in the library
+  (matched by title and artist, ignoring capitals, punctuation and
+  "(feat. …)") are marked and play from the page, with "Play the songs
+  you have"; any other song opens in Spotify or YouTube Music. MusicBrainz
+  has no audio. Follows the "Search online music" switch; it is left out
+  when MusicBrainz is busy or can't be reached.
 - Search also finds music on Audius and the Internet Archive, beside
   Jamendo, in one "Online" list under the library's matches: each
   source's first result, then each one's second, and so on, each row
@@ -99,6 +118,11 @@ Release channels:
 - The release list is read (pre-releases left out) and the rule is checked
   at one, two and three releases behind, on the automatic check and the
   one started from Settings.
+- MusicBrainz: finding the artist, newest first, what is left out, the
+  fallback to older releases, the track list of an official edition, and
+  failures. Matching release songs to the library. The search page's
+  release list and the release page: playing a song you have, opening the
+  release and a song elsewhere.
 
 ## 1.9.3 (build 18) - 2026-10-14
 
