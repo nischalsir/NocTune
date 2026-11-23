@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
@@ -11,7 +12,7 @@ import 'mp4_inspector.dart';
 
 /// Bump this whenever the reader learns to describe files better. The next
 /// scan then re-reads every file an older version described.
-const kTrackReaderVersion = 2;
+const kTrackReaderVersion = 3;
 
 /// Reads the tags and embedded artwork of [files] and returns one [Track] per
 /// file. Does blocking file IO, so call it from a background isolate.
@@ -31,49 +32,117 @@ Track readTrack(DiscoveredFile file, String artworkDir) {
     tags = null;
   }
 
+  final sidecarMeta = _readSidecarMeta(file.path);
   final extension = p.extension(file.path).replaceFirst('.', '').toLowerCase();
   final mp4 = _mp4Extensions.contains(extension)
       ? _inspectMp4(file.path)
       : null;
 
-  final year = tags?.year?.year ?? file.year;
+  final year =
+      tags?.year?.year ??
+      _parseYear(sidecarMeta?['release_date']?.toString()) ??
+      (sidecarMeta?['year'] as num?)?.toInt() ??
+      file.year;
+  final sidecarDurationMs = (sidecarMeta?['duration_ms'] as num?)?.toInt() ?? 0;
   final duration =
       _positiveDuration(tags?.duration) ??
       mp4?.duration ??
+      (sidecarDurationMs > 0
+          ? Duration(milliseconds: sidecarDurationMs)
+          : null) ??
       file.duration ??
       Duration.zero;
+  final embeddedArt = tags == null
+      ? null
+      : _cacheArtwork(tags.pictures, artworkDir);
+  final artPath = embeddedArt ?? _cacheSidecarArtwork(file.path, artworkDir);
+
   return Track(
     uri: file.path,
     fileName: p.basename(file.path),
     folder: p.dirname(file.path),
     title:
         _text(tags?.title) ??
+        _text(sidecarMeta?['title']?.toString()) ??
         _text(file.title) ??
         p.basenameWithoutExtension(file.path),
-    artist: _text(tags?.artist) ?? _text(file.artist),
-    album: _text(tags?.album) ?? _text(file.album),
-    albumArtist: _text(tags?.albumArtist),
-    genre: _text(tags?.genres.firstOrNull),
+    artist:
+        _text(tags?.artist) ??
+        _text(sidecarMeta?['artist']?.toString()) ??
+        _text(file.artist),
+    album:
+        _text(tags?.album) ??
+        _text(sidecarMeta?['album']?.toString()) ??
+        _text(file.album),
+    albumArtist:
+        _text(tags?.albumArtist) ??
+        _text(sidecarMeta?['album_artist']?.toString()),
+    genre:
+        _text(tags?.genres.firstOrNull) ??
+        _text(sidecarMeta?['genre']?.toString()),
     duration: duration,
     sizeBytes: file.sizeBytes,
     // For MP4 containers the codec comes from inside the file; for FLAC and
     // WAV the contents must confirm what the extension claims.
     codec: mp4?.audioCodec ?? sniffCodec(file.path, extension),
-    sampleRate: _positive(tags?.sampleRate),
-    bitDepth: extension == 'flac' ? _flacBitDepth(tags) : null,
+    sampleRate:
+        _positive(tags?.sampleRate) ??
+        _positive((sidecarMeta?['sample_rate'] as num?)?.toInt()),
+    bitDepth:
+        (extension == 'flac' ? _flacBitDepth(tags) : null) ??
+        _positive((sidecarMeta?['bit_depth'] as num?)?.toInt()),
     // The tag library's own bitrate field means something different for
     // every format, so the average is worked out from the file instead.
     bitrate: _averageBitrate(file.sizeBytes, duration),
-    trackNumber: _positive(tags?.trackNumber) ?? file.trackNumber,
-    discNumber: _positive(tags?.discNumber),
+    trackNumber:
+        _positive(tags?.trackNumber) ??
+        _positive((sidecarMeta?['track_number'] as num?)?.toInt()) ??
+        file.trackNumber,
+    discNumber:
+        _positive(tags?.discNumber) ??
+        _positive((sidecarMeta?['disc_number'] as num?)?.toInt()),
     // Some taggers write year 0 to mean "unknown".
     year: year != null && year > 0 ? year : null,
     dateAdded: DateTime.fromMillisecondsSinceEpoch(
       file.addedMs ?? file.modifiedMs,
     ),
     dateModified: DateTime.fromMillisecondsSinceEpoch(file.modifiedMs),
-    artPath: tags == null ? null : _cacheArtwork(tags.pictures, artworkDir),
+    artPath: artPath,
   );
+}
+
+Map<String, Object?>? _readSidecarMeta(String audioPath) {
+  try {
+    final file = File('${p.withoutExtension(audioPath)}.meta.json');
+    if (!file.existsSync()) return null;
+    final decoded = jsonDecode(file.readAsStringSync());
+    if (decoded is Map<String, Object?>) return decoded;
+    if (decoded is Map) {
+      return {
+        for (final entry in decoded.entries) entry.key.toString(): entry.value,
+      };
+    }
+  } on Object {
+    // Ignore malformed or inaccessible sidecar metadata.
+  }
+  return null;
+}
+
+int? _parseYear(String? raw) {
+  if (raw == null || raw.length < 4) return null;
+  return int.tryParse(raw.substring(0, 4));
+}
+
+String? _cacheSidecarArtwork(String audioPath, String artworkDir) {
+  try {
+    final file = File('${p.withoutExtension(audioPath)}.cover.jpg');
+    if (!file.existsSync()) return null;
+    final bytes = file.readAsBytesSync();
+    if (bytes.isEmpty) return null;
+    return _cacheArtworkBytes(bytes, artworkDir);
+  } on Object {
+    return null;
+  }
 }
 
 const _mp4Extensions = {'m4a', 'mp4', 'm4b'};
@@ -132,13 +201,17 @@ String? _cacheArtwork(List<Picture> pictures, String artworkDir) {
     orElse: () => pictures.first,
   );
   if (cover.bytes.isEmpty) return null;
+  return _cacheArtworkBytes(cover.bytes, artworkDir);
+}
+
+String _cacheArtworkBytes(List<int> bytes, String artworkDir) {
   // Always named .jpg; image decoders go by content, not extension.
-  final cached = File(p.join(artworkDir, '${md5.convert(cover.bytes)}.jpg'));
+  final cached = File(p.join(artworkDir, '${md5.convert(bytes)}.jpg'));
   if (!cached.existsSync()) {
-    final destination = cover.bytes.length > _largeArtworkBytes
+    final destination = bytes.length > _largeArtworkBytes
         ? File('${cached.path}$kPendingArtworkSuffix')
         : cached;
-    if (!destination.existsSync()) destination.writeAsBytesSync(cover.bytes);
+    if (!destination.existsSync()) destination.writeAsBytesSync(bytes);
   }
   return cached.path;
 }

@@ -55,6 +55,12 @@ class ExtensionState {
         ext,
   ];
 
+  /// Enabled extensions that provide audio downloads.
+  List<InstalledExtension> get enabledDownloadExtensions => [
+    for (final ext in extensions)
+      if (ext.enabled && ext.hasDownloadProvider) ext,
+  ];
+
   /// True when at least one enabled extension provides downloads.
   bool get hasActiveDownloader =>
       extensions.any((ext) => ext.enabled && ext.hasDownloadProvider);
@@ -212,10 +218,15 @@ class ExtensionController extends Notifier<ExtensionState> {
     );
   }
 
-  /// Downloads [track] through the enabled download extensions into the
-  /// device's music folder and triggers a library scan so it immediately
-  /// appears in the library.
-  Future<String?> downloadTrack(ExtensionTrackResult track) async {
+  /// Downloads [track] through the chosen [providerId] and [quality] (or
+  /// enabled download extensions in priority order) into the device's music
+  /// folder and triggers a library scan so it immediately appears in the
+  /// library with cover art, metadata, and lyrics.
+  Future<String?> downloadTrack(
+    ExtensionTrackResult track, {
+    String? providerId,
+    String? quality,
+  }) async {
     final key = track.uniqueKey;
     if (state.downloadingKeys.contains(key)) return null;
     state = state.copyWith(
@@ -231,7 +242,12 @@ class ExtensionController extends Notifier<ExtensionState> {
     try {
       final savedPath = await ref
           .read(extensionChannelProvider)
-          .download(track, musicDir: _musicDir);
+          .download(
+            track,
+            musicDir: _musicDir,
+            providerId: providerId,
+            quality: quality,
+          );
       if (savedPath != null && savedPath.isNotEmpty) {
         state = state.copyWith(
           downloadingKeys: {...state.downloadingKeys}..remove(key),

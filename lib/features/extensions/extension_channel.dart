@@ -165,11 +165,15 @@ class ExtensionChannel {
   Future<String?> download(
     ExtensionTrackResult track, {
     required String musicDir,
+    String? providerId,
+    String? quality,
   }) async {
     if (!isSupported) return null;
     final raw = await _channel.invokeMapMethod<Object?, Object?>('download', {
       'track': track.raw,
       'musicDir': musicDir,
+      if (providerId != null && providerId.isNotEmpty) 'providerId': providerId,
+      if (quality != null && quality.isNotEmpty) 'quality': quality,
     });
     return raw?['filePath'] as String?;
   }

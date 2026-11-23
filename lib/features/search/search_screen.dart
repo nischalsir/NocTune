@@ -12,6 +12,7 @@ import '../../core/widgets/pill_button.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/models/track.dart';
 import '../../data/repositories/library_repository.dart';
+import '../extensions/download_format_picker.dart';
 import '../extensions/extension_controller.dart';
 import '../extensions/extension_downloads_screen.dart';
 import '../extensions/extension_models.dart';
@@ -838,11 +839,24 @@ class _ExtensionResultTile extends ConsumerWidget {
   final VoidCallback onPlayed;
 
   Future<void> _download(BuildContext context, WidgetRef ref) async {
+    final selection = await showExtensionDownloadPicker(
+      context,
+      ref,
+      title: result.title,
+      artist: result.artist.isNotEmpty ? result.artist : result.providerName,
+      coverUrl: result.coverUrl,
+      recommendedProviderId: result.providerId,
+    );
+    if (selection == null || !context.mounted) return;
     onPlayed();
     try {
       final path = await ref
           .read(extensionControllerProvider.notifier)
-          .downloadTrack(result);
+          .downloadTrack(
+            result,
+            providerId: selection.providerId,
+            quality: selection.qualityId,
+          );
       if (!context.mounted) return;
       if (path != null) {
         ScaffoldMessenger.of(context)
@@ -886,7 +900,9 @@ class _ExtensionResultTile extends ConsumerWidget {
           ? '${result.album} · ${result.providerName}'
           : result.providerName,
       duration: result.duration,
-      artPath: localMatch?.artPath,
+      artPath:
+          localMatch?.artPath ??
+          (result.coverUrl.isNotEmpty ? result.coverUrl : null),
       dateAdded: DateTime(2026),
       dateModified: DateTime(2026),
     );
@@ -980,6 +996,21 @@ class _ExtensionAlbumScreenState extends ConsumerState<_ExtensionAlbumScreen> {
 
   Future<void> _downloadAll(List<ExtensionTrackResult> tracks) async {
     if (_downloadingAll || tracks.isEmpty) return;
+    final selection = await showExtensionDownloadPicker(
+      context,
+      ref,
+      title: (_details?.name.isNotEmpty ?? false)
+          ? _details!.name
+          : widget.album.title,
+      artist: (_details?.artist.isNotEmpty ?? false)
+          ? _details!.artist
+          : widget.album.artist,
+      coverUrl: (_details?.coverUrl.isNotEmpty ?? false)
+          ? _details!.coverUrl
+          : widget.album.coverUrl,
+      recommendedProviderId: widget.album.providerId,
+    );
+    if (selection == null || !mounted) return;
     setState(() => _downloadingAll = true);
     var downloaded = 0;
     try {
@@ -987,7 +1018,11 @@ class _ExtensionAlbumScreenState extends ConsumerState<_ExtensionAlbumScreen> {
         try {
           final path = await ref
               .read(extensionControllerProvider.notifier)
-              .downloadTrack(track);
+              .downloadTrack(
+                track,
+                providerId: selection.providerId,
+                quality: selection.qualityId,
+              );
           if (path != null) downloaded++;
         } on Object {
           // Continue with remaining tracks.

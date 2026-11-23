@@ -9,6 +9,27 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.14.0 (build 23) - 2026-11-23
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller. Both the universal APK and the arm64-v8a APK share build
+version code 2023 so either one can be installed over earlier arm64-v8a or
+universal releases without a version-code downgrade error.
+
+### Added
+
+- Mornye-style **Download Format & Service Picker** sheet before downloading
+  any track or album, allowing selection of the download extension (`Deezer`,
+  `JioSaavn`, `YouTube Music`, `SoundCloud`, `Qobuz`, `Tidal`, etc.) and
+  audio format / quality (`FLAC Lossless`, `Hi-Res FLAC`, `AAC 320 kbps`,
+  `M4A / Opus`, etc.).
+- Album cover artwork previews on every extension search result, album page,
+  artist page, and download queue entry.
+- Automatic cover image download (`.cover.jpg`), metadata sidecar
+  (`.meta.json`), native FLAC Vorbis comment & `PICTURE` block embedding,
+  and synced `.lrc` lyrics fetching (via enabled lyrics extensions and
+  LRCLib fallback) whenever an extension downloads a track.
+
 ## 1.13.0 (build 22) - 2026-11-23
 
 Published at the owner's request. The automated checks pass, with and

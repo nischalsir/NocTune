@@ -202,7 +202,9 @@ class _QueueItemTile extends ConsumerWidget {
 
     return ListTile(
       leading: Artwork(
-        path: localMatch?.artPath,
+        path:
+            localMatch?.artPath ??
+            (track.coverUrl.isNotEmpty ? track.coverUrl : null),
         size: 46,
         radius: 10,
       ),

@@ -24,12 +24,25 @@ class Artwork extends StatelessWidget {
     final path = this.path;
     final placeholder = _Placeholder(size: size);
     final cacheWidth = (size * MediaQuery.devicePixelRatioOf(context)).round();
+    final isNetwork =
+        path != null &&
+        (path.startsWith('http://') || path.startsWith('https://'));
     return ClipRRect(
       borderRadius: BorderRadius.circular(radius),
       child: SizedBox.square(
         dimension: size,
-        child: path != null
-            ? Image.file(
+        child: path == null || path.isEmpty
+            ? placeholder
+            : isNetwork
+            ? Image.network(
+                path,
+                fit: BoxFit.cover,
+                cacheWidth: cacheWidth,
+                gaplessPlayback: true,
+                excludeFromSemantics: true,
+                errorBuilder: (_, _, _) => placeholder,
+              )
+            : Image.file(
                 File(path),
                 fit: BoxFit.cover,
                 // Decode at display size so a 3000px cover doesn't sit in memory.
@@ -37,8 +50,7 @@ class Artwork extends StatelessWidget {
                 gaplessPlayback: true,
                 excludeFromSemantics: true,
                 errorBuilder: (_, _, _) => placeholder,
-              )
-            : placeholder,
+              ),
       ),
     );
   }

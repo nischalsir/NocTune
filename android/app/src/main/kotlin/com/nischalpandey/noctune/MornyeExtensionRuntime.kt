@@ -484,6 +484,22 @@ class MornyeExtensionRuntime(private val context: Context) {
                     )
                 )
             }
+            if (qualities.isEmpty() && ext.hasDownloadProvider) {
+                qualities.add(
+                    mapOf(
+                        "id" to "LOSSLESS",
+                        "label" to "FLAC Lossless",
+                        "description" to "16-bit / 44.1 kHz lossless audio",
+                    )
+                )
+                qualities.add(
+                    mapOf(
+                        "id" to "HIGH",
+                        "label" to "High Quality (320 kbps)",
+                        "description" to "AAC / MP3 320 kbps",
+                    )
+                )
+            }
             mapOf(
                 "id" to ext.id,
                 "name" to ext.name,
@@ -988,23 +1004,35 @@ class MornyeExtensionRuntime(private val context: Context) {
     }
 
     /**
-     * Downloads [track] through the originating extension (if it provides
-     * downloads) or across enabled download provider extensions in priority
-     * order, saving the audio file into [musicDirPath] so NocTune's library
-     * scanner adds it to the local library.
+     * Downloads [track] through the user-selected [preferredProviderId] (or
+     * originating extension / enabled download provider extensions in priority
+     * order) with [preferredQuality], embeds metadata + cover art + `.lrc`
+     * lyrics, and saves the audio file into [musicDirPath] so NocTune's library
+     * scanner adds it to the local library with full cover art, tags & lyrics.
      */
-    fun downloadTrack(rawTrack: Map<String, Any?>, musicDirPath: String?): Map<String, Any?> {
+    fun downloadTrack(
+        rawTrack: Map<String, Any?>,
+        musicDirPath: String?,
+        preferredProviderId: String? = null,
+        preferredQuality: String? = null,
+    ): Map<String, Any?> {
         val track = enrichTrackIsrcIfNeeded(rawTrack)
         val targetBaseDir = if (!musicDirPath.isNullOrBlank()) File(musicDirPath) else defaultMusicDir
         val outDir = File(targetBaseDir, "Extensions").apply { mkdirs() }
 
         val originId = track["provider_id"]?.toString() ?: ""
+        val chosenId = preferredProviderId?.trim()?.takeIf { it.isNotEmpty() }
         val candidates = synchronized(lock) {
             val enabledDownloaders = extensions.values.filter { it.enabled && it.hasDownloadProvider }.toMutableList()
             val origin = extensions[originId]
             if (origin != null && origin.enabled && origin.hasDownloadProvider) {
                 enabledDownloaders.remove(origin)
                 enabledDownloaders.add(0, origin)
+            }
+            val chosen = chosenId?.let { extensions[it] }
+            if (chosen != null && chosen.enabled && chosen.hasDownloadProvider) {
+                enabledDownloaders.remove(chosen)
+                enabledDownloaders.add(0, chosen)
             }
             enabledDownloaders
         }
@@ -1022,8 +1050,9 @@ class MornyeExtensionRuntime(private val context: Context) {
         for (ext in candidates) {
             val attempt = runCatching {
                 val settings = loadExtensionSettingsMap(ext)
-                val quality = settings["quality"]?.toString()
-                    ?: ext.qualityOptions.optJSONObject(0)?.optString("id")
+                val quality = (if (chosenId == null || ext.id == chosenId) preferredQuality?.trim()?.takeIf { it.isNotEmpty() } else null)
+                    ?: settings["quality"]?.toString()?.takeIf { it.isNotBlank() }
+                    ?: ext.qualityOptions.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
                     ?: "LOSSLESS"
                 val defaultOutFile = File(outDir, "$baseFileName.flac")
 
@@ -1124,6 +1153,9 @@ class MornyeExtensionRuntime(private val context: Context) {
             }
             if (downloadedFile != null && downloadedFile.isFile && downloadedFile.length() > 0) {
                 val finalFile = finalizeDownloadedAudioExtension(downloadedFile, outDir, baseFileName)
+                runCatching {
+                    persistTrackMetadataCoverAndLyrics(finalFile, outDir, baseFileName, track, resultMap)
+                }
                 return mapOf(
                     "success" to true,
                     "filePath" to finalFile.absolutePath,
@@ -1135,6 +1167,223 @@ class MornyeExtensionRuntime(private val context: Context) {
             }
         }
         throw IllegalStateException(lastError)
+    }
+
+    private fun persistTrackMetadataCoverAndLyrics(
+        audioFile: File,
+        outDir: File,
+        baseName: String,
+        track: Map<String, Any?>,
+        resultMap: Map<*, *>,
+    ) {
+        fun pickStr(vararg keys: String): String {
+            for (k in keys) {
+                val v1 = resultMap[k]?.toString()?.trim()
+                if (!v1.isNullOrEmpty() && v1 != "null") return v1
+                val v2 = track[k]?.toString()?.trim()
+                if (!v2.isNullOrEmpty() && v2 != "null") return v2
+            }
+            return ""
+        }
+        fun pickInt(vararg keys: String): Int {
+            for (k in keys) {
+                val v1 = resultMap[k]
+                if (v1 is Number && v1.toInt() > 0) return v1.toInt()
+                if (v1 is String) v1.trim().toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+                val v2 = track[k]
+                if (v2 is Number && v2.toInt() > 0) return v2.toInt()
+                if (v2 is String) v2.trim().toIntOrNull()?.takeIf { it > 0 }?.let { return it }
+            }
+            return 0
+        }
+
+        val finalTitle = pickStr("title", "name").ifBlank { baseName }
+        val finalArtist = pickStr("artist", "artists")
+        val finalAlbum = pickStr("album", "album_name")
+        val finalAlbumArtist = pickStr("album_artist", "albumArtist").ifBlank { finalArtist }
+        val finalGenre = pickStr("genre")
+        val finalReleaseDate = pickStr("release_date", "releaseDate")
+        val finalIsrc = pickStr("isrc")
+        val finalCoverUrl = pickStr("cover_url", "coverUrl", "images", "artwork_url")
+        val trackNumber = pickInt("track_number", "trackNumber")
+        val totalTracks = pickInt("total_tracks", "totalTracks")
+        val discNumber = pickInt("disc_number", "discNumber")
+        val totalDiscs = pickInt("total_discs", "totalDiscs")
+        val sampleRate = pickInt("sample_rate", "sampleRate")
+        val bitDepth = pickInt("bit_depth", "bitDepth")
+        val durationMs = ((resultMap["duration_ms"] ?: track["duration_ms"]) as? Number)?.toLong() ?: 0L
+
+        // 1. Download cover art image and save <baseName>.cover.jpg
+        var coverBytes: ByteArray? = null
+        if (finalCoverUrl.startsWith("http://") || finalCoverUrl.startsWith("https://")) {
+            runCatching {
+                val resp = httpRequestBytes(finalCoverUrl, "GET", null, mapOf("User-Agent" to "NocTune/1.13.0"))
+                if (resp.status in 200..299 && resp.body.isNotEmpty()) {
+                    coverBytes = resp.body
+                    File(outDir, "$baseName.cover.jpg").writeBytes(resp.body)
+                }
+            }
+        }
+
+        // 2. Fetch synced/plain lyrics (from lyrics extensions or LRCLib) and save <baseName>.lrc
+        var lyricsText: String? = null
+        runCatching {
+            lyricsText = fetchLyrics(finalTitle, finalArtist, finalAlbum, durationMs)
+            if (!lyricsText.isNullOrBlank()) {
+                File(outDir, "$baseName.lrc").writeText(lyricsText!!, StandardCharsets.UTF_8)
+            }
+        }
+
+        // 3. Save <baseName>.meta.json for NocTune's scanner across all containers (.flac, .m4a, .mp3, .ogg, .wav)
+        val metaJson = JSONObject().apply {
+            put("title", finalTitle)
+            put("artist", finalArtist)
+            put("album", finalAlbum)
+            put("album_artist", finalAlbumArtist)
+            put("genre", finalGenre)
+            put("release_date", finalReleaseDate)
+            put("isrc", finalIsrc)
+            put("cover_url", finalCoverUrl)
+            put("track_number", trackNumber)
+            put("total_tracks", totalTracks)
+            put("disc_number", discNumber)
+            put("total_discs", totalDiscs)
+            put("duration_ms", durationMs)
+            if (sampleRate > 0) put("sample_rate", sampleRate)
+            if (bitDepth > 0) put("bit_depth", bitDepth)
+        }
+        File(outDir, "$baseName.meta.json").writeText(metaJson.toString(), StandardCharsets.UTF_8)
+
+        // 4. Embed Vorbis comments + PICTURE block directly into FLAC files
+        if (audioFile.extension.equals("flac", ignoreCase = true)) {
+            runCatching {
+                embedFlacTagsAndCover(
+                    flacFile = audioFile,
+                    comments = buildList {
+                        add("TITLE=$finalTitle")
+                        if (finalArtist.isNotEmpty()) add("ARTIST=$finalArtist")
+                        if (finalAlbum.isNotEmpty()) add("ALBUM=$finalAlbum")
+                        if (finalAlbumArtist.isNotEmpty()) add("ALBUMARTIST=$finalAlbumArtist")
+                        if (finalGenre.isNotEmpty()) add("GENRE=$finalGenre")
+                        if (finalReleaseDate.isNotEmpty()) {
+                            add("DATE=$finalReleaseDate")
+                            if (finalReleaseDate.length >= 4) add("YEAR=${finalReleaseDate.substring(0, 4)}")
+                        }
+                        if (trackNumber > 0) add("TRACKNUMBER=$trackNumber")
+                        if (totalTracks > 0) add("TRACKTOTAL=$totalTracks")
+                        if (discNumber > 0) add("DISCNUMBER=$discNumber")
+                        if (totalDiscs > 0) add("DISCTOTAL=$totalDiscs")
+                        if (finalIsrc.isNotEmpty()) add("ISRC=$finalIsrc")
+                        if (!lyricsText.isNullOrBlank()) add("LYRICS=$lyricsText")
+                    },
+                    coverBytes = coverBytes,
+                )
+            }
+        }
+    }
+
+    /**
+     * Embeds a `VORBIS_COMMENT` metadata block (type 4) and `PICTURE` metadata
+     * block (type 6) directly into a `.flac` file right after its `STREAMINFO`
+     * block so standard tag readers and `audio_metadata_reader` read all tags
+     * and embedded cover art natively.
+     */
+    private fun embedFlacTagsAndCover(
+        flacFile: File,
+        comments: List<String>,
+        coverBytes: ByteArray?,
+    ) {
+        val raw = flacFile.readBytes()
+        if (raw.size < 42 || raw[0] != 'f'.code.toByte() || raw[1] != 'L'.code.toByte() ||
+            raw[2] != 'a'.code.toByte() || raw[3] != 'C'.code.toByte()
+        ) return
+
+        // Parse existing metadata blocks, keeping STREAMINFO (type 0) and SEEKTABLE (type 3),
+        // replacing VORBIS_COMMENT (type 4) and PICTURE (type 6).
+        val keptBlocks = mutableListOf<Pair<Int, ByteArray>>()
+        var pos = 4
+        while (pos + 4 <= raw.size) {
+            val headerByte = raw[pos].toInt() and 0xFF
+            val isLast = (headerByte and 0x80) != 0
+            val blockType = headerByte and 0x7F
+            val len = ((raw[pos + 1].toInt() and 0xFF) shl 16) or
+                ((raw[pos + 2].toInt() and 0xFF) shl 8) or
+                (raw[pos + 3].toInt() and 0xFF)
+            pos += 4
+            if (pos + len > raw.size) return
+            if (blockType != 4 && blockType != 6 && blockType != 1) {
+                keptBlocks.add(blockType to raw.copyOfRange(pos, pos + len))
+            }
+            pos += len
+            if (isLast) break
+        }
+        val audioDataStart = pos
+
+        // Build VORBIS_COMMENT block (little-endian lengths)
+        val vorbisOut = ByteArrayOutputStream()
+        fun writeLe32(out: ByteArrayOutputStream, v: Int) {
+            out.write(v and 0xFF)
+            out.write((v ushr 8) and 0xFF)
+            out.write((v ushr 16) and 0xFF)
+            out.write((v ushr 24) and 0xFF)
+        }
+        val vendorBytes = "NocTune 1.13.0".toByteArray(StandardCharsets.UTF_8)
+        writeLe32(vorbisOut, vendorBytes.size)
+        vorbisOut.write(vendorBytes)
+        writeLe32(vorbisOut, comments.size)
+        for (c in comments) {
+            val cb = c.toByteArray(StandardCharsets.UTF_8)
+            writeLe32(vorbisOut, cb.size)
+            vorbisOut.write(cb)
+        }
+        keptBlocks.add(4 to vorbisOut.toByteArray())
+
+        // Build PICTURE block (big-endian lengths) if coverBytes fits in a 24-bit FLAC block (< 16 MB)
+        if (coverBytes != null && coverBytes.isNotEmpty() && coverBytes.size < 8 * 1024 * 1024) {
+            val picOut = ByteArrayOutputStream()
+            fun writeBe32(out: ByteArrayOutputStream, v: Int) {
+                out.write((v ushr 24) and 0xFF)
+                out.write((v ushr 16) and 0xFF)
+                out.write((v ushr 8) and 0xFF)
+                out.write(v and 0xFF)
+            }
+            val isPng = coverBytes.size >= 4 && coverBytes[0] == 0x89.toByte() && coverBytes[1] == 'P'.code.toByte()
+            val mimeBytes = (if (isPng) "image/png" else "image/jpeg").toByteArray(StandardCharsets.US_ASCII)
+            writeBe32(picOut, 3) // Picture type 3: Cover (front)
+            writeBe32(picOut, mimeBytes.size)
+            picOut.write(mimeBytes)
+            writeBe32(picOut, 0) // Empty description
+            writeBe32(picOut, 0) // Width
+            writeBe32(picOut, 0) // Height
+            writeBe32(picOut, 24) // Color depth
+            writeBe32(picOut, 0) // Indexed colors
+            writeBe32(picOut, coverBytes.size)
+            picOut.write(coverBytes)
+            keptBlocks.add(6 to picOut.toByteArray())
+        }
+
+        val tmpFile = File(flacFile.parentFile, "${flacFile.name}.tagging")
+        FileOutputStream(tmpFile).use { fos ->
+            fos.write(byteArrayOf('f'.code.toByte(), 'L'.code.toByte(), 'a'.code.toByte(), 'C'.code.toByte()))
+            for ((index, block) in keptBlocks.withIndex()) {
+                val (bType, bData) = block
+                val isLast = index == keptBlocks.lastIndex
+                val firstByte = (if (isLast) 0x80 else 0x00) or (bType and 0x7F)
+                val bLen = bData.size
+                fos.write(
+                    byteArrayOf(
+                        firstByte.toByte(),
+                        ((bLen ushr 16) and 0xFF).toByte(),
+                        ((bLen ushr 8) and 0xFF).toByte(),
+                        (bLen and 0xFF).toByte(),
+                    )
+                )
+                fos.write(bData)
+            }
+            fos.write(raw, audioDataStart, raw.size - audioDataStart)
+        }
+        tmpFile.copyTo(flacFile, overwrite = true)
+        tmpFile.delete()
     }
 
     /**
@@ -1203,7 +1452,27 @@ class MornyeExtensionRuntime(private val context: Context) {
             }.getOrNull()
             if (!lrc.isNullOrBlank()) return lrc
         }
-        return null
+        // Fallback directly to LRCLib so synced lyrics work out-of-the-box just like Mornye.
+        return fetchLrcLibDirect(title, artist)
+    }
+
+    private fun fetchLrcLibDirect(track: String, artist: String): String? {
+        return runCatching {
+            val qTrack = URLEncoder.encode(track.trim(), "UTF-8")
+            val qArtist = URLEncoder.encode(artist.trim(), "UTF-8")
+            val url = "https://lrclib.net/api/search?track_name=$qTrack&artist_name=$qArtist"
+            val resp = httpRequestBytes(url, "GET", null, mapOf("User-Agent" to "NocTune/1.13.0"))
+            if (resp.status !in 200..299) return null
+            val arr = JSONArray(String(resp.body, StandardCharsets.UTF_8))
+            if (arr.length() == 0) return null
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val synced = item.optString("syncedLyrics").trim()
+                if (synced.isNotEmpty()) return synced
+            }
+            val first = arr.optJSONObject(0)
+            first?.optString("plainLyrics")?.trim()?.takeIf { it.isNotEmpty() }
+        }.getOrNull()
     }
 
     private fun formatLyricsResult(res: Any?): String? {

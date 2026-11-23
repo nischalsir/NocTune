@@ -117,10 +117,12 @@ final lyricsProvider = FutureProvider.family<LoadedLyrics?, LyricsKey>((
   key,
 ) async {
   final repository = ref.watch(libraryRepositoryProvider);
-  final hasLyricsExt = ref.watch(
-    extensionControllerProvider.select((state) => state.hasActiveLyrics),
+  final hasExt = ref.watch(
+    extensionControllerProvider.select(
+      (state) => state.hasActiveLyrics || state.hasActiveSearchOrDownload,
+    ),
   );
-  final channel = hasLyricsExt ? ref.watch(extensionChannelProvider) : null;
+  final channel = hasExt ? ref.watch(extensionChannelProvider) : null;
   final track = await repository.trackById(key.trackId);
   return track == null
       ? null

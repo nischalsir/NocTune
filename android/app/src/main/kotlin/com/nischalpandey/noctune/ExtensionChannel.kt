@@ -112,7 +112,9 @@ class ExtensionChannel(private val context: Context) : MethodChannel.MethodCallH
                         @Suppress("UNCHECKED_CAST")
                         val track = args["track"] as? Map<String, Any?> ?: emptyMap()
                         val musicDir = args["musicDir"] as? String
-                        runtime.downloadTrack(track, musicDir)
+                        val providerId = args["providerId"] as? String
+                        val quality = args["quality"] as? String
+                        runtime.downloadTrack(track, musicDir, providerId, quality)
                     }
                     "fetchLyrics" -> {
                         val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()

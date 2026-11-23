@@ -119,8 +119,10 @@ class _FakeExtensionChannel extends ExtensionChannel {
   Future<String?> download(
     ExtensionTrackResult track, {
     required String musicDir,
+    String? providerId,
+    String? quality,
   }) async {
-    downloadedTitles.add(track.title);
+    downloadedTitles.add('${track.title}:${quality ?? 'default'}');
     return '$musicDir/Extensions/${track.title}.flac';
   }
 
@@ -223,7 +225,13 @@ void main() {
       await tester.tap(find.byTooltip('Download Starlight FLAC'));
       await tester.pumpAndSettle();
 
-      expect(channel.downloadedTitles, ['Starlight FLAC']);
+      // Mornye-style format & service picker sheet appears before downloading.
+      expect(find.text('Download from'), findsOneWidget);
+      expect(find.text('Select format & quality'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('picker-quality-LOSSLESS')));
+      await tester.pumpAndSettle();
+
+      expect(channel.downloadedTitles, ['Starlight FLAC:LOSSLESS']);
       expect(
         find.text('Downloaded "Starlight FLAC" to library.'),
         findsOneWidget,
