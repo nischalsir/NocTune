@@ -9,6 +9,27 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.13.0 (build 22) - 2026-11-23
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller. Both the universal APK and the arm64-v8a APK share build
+version code 2022 so either one can be installed over earlier arm64-v8a or
+universal releases without a version-code downgrade error.
+
+### Added
+
+- Mornye-style Search category filter chips (`All`, `Songs`, `Albums`,
+  `Artists`) and extension source selector chips (`Deezer`, `JioSaavn`,
+  `YouTube Music`, `SoundCloud`, `Qobuz`, `Tidal`, `Apple Music`,
+  `Spotify Web`, `Amazon Music`, `All extensions`, `Library only`).
+- Extension album and artist detail pages (`getAlbum` / `getArtist`) to
+  browse and download full albums or individual tracks into the library.
+- Dedicated **Download queue** page accessible from the Search bar and from
+  Settings › Library › Extensions to view in-progress, failed (with retry),
+  and completed extension downloads.
+- Fast single-provider search by default, compiled Rhino JS caching, typing
+  debounce, and parallel multi-extension search.
+
 ## 1.12.0 (build 21) - 2026-11-23
 
 Published at the owner's request. The automated checks pass, with and
