@@ -5,6 +5,8 @@ import '../../app/providers.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/empty_state.dart';
 import '../../data/models/track.dart';
+import '../extensions/extension_controller.dart';
+import '../extensions/extension_models.dart';
 import '../library/track_menu.dart';
 import '../library/track_tile.dart';
 import 'search_history.dart';
@@ -131,10 +133,26 @@ class _Results extends ConsumerWidget {
     final playing = ref.watch(
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
+    final hasExtensions = ref.watch(
+      extensionControllerProvider.select(
+        (state) => state.hasActiveSearchOrDownload,
+      ),
+    );
+    final extSearch = hasExtensions
+        ? ref.watch(extensionSearchResultsProvider(query))
+        : const AsyncValue<List<ExtensionTrackResult>>.data([]);
 
     final tracks = local.value ?? const <Track>[];
+    final extTracks = extSearch.value ?? const <ExtensionTrackResult>[];
     if (!local.hasValue) return const _Progress('Searching your library…');
-    if (tracks.isEmpty) {
+    if (tracks.isEmpty && !hasExtensions) {
+      return EmptyState(
+        icon: Icons.music_off_outlined,
+        title: 'No matches',
+        message: 'Nothing in your library matches "$query".',
+      );
+    }
+    if (tracks.isEmpty && !extSearch.isLoading && extTracks.isEmpty) {
       return EmptyState(
         icon: Icons.music_off_outlined,
         title: 'No matches',
@@ -142,24 +160,138 @@ class _Results extends ConsumerWidget {
       );
     }
 
-    return ListView.builder(
-      itemCount: tracks.length + 1,
-      itemBuilder: (context, index) {
-        if (index == 0) return const _Heading('In your library');
-        final track = tracks[index - 1];
-        return TrackTile(
-          track: track,
-          isCurrent: track.id == currentId,
-          playing: playing,
-          onTap: () {
-            ref
-                .read(audioHandlerProvider)
-                .playTracks(tracks, initialIndex: index - 1);
-            onPlayed();
-          },
-          onMenu: () => showTrackMenu(context, ref, track),
-        );
+    return ListView(
+      children: [
+        if (tracks.isNotEmpty) ...[
+          const _Heading('In your library'),
+          for (final (index, track) in tracks.indexed)
+            TrackTile(
+              track: track,
+              isCurrent: track.id == currentId,
+              playing: playing,
+              onTap: () {
+                ref
+                    .read(audioHandlerProvider)
+                    .playTracks(tracks, initialIndex: index);
+                onPlayed();
+              },
+              onMenu: () => showTrackMenu(context, ref, track),
+            ),
+        ],
+        if (hasExtensions) ...[
+          if (extTracks.isNotEmpty) const _Heading('Extensions'),
+          for (final extTrack in extTracks)
+            _ExtensionResultTile(
+              result: extTrack,
+              libraryTracks: tracks,
+              onPlayed: onPlayed,
+            ),
+          if (extSearch.isLoading) const _Progress('Searching extensions…'),
+        ],
+      ],
+    );
+  }
+}
+
+class _ExtensionResultTile extends ConsumerWidget {
+  const _ExtensionResultTile({
+    required this.result,
+    required this.libraryTracks,
+    required this.onPlayed,
+  });
+
+  final ExtensionTrackResult result;
+  final List<Track> libraryTracks;
+  final VoidCallback onPlayed;
+
+  Future<void> _download(BuildContext context, WidgetRef ref) async {
+    onPlayed();
+    try {
+      final path = await ref
+          .read(extensionControllerProvider.notifier)
+          .downloadTrack(result);
+      if (!context.mounted) return;
+      if (path != null) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(content: Text('Downloaded "${result.title}" to library.')),
+          );
+      }
+    } on Object catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final extState = ref.watch(extensionControllerProvider);
+    final isDownloading = extState.downloadingKeys.contains(result.uniqueKey);
+    final savedPath = extState.downloadedPaths[result.uniqueKey];
+    final allLibrary = ref.watch(allTracksProvider).value ?? libraryTracks;
+    final localMatch = allLibrary.cast<Track?>().firstWhere(
+      (t) =>
+          t != null &&
+          (t.uri == savedPath ||
+              (t.title.toLowerCase() == result.title.toLowerCase() &&
+                  (t.artist ?? '').toLowerCase() ==
+                      result.artist.toLowerCase())),
+      orElse: () => null,
+    );
+
+    final syntheticTrack = Track(
+      id: localMatch?.id ?? 0,
+      uri: localMatch?.uri ?? savedPath ?? '',
+      fileName: result.title,
+      folder: '',
+      title: result.title,
+      artist: result.artist.isNotEmpty ? result.artist : result.providerName,
+      album: result.album.isNotEmpty
+          ? '${result.album} · ${result.providerName}'
+          : result.providerName,
+      duration: result.duration,
+      artPath: localMatch?.artPath,
+      dateAdded: DateTime(2026),
+      dateModified: DateTime(2026),
+    );
+
+    return TrackTile(
+      track: syntheticTrack,
+      onTap: () {
+        if (localMatch != null) {
+          ref.read(audioHandlerProvider).playTracks([localMatch]);
+          onPlayed();
+        } else if (!isDownloading) {
+          _download(context, ref);
+        }
       },
+      action: isDownloading
+          ? const Padding(
+              padding: EdgeInsets.all(12),
+              child: SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              ),
+            )
+          : localMatch != null || savedPath != null
+          ? IconButton(
+              tooltip: 'Downloaded',
+              onPressed: localMatch == null
+                  ? null
+                  : () {
+                      ref.read(audioHandlerProvider).playTracks([localMatch]);
+                      onPlayed();
+                    },
+              icon: const Icon(Icons.download_done_rounded),
+            )
+          : IconButton(
+              tooltip: 'Download ${result.title}',
+              onPressed: () => _download(context, ref),
+              icon: const Icon(Icons.download_rounded),
+            ),
     );
   }
 }

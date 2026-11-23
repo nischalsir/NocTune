@@ -9,6 +9,28 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.12.0 (build 21) - 2026-11-23
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller. Both the universal APK and the arm64-v8a APK share build
+version code 2021 so either one can be installed over earlier arm64-v8a or
+universal releases without a version-code downgrade error.
+
+### Added
+
+- Mornye / SpotiFLAC extension support (`.spotiflac-ext`, `.sflx`,
+  `.mornye-ext`), managed under Settings › Library › Extensions. Extensions
+  on the device (in `Download/`, `Documents/` or `Music/`) are discovered on
+  launch or can be picked from a file or repository URL, switched on or off,
+  configured, and ordered by priority.
+- When search or download extensions are active, Search lists extension
+  matches (and tracks resolved from pasted links) under the library's own
+  matches, and downloads them into the library. With no extensions active,
+  Search stays library-only.
+- When a track has no imported, `.lrc` or embedded lyrics on the device and
+  a lyrics extension is active, lyrics are fetched through the extension and
+  saved locally for offline playback.
+
 ## 1.11.0 (build 20) - 2026-11-22
 
 Published at the owner's request. The automated checks pass, with and

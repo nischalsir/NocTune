@@ -15,6 +15,8 @@ import '../audio_output/audio_output_controller.dart';
 import '../audio_output/audio_output_settings.dart';
 import '../equalizer/equalizer_controller.dart';
 import '../equalizer/equalizer_screen.dart';
+import '../extensions/extension_controller.dart';
+import '../extensions/extensions_screen.dart';
 import '../library/duplicates_screen.dart';
 import '../library/scan/scan_banner.dart';
 import '../library/scan/scan_controller.dart';
@@ -462,6 +464,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ),
                   ),
+                  if (defaultTargetPlatform == TargetPlatform.android)
+                    _Tile(
+                      leading: const _TileIcon(Icons.extension_rounded),
+                      title: const Text('Extensions'),
+                      subtitle: Text(
+                        ref.watch(extensionControllerProvider).summary,
+                      ),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                      onTap: () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const ExtensionsScreen(),
+                        ),
+                      ),
+                    ),
                   _Tile(
                     leading: _TileIcon(
                       Icons.history_toggle_off_rounded,

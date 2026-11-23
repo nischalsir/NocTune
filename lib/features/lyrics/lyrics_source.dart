@@ -11,6 +11,8 @@ import 'package:path/path.dart' as p;
 import '../../app/providers.dart';
 import '../../data/models/track.dart';
 import '../../data/repositories/library_repository.dart';
+import '../extensions/extension_channel.dart';
+import '../extensions/extension_controller.dart';
 import 'lyrics.dart';
 
 /// Where a track's lyrics came from.
@@ -32,28 +34,46 @@ class LoadedLyrics {
   final LyricsOrigin origin;
 }
 
-/// Finds lyrics for [track], all from this device: a file the user imported
-/// for it, then an `.lrc` file with the same name next to it, then lyrics
-/// embedded in the audio file's tags. Returns null when there are none.
+/// Finds lyrics for [track], all from this device first: a file the user
+/// imported for it, then an `.lrc` file with the same name next to it, then
+/// lyrics embedded in the audio file's tags. When none are present and a
+/// lyrics extension is enabled, falls back to [extensionChannel] and caches
+/// the result locally.
 Future<LoadedLyrics?> loadLyrics(
   Track track,
-  LibraryRepository repository,
-) async {
+  LibraryRepository repository, {
+  ExtensionChannel? extensionChannel,
+}) async {
   final imported = await repository.importedLyrics(track.id);
   if (imported != null) {
     final lyrics = parseLyrics(imported);
     if (lyrics != null) return LoadedLyrics(lyrics, LyricsOrigin.imported);
   }
-  if (track.uri.startsWith('content://')) return null;
-
-  final path = track.uri;
-  final found = await Isolate.run(() => readLyricsFromFiles(path));
-  for (final (text, origin) in [
-    (found.sidecar, LyricsOrigin.sidecar),
-    (found.embedded, LyricsOrigin.embedded),
-  ]) {
-    final lyrics = text == null ? null : parseLyrics(text);
-    if (lyrics != null) return LoadedLyrics(lyrics, origin);
+  if (!track.uri.startsWith('content://')) {
+    final path = track.uri;
+    final found = await Isolate.run(() => readLyricsFromFiles(path));
+    for (final (text, origin) in [
+      (found.sidecar, LyricsOrigin.sidecar),
+      (found.embedded, LyricsOrigin.embedded),
+    ]) {
+      final lyrics = text == null ? null : parseLyrics(text);
+      if (lyrics != null) return LoadedLyrics(lyrics, origin);
+    }
+  }
+  if (extensionChannel != null) {
+    final fetched = await extensionChannel.fetchLyrics(
+      title: track.title,
+      artist: track.artist ?? '',
+      album: track.album ?? '',
+      duration: track.duration,
+    );
+    if (fetched != null) {
+      final lyrics = parseLyrics(fetched);
+      if (lyrics != null) {
+        await repository.setImportedLyrics(track.id, fetched);
+        return LoadedLyrics(lyrics, LyricsOrigin.imported);
+      }
+    }
   }
   return null;
 }
@@ -97,8 +117,14 @@ final lyricsProvider = FutureProvider.family<LoadedLyrics?, LyricsKey>((
   key,
 ) async {
   final repository = ref.watch(libraryRepositoryProvider);
+  final hasLyricsExt = ref.watch(
+    extensionControllerProvider.select((state) => state.hasActiveLyrics),
+  );
+  final channel = hasLyricsExt ? ref.watch(extensionChannelProvider) : null;
   final track = await repository.trackById(key.trackId);
-  return track == null ? null : loadLyrics(track, repository);
+  return track == null
+      ? null
+      : loadLyrics(track, repository, extensionChannel: channel);
 });
 
 /// Thrown when a picked file holds nothing usable as lyrics.

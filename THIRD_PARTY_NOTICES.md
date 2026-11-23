@@ -89,3 +89,11 @@ are from [AndroidX Media](https://github.com/androidx/media) 1.4.1,
 0.10.6 by Ryan Heise, under the MIT licence in `packages/just_audio/LICENSE`.
 NocTune changes only how its Android player is built, to offer the decoder
 and output sample rate choices.
+
+## Mozilla Rhino
+
+On Android, the JavaScript runtime used to execute user-installed Mornye /
+SpotiFLAC extension packages (`.spotiflac-ext`, `.sflx`, `.mornye-ext`) is
+[Mozilla Rhino](https://github.com/mozilla/rhino) 1.7.15, used under the
+Mozilla Public License 2.0.
+
