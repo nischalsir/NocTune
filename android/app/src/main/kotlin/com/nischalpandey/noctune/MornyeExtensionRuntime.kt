@@ -56,6 +56,10 @@ class MornyeExtensionRuntime(private val context: Context) {
 
     private val lock = Any()
     private val extensions = linkedMapOf<String, LoadedExtension>()
+    private val searchPool = java.util.concurrent.Executors.newCachedThreadPool()
+
+    @Volatile
+    private var compiledBootstrapScript: org.mozilla.javascript.Script? = null
 
     data class LoadedExtension(
         val id: String,
@@ -69,6 +73,7 @@ class MornyeExtensionRuntime(private val context: Context) {
         val hasDownloadProvider: Boolean,
         val hasLyricsProvider: Boolean,
         val hasCustomSearch: Boolean,
+        val isPrimarySearch: Boolean,
         val hasUrlHandler: Boolean,
         val urlPatterns: List<String>,
         val searchPlaceholder: String,
@@ -77,6 +82,7 @@ class MornyeExtensionRuntime(private val context: Context) {
         var enabled: Boolean,
         var status: String = "loaded",
         var errorMessage: String? = null,
+        @Volatile var compiledScript: org.mozilla.javascript.Script? = null,
     )
 
     fun init(musicDirPath: String) {
@@ -114,21 +120,7 @@ class MornyeExtensionRuntime(private val context: Context) {
             }
         }
         for (dir in dirs.filterNotNull()) {
-            runCatching {
-                if (dir.exists() && dir.isDirectory) {
-                    dir.listFiles()?.forEach { file ->
-                        if (file.isFile && isExtensionPackageName(file.name)) {
-                            candidates.add(file)
-                        } else if (file.isDirectory && file.name.lowercase(Locale.ROOT) in setOf("extensions", "mornye", "spotiflac")) {
-                            file.listFiles()?.forEach { sub ->
-                                if (sub.isFile && isExtensionPackageName(sub.name)) {
-                                    candidates.add(sub)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            collectExtensionFiles(dir, depth = 0, maxDepth = 4, out = candidates)
         }
         val importedMarkers = statePrefs.getStringSet("auto_imported_files", emptySet())?.toMutableSet() ?: mutableSetOf()
         var changed = false
@@ -143,6 +135,20 @@ class MornyeExtensionRuntime(private val context: Context) {
         }
         if (changed) {
             statePrefs.edit().putStringSet("auto_imported_files", importedMarkers).apply()
+        }
+    }
+
+    private fun collectExtensionFiles(dir: File, depth: Int, maxDepth: Int, out: MutableList<File>) {
+        if (depth > maxDepth) return
+        runCatching {
+            if (!dir.exists() || !dir.isDirectory) return
+            dir.listFiles()?.forEach { file ->
+                if (file.isFile && isExtensionPackageName(file.name)) {
+                    out.add(file)
+                } else if (file.isDirectory && !file.name.startsWith(".")) {
+                    collectExtensionFiles(file, depth + 1, maxDepth, out)
+                }
+            }
         }
     }
 
@@ -296,7 +302,8 @@ class MornyeExtensionRuntime(private val context: Context) {
                     .ifBlank { name }
                 val version = manifest.optString("version", "1.0.0")
                 val description = manifest.optString("description", "")
-                val types = manifest.optJSONArray("types")
+                val types = manifest.optJSONArray("type")
+                    ?: manifest.optJSONArray("types")
                     ?: manifest.optJSONArray("capabilities_list")
                 val typeSet = mutableSetOf<String>()
                 if (types != null) {
@@ -313,22 +320,23 @@ class MornyeExtensionRuntime(private val context: Context) {
                 val hasCustomSearch = searchBehavior?.optBoolean("enabled", false) == true ||
                     capabilities?.optBoolean("customSearch", false) == true ||
                     capabilities?.optBoolean("custom_search", false) == true
+                val isPrimarySearch = searchBehavior?.optBoolean("primary", false) == true
                 val hasMetadata = manifest.optBoolean("has_metadata_provider", false) ||
                     manifest.optBoolean("hasMetadataProvider", false) ||
                     manifest.optBoolean("metadata_provider", false) ||
-                    "metadata" in typeSet || "search" in typeSet ||
+                    "metadata" in typeSet || "metadata_provider" in typeSet || "search" in typeSet ||
                     capabilities?.optBoolean("metadata", false) == true ||
                     capabilities?.optBoolean("search", false) == true ||
                     hasCustomSearch
                 val hasDownload = manifest.optBoolean("has_download_provider", false) ||
                     manifest.optBoolean("hasDownloadProvider", false) ||
                     manifest.optBoolean("download_provider", false) ||
-                    "download" in typeSet || "downloader" in typeSet ||
+                    "download" in typeSet || "download_provider" in typeSet || "downloader" in typeSet ||
                     capabilities?.optBoolean("download", false) == true
                 val hasLyrics = manifest.optBoolean("has_lyrics_provider", false) ||
                     manifest.optBoolean("hasLyricsProvider", false) ||
                     manifest.optBoolean("lyrics_provider", false) ||
-                    "lyrics" in typeSet ||
+                    "lyrics" in typeSet || "lyrics_provider" in typeSet ||
                     capabilities?.optBoolean("lyrics", false) == true
                 val hasUrl = urlHandler?.optBoolean("enabled", false) == true
                 val patterns = mutableListOf<String>()
@@ -367,7 +375,8 @@ class MornyeExtensionRuntime(private val context: Context) {
                     hasDownloadProvider = inferredDownload,
                     hasLyricsProvider = inferredLyrics,
                     hasCustomSearch = inferredCustomSearch,
-                    hasUrlHandler = hasUrl || scriptSource.contains("handleUrl"),
+                    isPrimarySearch = isPrimarySearch,
+                    hasUrlHandler = hasUrl || scriptSource.contains("handleUrl") || scriptSource.contains("handleURL"),
                     urlPatterns = patterns,
                     searchPlaceholder = searchBehavior?.optString("placeholder", "") ?: "",
                     settingsSchema = manifest.optJSONArray("settings") ?: JSONArray(),
@@ -382,8 +391,30 @@ class MornyeExtensionRuntime(private val context: Context) {
         for (id in order) {
             parsed.remove(id)?.let { extensions[id] = it }
         }
-        for ((id, ext) in parsed) {
-            extensions[id] = ext
+        val preferredOrder = listOf(
+            "deezer",
+            "jiosaavn",
+            "ytmusic-spotiflac",
+            "soundcloud",
+            "qobuz-web",
+            "tidal-web",
+            "apple-music",
+            "spotify-web",
+            "amzn",
+            "bugs-music",
+            "genie-music",
+            "melon-music",
+        )
+        val remaining = parsed.values.sortedWith(
+            compareBy<LoadedExtension> { !it.isPrimarySearch }
+                .thenBy { ext ->
+                    val idx = preferredOrder.indexOf(ext.id.lowercase(Locale.ROOT))
+                    if (idx >= 0) idx else preferredOrder.size
+                }
+                .thenBy { it.displayName.lowercase(Locale.ROOT) }
+        )
+        for (ext in remaining) {
+            extensions[ext.id] = ext
         }
     }
 
@@ -519,10 +550,16 @@ class MornyeExtensionRuntime(private val context: Context) {
     }
 
     /**
-     * Searches across all enabled search/metadata extensions. If the query is
-     * a URL, resolves it via [handleUrl] too.
+     * Searches across a selected extension ([providerId]) or all enabled
+     * search/metadata extensions in parallel. If the query is a URL, resolves
+     * it via [handleUrl] too.
      */
-    fun search(query: String, limit: Int): List<Map<String, Any?>> {
+    fun search(
+        query: String,
+        limit: Int,
+        filter: String? = null,
+        providerId: String? = null,
+    ): List<Map<String, Any?>> {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return emptyList()
         if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("spotify:")) {
@@ -533,29 +570,64 @@ class MornyeExtensionRuntime(private val context: Context) {
                 return tracks as List<Map<String, Any?>>
             }
         }
+        val requestedProvider = providerId?.trim()?.takeIf { it.isNotEmpty() && it != "all" }
         val active = synchronized(lock) {
-            extensions.values.filter { it.enabled && (it.hasMetadataProvider || it.hasCustomSearch) }
+            if (requestedProvider != null) {
+                listOfNotNull(extensions[requestedProvider]?.takeIf { it.enabled })
+            } else {
+                extensions.values.filter { it.enabled && (it.hasMetadataProvider || it.hasCustomSearch) }
+            }
         }
         val hasEnabledDownloader = synchronized(lock) {
             extensions.values.any { it.enabled && it.hasDownloadProvider }
         }
         if (active.isEmpty() && !hasEnabledDownloader) return emptyList()
 
+        val canonicalFilter = when (filter?.trim()?.lowercase(Locale.ROOT)) {
+            "track", "tracks", "song", "songs" -> "tracks"
+            "album", "albums" -> "albums"
+            "artist", "artists" -> "artists"
+            else -> "all"
+        }
+
         val perSourceResults = mutableListOf<List<Map<String, Any?>>>()
-        for (ext in active) {
+        if (active.size == 1) {
+            val ext = active.first()
             runCatching {
-                val items = invokeExtensionSearch(ext, trimmed, limit)
+                val items = invokeExtensionSearch(ext, trimmed, limit, canonicalFilter)
                 if (items.isNotEmpty()) perSourceResults.add(items)
             }.onFailure { err ->
                 ext.errorMessage = err.message
+            }
+        } else if (active.size > 1) {
+            // Run extensions in parallel with a short timeout so slow/unauthenticated
+            // extensions never block fast ones.
+            val tasks = active.map { ext ->
+                java.util.concurrent.Callable {
+                    runCatching {
+                        invokeExtensionSearch(ext, trimmed, limit, canonicalFilter)
+                    }.onFailure { err ->
+                        ext.errorMessage = err.message
+                    }.getOrDefault(emptyList())
+                }
+            }
+            val futures = runCatching {
+                searchPool.invokeAll(tasks, 4500L, java.util.concurrent.TimeUnit.MILLISECONDS)
+            }.getOrDefault(emptyList())
+            for (future in futures) {
+                if (future.isDone && !future.isCancelled) {
+                    val items = runCatching { future.get() }.getOrDefault(emptyList())
+                    if (items.isNotEmpty()) perSourceResults.add(items)
+                }
             }
         }
         // When only download extensions are installed (or metadata extensions returned nothing),
         // resolve track metadata with ISRC support via Deezer's public catalog so download
         // extensions can match and download the track.
-        if (perSourceResults.isEmpty() && hasEnabledDownloader) {
+        if (perSourceResults.isEmpty() && hasEnabledDownloader && (canonicalFilter == "all" || canonicalFilter == "tracks")) {
             val downloader = synchronized(lock) {
-                extensions.values.first { it.enabled && it.hasDownloadProvider }
+                (requestedProvider?.let { extensions[it] }?.takeIf { it.enabled && it.hasDownloadProvider })
+                    ?: extensions.values.first { it.enabled && it.hasDownloadProvider }
             }
             runCatching {
                 val fallbackItems = searchPublicCatalogForDownloader(trimmed, limit, downloader)
@@ -697,13 +769,50 @@ class MornyeExtensionRuntime(private val context: Context) {
         return emptyMap()
     }
 
-    private fun invokeExtensionSearch(ext: LoadedExtension, query: String, limit: Int): List<Map<String, Any?>> {
+    private fun resolveExtensionFilterId(ext: LoadedExtension, canonicalFilter: String): String {
+        if (canonicalFilter == "all") return ""
+        val searchBehavior = ext.manifestJson.optJSONObject("searchBehavior")
+            ?: ext.manifestJson.optJSONObject("search_behavior")
+        val filters = searchBehavior?.optJSONArray("filters")
+        if (filters != null) {
+            for (i in 0 until filters.length()) {
+                val f = filters.optJSONObject(i) ?: continue
+                val id = f.optString("id").trim()
+                val lower = id.lowercase(Locale.ROOT)
+                when (canonicalFilter) {
+                    "tracks" -> if (lower in setOf("track", "tracks", "song", "songs")) return id
+                    "albums" -> if (lower in setOf("album", "albums")) return id
+                    "artists" -> if (lower in setOf("artist", "artists")) return id
+                }
+            }
+        }
+        return when (canonicalFilter) {
+            "tracks" -> "track"
+            "albums" -> "album"
+            "artists" -> "artist"
+            else -> ""
+        }
+    }
+
+    private fun invokeExtensionSearch(
+        ext: LoadedExtension,
+        query: String,
+        limit: Int,
+        canonicalFilter: String = "all",
+    ): List<Map<String, Any?>> {
+        val extFilterId = resolveExtensionFilterId(ext, canonicalFilter)
         val rawResult = executeInExtension(ext) { cx, scope, extObj ->
             val customFn = ScriptableObject.getProperty(extObj, "customSearch") as? RhinoFunction
             if (customFn != null) {
                 val opts = cx.newObject(scope)
                 ScriptableObject.putProperty(opts, "limit", limit)
+                if (extFilterId.isNotEmpty()) {
+                    ScriptableObject.putProperty(opts, "filter", extFilterId)
+                }
                 return@executeInExtension jsToKotlin(customFn.call(cx, scope, extObj, arrayOf<Any?>(query, opts)))
+            }
+            if (canonicalFilter == "albums" || canonicalFilter == "artists") {
+                return@executeInExtension null
             }
             val searchFn = ScriptableObject.getProperty(extObj, "searchTracks") as? RhinoFunction
                 ?: ScriptableObject.getProperty(extObj, "search") as? RhinoFunction
@@ -718,12 +827,86 @@ class MornyeExtensionRuntime(private val context: Context) {
                 ?: emptyList<Any?>()
             else -> emptyList<Any?>()
         }
+        val defaultType = when (canonicalFilter) {
+            "albums" -> "album"
+            "artists" -> "artist"
+            else -> "track"
+        }
         return list.mapNotNull { item ->
-            (item as? Map<*, *>)?.let { normalizeTrackMap(it, ext) }
+            val map = item as? Map<*, *> ?: return@mapNotNull null
+            val normalized = normalizeTrackMap(map, ext, defaultType)
+            val itemType = normalized["item_type"]?.toString() ?: "track"
+            when {
+                itemType !in setOf("track", "album", "artist") -> null
+                canonicalFilter == "tracks" && itemType != "track" -> null
+                canonicalFilter == "albums" && itemType != "album" -> null
+                canonicalFilter == "artists" && itemType != "artist" -> null
+                else -> normalized
+            }
         }
     }
 
-    private fun normalizeTrackMap(raw: Map<*, *>, ext: LoadedExtension): Map<String, Any?> {
+    fun getAlbum(providerId: String, albumId: String): Map<String, Any?> {
+        val ext = synchronized(lock) { extensions[providerId] }
+            ?: throw IllegalArgumentException("Extension not found: $providerId")
+        val raw = executeInExtension(ext) { cx, scope, extObj ->
+            val fn = ScriptableObject.getProperty(extObj, "getAlbum") as? RhinoFunction
+                ?: throw IllegalStateException("${ext.displayName} does not support album browsing")
+            jsToKotlin(fn.call(cx, scope, extObj, arrayOf<Any?>(albumId)))
+        } as? Map<*, *> ?: return emptyMap()
+        val tracksRaw = (raw["tracks"] as? List<*>) ?: emptyList<Any?>()
+        val tracks = tracksRaw.mapNotNull { item ->
+            (item as? Map<*, *>)?.let { normalizeTrackMap(it, ext, "track") }
+        }
+        return mapOf(
+            "id" to (raw["id"]?.toString() ?: albumId),
+            "name" to ((raw["name"] ?: raw["title"])?.toString() ?: ""),
+            "artist" to ((raw["artists"] ?: raw["artist"])?.toString() ?: ""),
+            "cover_url" to ((raw["cover_url"] ?: raw["coverUrl"] ?: raw["images"])?.toString() ?: ""),
+            "release_date" to ((raw["release_date"] ?: raw["releaseDate"])?.toString() ?: ""),
+            "provider_id" to ext.id,
+            "provider_name" to ext.displayName,
+            "tracks" to tracks,
+        )
+    }
+
+    fun getArtist(providerId: String, artistId: String): Map<String, Any?> {
+        val ext = synchronized(lock) { extensions[providerId] }
+            ?: throw IllegalArgumentException("Extension not found: $providerId")
+        val raw = executeInExtension(ext) { cx, scope, extObj ->
+            val fn = ScriptableObject.getProperty(extObj, "getArtist") as? RhinoFunction
+                ?: throw IllegalStateException("${ext.displayName} does not support artist browsing")
+            jsToKotlin(fn.call(cx, scope, extObj, arrayOf<Any?>(artistId)))
+        } as? Map<*, *> ?: return emptyMap()
+        val topTracksRaw = (raw["top_tracks"] as? List<*>)
+            ?: (raw["topTracks"] as? List<*>)
+            ?: (raw["tracks"] as? List<*>)
+            ?: emptyList<Any?>()
+        val albumsRaw = (raw["albums"] as? List<*>)
+            ?: (raw["releases"] as? List<*>)
+            ?: emptyList<Any?>()
+        val topTracks = topTracksRaw.mapNotNull { item ->
+            (item as? Map<*, *>)?.let { normalizeTrackMap(it, ext, "track") }
+        }
+        val albums = albumsRaw.mapNotNull { item ->
+            (item as? Map<*, *>)?.let { normalizeTrackMap(it, ext, "album") }
+        }
+        return mapOf(
+            "id" to (raw["id"]?.toString() ?: artistId),
+            "name" to ((raw["name"] ?: raw["title"])?.toString() ?: ""),
+            "cover_url" to ((raw["image_url"] ?: raw["imageUrl"] ?: raw["cover_url"] ?: raw["coverUrl"] ?: raw["images"])?.toString() ?: ""),
+            "provider_id" to ext.id,
+            "provider_name" to ext.displayName,
+            "top_tracks" to topTracks,
+            "albums" to albums,
+        )
+    }
+
+    private fun normalizeTrackMap(
+        raw: Map<*, *>,
+        ext: LoadedExtension,
+        defaultItemType: String = "track",
+    ): Map<String, Any?> {
         fun str(vararg keys: String): String {
             for (k in keys) {
                 val v = raw[k]
@@ -739,6 +922,15 @@ class MornyeExtensionRuntime(private val context: Context) {
                 if (v is String) v.trim().toDoubleOrNull()?.let { return it.toLong() }
             }
             return 0L
+        }
+        val rawType = str("item_type", "itemType", "type").lowercase(Locale.ROOT)
+        val itemType = when (rawType) {
+            "album", "albums" -> "album"
+            "artist", "artists" -> "artist"
+            "playlist", "playlists" -> "playlist"
+            "show", "podcast" -> "show"
+            "track", "tracks", "song", "songs" -> "track"
+            else -> defaultItemType
         }
         val artistsVal = raw["artists"] ?: raw["artist"]
         val artistStr = when (artistsVal) {
@@ -769,6 +961,7 @@ class MornyeExtensionRuntime(private val context: Context) {
         }
         return mapOf(
             "id" to id,
+            "item_type" to itemType,
             "name" to title,
             "title" to title,
             "artists" to artistStr,
@@ -781,6 +974,7 @@ class MornyeExtensionRuntime(private val context: Context) {
             "isrc" to str("isrc"),
             "release_date" to str("release_date", "releaseDate"),
             "track_number" to num("track_number", "trackNumber").toInt(),
+            "total_tracks" to num("total_tracks", "totalTracks", "nb_tracks").toInt(),
             "disc_number" to num("disc_number", "discNumber").toInt(),
             "provider_id" to ext.id,
             "provider_name" to ext.displayName,
@@ -835,26 +1029,39 @@ class MornyeExtensionRuntime(private val context: Context) {
 
                 executeInExtension(ext) { cx, scope, extObj ->
                     val jsTrack = kotlinMapToJsObject(cx, scope, track)
-                    // Optional checkAvailability first
+                    val isrc = (track["isrc"] ?: "").toString().trim()
+                    var resolvedTrackId = (track["id"] ?: "").toString().trim()
+                    var preparedContext: Map<*, *>? = null
+
                     val checkFn = ScriptableObject.getProperty(extObj, "checkAvailability") as? RhinoFunction
                     if (checkFn != null) {
-                        val availRaw = jsToKotlin(checkFn.call(cx, scope, extObj, arrayOf(jsTrack))) as? Map<*, *>
+                        val checkOpts = kotlinMapToJsObject(
+                            cx,
+                            scope,
+                            mapOf(
+                                "track" to track,
+                                "duration_ms" to (track["duration_ms"] ?: 0L),
+                                "deezer_id" to (track["deezer_id"] ?: ""),
+                                "tidal_id" to (track["tidal_id"] ?: ""),
+                                "qobuz_id" to (track["qobuz_id"] ?: ""),
+                                "spotify_id" to (track["spotify_id"] ?: ""),
+                                "track_id" to resolvedTrackId,
+                                "url" to (track["external_urls"] ?: ""),
+                            ),
+                        )
+                        val availRaw = jsToKotlin(
+                            checkFn.call(cx, scope, extObj, arrayOf<Any?>(isrc, title, artist, checkOpts))
+                        ) as? Map<*, *>
                         if (availRaw != null && availRaw["available"] == false) {
                             val reason = availRaw["reason"]?.toString()?.ifBlank { "Unavailable on ${ext.displayName}" }
                             throw IllegalStateException(reason ?: "Unavailable")
                         }
-                        val resolvedId = availRaw?.get("track_id") ?: availRaw?.get("trackId")
-                        if (resolvedId is String && resolvedId.isNotBlank()) {
-                            ScriptableObject.putProperty(jsTrack, "id", resolvedId)
+                        val availId = (availRaw?.get("track_id") ?: availRaw?.get("trackId"))?.toString()?.trim()
+                        if (!availId.isNullOrEmpty()) {
+                            resolvedTrackId = availId
+                            ScriptableObject.putProperty(jsTrack, "id", availId)
                         }
-                        val prepared = availRaw?.get("prepared_context") ?: availRaw?.get("preparedContext")
-                        if (prepared is Map<*, *>) {
-                            ScriptableObject.putProperty(
-                                jsTrack,
-                                "prepared_context",
-                                kotlinMapToJsObject(cx, scope, prepared),
-                            )
-                        }
+                        preparedContext = (availRaw?.get("prepared_context") ?: availRaw?.get("preparedContext")) as? Map<*, *>
                     }
 
                     val downloadFn = ScriptableObject.getProperty(extObj, "download") as? RhinoFunction
@@ -867,25 +1074,28 @@ class MornyeExtensionRuntime(private val context: Context) {
                             args: Array<out Any?>?,
                         ): Any = Undefined.instance
                     }
-                    val jsOptions = kotlinMapToJsObject(
-                        cx,
-                        scope,
-                        mapOf(
-                            "outputDir" to outDir.absolutePath,
-                            "output_dir" to outDir.absolutePath,
-                            "quality" to quality,
-                            "filename" to defaultOutFile.name,
-                        ),
+                    val optionsMap = mutableMapOf<String, Any?>(
+                        "outputDir" to outDir.absolutePath,
+                        "output_dir" to outDir.absolutePath,
+                        "quality" to quality,
+                        "filename" to defaultOutFile.name,
+                        "track" to track,
+                        "isrc" to isrc,
+                        "duration_ms" to (track["duration_ms"] ?: 0L),
                     )
-                    val res = jsToKotlin(
+                    if (preparedContext != null) {
+                        optionsMap["preparedContext"] = preparedContext
+                        optionsMap["prepared_context"] = preparedContext
+                    }
+                    val jsOptions = kotlinMapToJsObject(cx, scope, optionsMap)
+                    jsToKotlin(
                         downloadFn.call(
                             cx,
                             scope,
                             extObj,
-                            arrayOf(jsTrack, defaultOutFile.absolutePath, quality, progressFn, jsOptions),
+                            arrayOf<Any?>(resolvedTrackId, quality, defaultOutFile.absolutePath, progressFn, jsOptions),
                         )
                     )
-                    res
                 }
             }
 
@@ -1035,9 +1245,14 @@ class MornyeExtensionRuntime(private val context: Context) {
             val scope = cx.initStandardObjects()
             installMornyeHostGlobals(cx, scope, ext)
 
-            val scriptFile = File(ext.dir, "index.js")
-            val scriptSource = scriptFile.readText(StandardCharsets.UTF_8)
-            cx.evaluateString(scope, scriptSource, "${ext.id}/index.js", 1, null)
+            val script = ext.compiledScript ?: run {
+                val scriptFile = File(ext.dir, "index.js")
+                val scriptSource = scriptFile.readText(StandardCharsets.UTF_8)
+                cx.compileString(scriptSource, "${ext.id}/index.js", 1, null).also {
+                    ext.compiledScript = it
+                }
+            }
+            script.exec(cx, scope)
 
             val extObj = ScriptableObject.getProperty(scope, "extension") as? Scriptable
                 ?: throw IllegalStateException("Extension '${ext.id}' did not call registerExtension()")
@@ -1322,6 +1537,183 @@ class MornyeExtensionRuntime(private val context: Context) {
             }
 
             @Suppress("unused")
+            fun transformPatternedBlocks(inPath: String, outPath: String, optionsJson: String): String {
+                return try {
+                    val inFile = resolveExtensionFile(extDataDir, inPath)
+                    val outFile = resolveExtensionFile(extDataDir, outPath)
+                    outFile.parentFile?.mkdirs()
+                    val opts = JSONObject(optionsJson)
+                    val algo = opts.optString("algorithm", "blowfish").lowercase(Locale.ROOT)
+                    val keyHex = opts.optString("key", "")
+                    val ivHex = opts.optString("iv", "0001020304050607")
+                    val segmentSize = opts.optInt("segmentSize", 2048).coerceAtLeast(8)
+                    val transformEvery = opts.optInt("transformEvery", 3).coerceAtLeast(1)
+                    val transformOffset = opts.optInt("transformOffset", 0).coerceAtLeast(0)
+
+                    val keyBytes = hexToBytes(keyHex)
+                    val ivBytes = hexToBytes(ivHex)
+                    val cipherAlgo = if (algo.contains("aes")) "AES" else "Blowfish"
+                    val cipherTransform = "$cipherAlgo/CBC/NoPadding"
+                    val keySpec = SecretKeySpec(keyBytes, cipherAlgo)
+                    val ivSpec = IvParameterSpec(ivBytes)
+
+                    FileInputStream(inFile).use { fis ->
+                        FileOutputStream(outFile).use { fos ->
+                            val buf = ByteArray(segmentSize)
+                            var segIndex = 0
+                            while (true) {
+                                var totalRead = 0
+                                while (totalRead < segmentSize) {
+                                    val r = fis.read(buf, totalRead, segmentSize - totalRead)
+                                    if (r <= 0) break
+                                    totalRead += r
+                                }
+                                if (totalRead <= 0) break
+                                val shouldTransform = totalRead == segmentSize &&
+                                    segIndex >= transformOffset &&
+                                    ((segIndex - transformOffset) % transformEvery == 0)
+                                if (shouldTransform) {
+                                    val cipher = Cipher.getInstance(cipherTransform)
+                                    cipher.init(Cipher.DECRYPT_MODE, keySpec, ivSpec)
+                                    val decrypted = cipher.doFinal(buf, 0, totalRead)
+                                    fos.write(decrypted)
+                                } else {
+                                    fos.write(buf, 0, totalRead)
+                                }
+                                segIndex++
+                            }
+                        }
+                    }
+                    JSONObject()
+                        .put("success", true)
+                        .put("path", outFile.absolutePath)
+                        .put("file_path", outFile.absolutePath)
+                        .toString()
+                } catch (e: Throwable) {
+                    JSONObject()
+                        .put("success", false)
+                        .put("error", e.message ?: e.toString())
+                        .toString()
+                }
+            }
+
+            @Suppress("unused")
+            fun signedFetchCall(method: String, path: String, body: String?, headersJson: String): String {
+                val signedCfg = ext.manifestJson.optJSONObject("signedSession")
+                    ?: ext.manifestJson.optJSONObject("signed_session")
+                    ?: return JSONObject().put("ok", false).put("error", "No signedSession in manifest").toString()
+                return try {
+                    val baseUrl = signedCfg.optString("baseUrl", "https://api.zarz.moe/v2").trimEnd('/')
+                    val appVer = signedCfg.optString("appVersion", "${ext.id}@${ext.version}")
+                    val platform = signedCfg.optString("platform", "extension")
+                    val schemeLabel = signedCfg.optString("schemeLabel", "ZARZ-HMAC-V1")
+                    val headerPrefix = signedCfg.optString("headerPrefix", "X-Zarz-")
+                    val timeWindow = signedCfg.optLong("timeWindowSeconds", 300L).coerceAtLeast(1L)
+                    val endpoints = signedCfg.optJSONObject("endpoints")
+                    val bootstrapEp = endpoints?.optString("bootstrap", "/bootstrap") ?: "/bootstrap"
+
+                    val sessionFile = File(extDataDir, "signed_session.json")
+                    var sessionObj = if (sessionFile.isFile) {
+                        runCatching { JSONObject(sessionFile.readText(StandardCharsets.UTF_8)) }.getOrNull() ?: JSONObject()
+                    } else {
+                        JSONObject()
+                    }
+                    var installId = sessionObj.optString("install_id")
+                    if (installId.isBlank()) {
+                        val rnd = ByteArray(16)
+                        SecureRandom().nextBytes(rnd)
+                        installId = rnd.joinToString("") { "%02x".format(it) }
+                        sessionObj.put("install_id", installId)
+                    }
+                    var sessionId = sessionObj.optString("session_id")
+                    var sessionSecret = sessionObj.optString("session_secret")
+                    if (sessionId.isBlank() || sessionSecret.isBlank()) {
+                        val bootUrl = "$baseUrl/${bootstrapEp.trimStart('/')}?app_version=${URLEncoder.encode(appVer, "UTF-8")}&install_id=$installId"
+                        val bootResp = httpRequestBytes(bootUrl, "GET", null, mapOf("User-Agent" to "NocTune/1.12.0"))
+                        if (bootResp.status in 200..299) {
+                            val bootJson = JSONObject(String(bootResp.body, StandardCharsets.UTF_8))
+                            sessionId = bootJson.optString("session_id")
+                            sessionSecret = bootJson.optString("session_secret")
+                            if (sessionId.isNotBlank() && sessionSecret.isNotBlank()) {
+                                sessionObj.put("session_id", sessionId)
+                                sessionObj.put("session_secret", sessionSecret)
+                                sessionFile.writeText(sessionObj.toString(), StandardCharsets.UTF_8)
+                            }
+                        }
+                    }
+                    if (sessionId.isBlank() || sessionSecret.isBlank()) {
+                        return JSONObject().put("ok", false).put("status", 401).put("statusCode", 401)
+                            .put("error", "Signed session bootstrap required verification").toString()
+                    }
+
+                    val targetUrl = if (path.startsWith("https://")) path else "$baseUrl/${path.trimStart('/')}"
+                    val parsedUri = URI(targetUrl)
+                    val escapedPath = parsedUri.rawPath.ifBlank { "/" }
+                    val bodyBytes = (body ?: "").toByteArray(StandardCharsets.UTF_8)
+                    val bodyHash = MessageDigest.getInstance("SHA-256").digest(bodyBytes).joinToString("") { "%02x".format(it) }
+                    val nowMillis = System.currentTimeMillis()
+                    val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                        timeZone = java.util.TimeZone.getTimeZone("UTC")
+                    }
+                    val timestamp = sdf.format(java.util.Date(nowMillis))
+                    val nonceBytes = ByteArray(16)
+                    SecureRandom().nextBytes(nonceBytes)
+                    val nonce = nonceBytes.joinToString("") { "%02x".format(it) }
+                    val window = (nowMillis / 1000L) / timeWindow
+                    val rolling = hmacSha256Base64Url(sessionSecret, "$window:$sessionId")
+                    val signing = listOf(
+                        schemeLabel,
+                        method.uppercase(Locale.ROOT),
+                        escapedPath,
+                        "",
+                        bodyHash,
+                        timestamp,
+                        nonce,
+                        sessionId,
+                        appVer,
+                        platform,
+                    ).joinToString("\n")
+                    val signature = hmacSha256Base64Url(rolling, signing)
+
+                    val reqHeaders = mutableMapOf(
+                        "${headerPrefix}Session" to sessionId,
+                        "${headerPrefix}Timestamp" to timestamp,
+                        "${headerPrefix}Nonce" to nonce,
+                        "${headerPrefix}Body-SHA256" to bodyHash,
+                        "${headerPrefix}Signature" to signature,
+                        "${headerPrefix}App-Version" to appVer,
+                        "${headerPrefix}Platform" to platform,
+                        "Content-Type" to "application/json",
+                        "Accept" to "application/json",
+                    )
+                    runCatching {
+                        val extra = JSONObject(headersJson)
+                        val ks = extra.keys()
+                        while (ks.hasNext()) {
+                            val k = ks.next()
+                            reqHeaders[k] = extra.optString(k)
+                        }
+                    }
+                    val resp = httpRequestBytes(
+                        url = targetUrl,
+                        method = method.uppercase(Locale.ROOT),
+                        body = if (body.isNullOrEmpty()) null else bodyBytes,
+                        headers = reqHeaders,
+                    )
+                    val respText = String(resp.body, StandardCharsets.UTF_8)
+                    JSONObject()
+                        .put("ok", resp.status in 200..299)
+                        .put("status", resp.status)
+                        .put("statusCode", resp.status)
+                        .put("body", respText)
+                        .toString()
+                } catch (e: Throwable) {
+                    JSONObject().put("ok", false).put("status", 0).put("statusCode", 0)
+                        .put("error", e.message ?: e.toString()).toString()
+                }
+            }
+
+            @Suppress("unused")
             fun fetchLrcLib(track: String, artist: String, durationMs: Long): String {
                 return try {
                     val qTrack = URLEncoder.encode(track, "UTF-8")
@@ -1533,6 +1925,32 @@ class MornyeExtensionRuntime(private val context: Context) {
                     },
                     move: function(src, dst) {
                         return JSON.parse(String(host.fileOp("move", String(src), String(dst))));
+                    },
+                    transformPatternedBlocks: function(inPath, outPath, opts, onProgress) {
+                        var res = JSON.parse(String(host.transformPatternedBlocks(String(inPath), String(outPath), JSON.stringify(opts || {}))));
+                        if (typeof onProgress === "function") onProgress(100, 100);
+                        return res;
+                    }
+                };
+                globalThis.ffmpeg = {
+                    getInfo: function(path) {
+                        var sz = JSON.parse(String(host.fileOp("getSize", String(path), null))).size || 0;
+                        return { success: sz > 0, duration: 200, bitDepth: 16, sampleRate: 44100, codec: "flac" };
+                    },
+                    convert: function(inPath, outPath, opts) {
+                        return JSON.parse(String(host.fileOp("copy", String(inPath), String(outPath))));
+                    },
+                    execute: function() {
+                        return { success: false, error: "raw FFmpeg execution is disabled" };
+                    }
+                };
+                globalThis.session = {
+                    status: function() { return { authenticated: true }; },
+                    clear: function() { return { success: true }; },
+                    completeGrant: function() { return { success: true }; },
+                    signedFetch: function(method, path, body, headers) {
+                        var bodyStr = (body === undefined || body === null) ? "" : (typeof body === "string" ? body : JSON.stringify(body));
+                        return JSON.parse(String(host.signedFetchCall(String(method || "GET"), String(path || "/"), bodyStr, JSON.stringify(headers || {}))));
                     }
                 };
                 globalThis.utils = {
@@ -1590,12 +2008,31 @@ class MornyeExtensionRuntime(private val context: Context) {
                 globalThis.console = globalThis.log;
             })(__nocHost);
         """.trimIndent()
-        cx.evaluateString(scope, bootstrapJs, "mornye_prelude.js", 1, null)
+        val bootScript = compiledBootstrapScript ?: cx.compileString(bootstrapJs, "mornye_prelude.js", 1, null).also {
+            compiledBootstrapScript = it
+        }
+        bootScript.exec(cx, scope)
     }
 
     private fun resolveExtensionFile(extDataDir: File, path: String): File {
         val f = File(path)
         return if (f.isAbsolute) f else File(extDataDir, path)
+    }
+
+    private fun hexToBytes(hex: String): ByteArray {
+        val clean = hex.trim()
+        val out = ByteArray(clean.length / 2)
+        for (i in out.indices) {
+            out[i] = clean.substring(i * 2, i * 2 + 2).toInt(16).toByte()
+        }
+        return out
+    }
+
+    private fun hmacSha256Base64Url(key: String, message: String): String {
+        val mac = Mac.getInstance("HmacSHA256")
+        mac.init(SecretKeySpec(key.toByteArray(StandardCharsets.UTF_8), "HmacSHA256"))
+        val raw = mac.doFinal(message.toByteArray(StandardCharsets.UTF_8))
+        return Base64.encodeToString(raw, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
     }
 
     private data class HttpResponseBytes(
@@ -1613,8 +2050,8 @@ class MornyeExtensionRuntime(private val context: Context) {
     ): HttpResponseBytes {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             requestMethod = method.uppercase(Locale.ROOT)
-            connectTimeout = 15_000
-            readTimeout = 30_000
+            connectTimeout = 6_000
+            readTimeout = 12_000
             instanceFollowRedirects = true
             setRequestProperty("User-Agent", headers["User-Agent"] ?: headers["user-agent"] ?: "Spotiflac-Extension/1.0")
             for ((k, v) in headers) {

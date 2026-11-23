@@ -1,19 +1,45 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/theme/noc_palette.dart';
+import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/noc_backdrop.dart';
+import '../../core/widgets/pill_button.dart';
+import '../../core/widgets/pressable.dart';
 import '../../data/models/track.dart';
+import '../../data/repositories/library_repository.dart';
 import '../extensions/extension_controller.dart';
+import '../extensions/extension_downloads_screen.dart';
 import '../extensions/extension_models.dart';
+import '../library/collection_screen.dart';
 import '../library/track_menu.dart';
 import '../library/track_tile.dart';
 import 'search_history.dart';
 
-/// Searches the library by title, artist, album and file name as you type.
-/// Everything stays on the device. With nothing typed it lists the searches
-/// made lately, to run again.
+/// Mornye-style search categories.
+enum SearchCategory {
+  all('All', 'all', Icons.grid_view_rounded),
+  songs('Songs', 'tracks', Icons.music_note_rounded),
+  albums('Albums', 'albums', Icons.album_rounded),
+  artists('Artists', 'artists', Icons.person_rounded);
+
+  const SearchCategory(this.label, this.filterId, this.icon);
+
+  final String label;
+  final String filterId;
+  final IconData icon;
+}
+
+/// Special source selector values alongside individual extension IDs.
+const _kSourceLibraryOnly = '__library__';
+const _kSourceAllExtensions = 'all';
+
+/// Searches the library and enabled Mornye extensions by Songs, Albums, and
+/// Artists with quick extension switching.
 class SearchScreen extends ConsumerStatefulWidget {
   const SearchScreen({super.key});
 
@@ -24,15 +50,16 @@ class SearchScreen extends ConsumerStatefulWidget {
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _field = TextEditingController();
   String _query = '';
+  String _debouncedExtQuery = '';
+  Timer? _extDebounce;
   final _focus = FocusNode();
   bool _wasShowing = false;
+  SearchCategory _category = SearchCategory.all;
+  String? _selectedSourceId;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    // The page stays alive while another tab is showing, with its tickers
-    // paused. When it comes to the front, put the cursor in the field so the
-    // keyboard opens straight away.
     final showing = TickerMode.valuesOf(context).enabled;
     if (showing && !_wasShowing) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -44,61 +71,272 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   @override
   void dispose() {
+    _extDebounce?.cancel();
     _field.dispose();
     _focus.dispose();
     super.dispose();
   }
 
+  void _onQueryChanged(String value) {
+    final trimmed = value.trim();
+    final wasEmpty = _query.trim().isEmpty;
+    setState(() {
+      _query = value;
+      if (trimmed.isEmpty) {
+        _extDebounce?.cancel();
+        _debouncedExtQuery = '';
+      } else if (wasEmpty) {
+        // Run the first non-empty query immediately; debounce subsequent rapid edits.
+        _debouncedExtQuery = trimmed;
+      }
+    });
+    if (trimmed.isNotEmpty && !wasEmpty) {
+      _extDebounce?.cancel();
+      _extDebounce = Timer(const Duration(milliseconds: 260), () {
+        if (mounted && _query.trim() == trimmed) {
+          setState(() => _debouncedExtQuery = trimmed);
+        }
+      });
+    }
+  }
+
+  void _flushExtQuery() {
+    _extDebounce?.cancel();
+    final trimmed = _query.trim();
+    if (_debouncedExtQuery != trimmed) {
+      setState(() => _debouncedExtQuery = trimmed);
+    }
+  }
+
   /// A search counts as made once it is sent from the keyboard or one of its
   /// results is played, not on every letter typed.
-  void _remember() => ref.read(searchHistoryProvider.notifier).add(_query);
+  void _remember() {
+    _flushExtQuery();
+    ref.read(searchHistoryProvider.notifier).add(_query);
+  }
 
   void _searchAgain(String search) {
+    _extDebounce?.cancel();
     _field.value = TextEditingValue(
       text: search,
       selection: TextSelection.collapsed(offset: search.length),
     );
-    setState(() => _query = search);
+    setState(() {
+      _query = search;
+      _debouncedExtQuery = search.trim();
+    });
     _remember();
+  }
+
+  void _clearQuery() {
+    _extDebounce?.cancel();
+    _field.clear();
+    setState(() {
+      _query = '';
+      _debouncedExtQuery = '';
+    });
+  }
+
+  String _resolveActiveSource(List<InstalledExtension> searchExtensions) {
+    if (searchExtensions.isEmpty) return _kSourceLibraryOnly;
+    final current = _selectedSourceId;
+    if (current == _kSourceLibraryOnly || current == _kSourceAllExtensions) {
+      return current!;
+    }
+    if (current != null && searchExtensions.any((e) => e.id == current)) {
+      return current;
+    }
+    // Default to the primary / highest-priority enabled search extension so
+    // searches query a single fast provider (~250ms) just like Mornye.
+    return searchExtensions.first.id;
+  }
+
+  String _searchHint(
+    String activeSource,
+    List<InstalledExtension> searchExtensions,
+  ) {
+    if (activeSource == _kSourceLibraryOnly || searchExtensions.isEmpty) {
+      return 'Search tracks, artists, albums…';
+    }
+    if (activeSource == _kSourceAllExtensions) {
+      return 'Search library & all extensions…';
+    }
+    final ext = searchExtensions
+        .where((e) => e.id == activeSource)
+        .firstOrNull;
+    if (ext != null) {
+      if (ext.searchPlaceholder.trim().isNotEmpty) {
+        return ext.searchPlaceholder.trim();
+      }
+      return 'Search ${ext.displayName} & library…';
+    }
+    return 'Search tracks, artists, albums…';
   }
 
   @override
   Widget build(BuildContext context) {
     final palette = context.noc;
     final history = ref.watch(searchHistoryProvider);
+    final extState = ref.watch(extensionControllerProvider);
+    final searchExtensions = extState.enabledSearchExtensions;
+    final activeSource = _resolveActiveSource(searchExtensions);
+    final queueCount = extState.downloadQueue.length;
+    final activeDownloads = extState.activeDownloadCount;
 
     return SafeArea(
       bottom: false,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: TextField(
-              controller: _field,
-              focusNode: _focus,
-              onChanged: (value) => setState(() => _query = value),
-              onSubmitted: (_) => _remember(),
-              textInputAction: TextInputAction.search,
-              decoration: InputDecoration(
-                hintText: 'Search tracks, artists, albums…',
-                prefixIcon: const Icon(Icons.search_rounded),
-                filled: true,
-                fillColor: palette.glass,
-                contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(28),
-                  borderSide: BorderSide(color: palette.glassBorder),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _field,
+                    focusNode: _focus,
+                    onChanged: _onQueryChanged,
+                    onSubmitted: (_) => _remember(),
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      hintText: _searchHint(activeSource, searchExtensions),
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      suffixIcon: _query.isNotEmpty
+                          ? IconButton(
+                              tooltip: 'Clear search',
+                              onPressed: _clearQuery,
+                              icon: const Icon(Icons.close_rounded, size: 20),
+                            )
+                          : null,
+                      filled: true,
+                      fillColor: palette.glass,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: BorderSide(color: palette.glassBorder),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(28),
+                        borderSide: BorderSide(color: palette.glassBorder),
+                      ),
+                    ),
+                  ),
                 ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(28),
-                  borderSide: BorderSide(color: palette.glassBorder),
-                ),
-              ),
+                if (extState.extensions.isNotEmpty || queueCount > 0) ...[
+                  const SizedBox(width: 8),
+                  _DownloadQueueButton(
+                    queueCount: queueCount,
+                    activeCount: activeDownloads,
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const ExtensionDownloadsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ],
             ),
           ),
+          // Mornye-style category filter bar: All, Songs, Albums, Artists.
+          SizedBox(
+            height: 40,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              children: [
+                for (final cat in SearchCategory.values)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _SearchPillChip(
+                      key: ValueKey('search-category-${cat.name}'),
+                      label: cat.label,
+                      icon: cat.icon,
+                      selected: _category == cat,
+                      onTap: () {
+                        setState(() => _category = cat);
+                        _flushExtQuery();
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          // Mornye-style extension / source picker bar.
+          if (searchExtensions.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 36,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                children: [
+                  for (final ext in searchExtensions)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _SearchPillChip(
+                        key: ValueKey('search-source-${ext.id}'),
+                        label: ext.displayName,
+                        icon: Icons.extension_rounded,
+                        compact: true,
+                        selected: activeSource == ext.id,
+                        onTap: () {
+                          setState(() => _selectedSourceId = ext.id);
+                          _flushExtQuery();
+                        },
+                      ),
+                    ),
+                  if (searchExtensions.length > 1)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: _SearchPillChip(
+                        key: const ValueKey('search-source-all'),
+                        label: 'All extensions',
+                        icon: Icons.public_rounded,
+                        compact: true,
+                        selected: activeSource == _kSourceAllExtensions,
+                        onTap: () {
+                          setState(
+                            () => _selectedSourceId = _kSourceAllExtensions,
+                          );
+                          _flushExtQuery();
+                        },
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _SearchPillChip(
+                      key: const ValueKey('search-source-library'),
+                      label: 'Library only',
+                      icon: Icons.library_music_rounded,
+                      compact: true,
+                      selected: activeSource == _kSourceLibraryOnly,
+                      onTap: () {
+                        setState(() => _selectedSourceId = _kSourceLibraryOnly);
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 4),
           Expanded(
             child: _query.trim().isNotEmpty
-                ? _Results(query: _query.trim(), onPlayed: _remember)
+                ? _Results(
+                    query: _query.trim(),
+                    extQuery: _debouncedExtQuery.isNotEmpty
+                        ? _debouncedExtQuery
+                        : _query.trim(),
+                    category: _category,
+                    activeSource: activeSource,
+                    hasExtensions:
+                        searchExtensions.isNotEmpty &&
+                        activeSource != _kSourceLibraryOnly,
+                    onPlayed: _remember,
+                  )
                 : history.isEmpty
                 ? EmptyState(
                     icon: Icons.search_rounded,
@@ -119,40 +357,233 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 }
 
-/// The library's matches for [query].
+class _DownloadQueueButton extends StatelessWidget {
+  const _DownloadQueueButton({
+    required this.queueCount,
+    required this.activeCount,
+    required this.onTap,
+  });
+
+  final int queueCount;
+  final int activeCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    return Pressable(
+      semanticLabel: 'Download queue',
+      onTap: onTap,
+      child: Tooltip(
+        message: 'Download queue',
+        child: Container(
+          height: 48,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: ShapeDecoration(
+            color: activeCount > 0 ? palette.accent : palette.glass,
+            shape: StadiumBorder(
+              side: BorderSide(
+                color: activeCount > 0 ? palette.accent : palette.glassBorder,
+              ),
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.downloading_rounded,
+                size: 20,
+                color: activeCount > 0
+                    ? palette.onAccent
+                    : palette.textPrimary,
+              ),
+              if (queueCount > 0) ...[
+                const SizedBox(width: 6),
+                Text(
+                  '$queueCount',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: activeCount > 0
+                        ? palette.onAccent
+                        : palette.textPrimary,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SearchPillChip extends StatelessWidget {
+  const _SearchPillChip({
+    super.key,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+    this.compact = false,
+  });
+
+  final String label;
+  final IconData? icon;
+  final bool selected;
+  final bool compact;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final fg = selected ? palette.onAccent : palette.textSecondary;
+    return Pressable(
+      semanticLabel: label,
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        curve: Curves.easeOutCubic,
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 12 : 14,
+          vertical: compact ? 6 : 8,
+        ),
+        decoration: ShapeDecoration(
+          color: selected ? palette.accent : palette.glass,
+          shape: StadiumBorder(
+            side: BorderSide(
+              color: selected ? palette.accent : palette.glassBorder,
+            ),
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (icon != null) ...[
+              Icon(icon, size: compact ? 14 : 16, color: fg),
+              const SizedBox(width: 6),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                color: fg,
+                fontSize: compact ? 12 : 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The library's and selected extension's matches for [query].
 class _Results extends ConsumerWidget {
-  const _Results({required this.query, required this.onPlayed});
+  const _Results({
+    required this.query,
+    required this.extQuery,
+    required this.category,
+    required this.activeSource,
+    required this.hasExtensions,
+    required this.onPlayed,
+  });
 
   final String query;
+  final String extQuery;
+  final SearchCategory category;
+  final String activeSource;
+  final bool hasExtensions;
   final VoidCallback onPlayed;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final local = ref.watch(searchResultsProvider(query));
+    final allLibrary = ref.watch(allTracksProvider).value ?? const <Track>[];
     final currentId = ref.watch(currentTrackIdProvider);
     final playing = ref.watch(
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
-    final hasExtensions = ref.watch(
-      extensionControllerProvider.select(
-        (state) => state.hasActiveSearchOrDownload,
-      ),
-    );
+
     final extSearch = hasExtensions
-        ? ref.watch(extensionSearchResultsProvider(query))
+        ? ref.watch(
+            extensionFilteredSearchProvider((
+              query: extQuery,
+              filter: category.filterId,
+              providerId: activeSource == _kSourceAllExtensions
+                  ? 'all'
+                  : activeSource,
+            )),
+          )
         : const AsyncValue<List<ExtensionTrackResult>>.data([]);
 
-    final tracks = local.value ?? const <Track>[];
-    final extTracks = extSearch.value ?? const <ExtensionTrackResult>[];
     if (!local.hasValue) return const _Progress('Searching your library…');
-    if (tracks.isEmpty && !hasExtensions) {
+
+    final rawLocalTracks = local.value ?? const <Track>[];
+    final localTracks =
+        (category == SearchCategory.all || category == SearchCategory.songs)
+        ? rawLocalTracks
+        : const <Track>[];
+
+    // Local album and artist matches from the library.
+    final lowerQ = query.toLowerCase();
+    final localAlbums = <String, Track>{};
+    final localArtists = <String, Track>{};
+    if (category == SearchCategory.all || category == SearchCategory.albums) {
+      for (final t in allLibrary) {
+        final alb = t.album?.trim() ?? '';
+        if (alb.isNotEmpty && alb.toLowerCase().contains(lowerQ)) {
+          localAlbums.putIfAbsent(alb, () => t);
+        }
+      }
+    }
+    if (category == SearchCategory.artists) {
+      for (final t in allLibrary) {
+        final art = t.artist?.trim() ?? '';
+        if (art.isNotEmpty && art.toLowerCase().contains(lowerQ)) {
+          localArtists.putIfAbsent(art, () => t);
+        }
+      }
+    }
+
+    final extResults = extSearch.value ?? const <ExtensionTrackResult>[];
+    final extSongs = [
+      for (final item in extResults)
+        if (item.isTrack &&
+            (category == SearchCategory.all ||
+                category == SearchCategory.songs))
+          item,
+    ];
+    final extAlbums = [
+      for (final item in extResults)
+        if (item.isAlbum &&
+            (category == SearchCategory.all ||
+                category == SearchCategory.albums))
+          item,
+    ];
+    final extArtists = [
+      for (final item in extResults)
+        if (item.isArtist &&
+            (category == SearchCategory.all ||
+                category == SearchCategory.artists))
+          item,
+    ];
+
+    final hasLocalMatches =
+        localTracks.isNotEmpty ||
+        localAlbums.isNotEmpty ||
+        localArtists.isNotEmpty;
+    final hasExtMatches =
+        extSongs.isNotEmpty || extAlbums.isNotEmpty || extArtists.isNotEmpty;
+
+    if (!hasLocalMatches && !hasExtensions) {
       return EmptyState(
         icon: Icons.music_off_outlined,
         title: 'No matches',
         message: 'Nothing in your library matches "$query".',
       );
     }
-    if (tracks.isEmpty && !extSearch.isLoading && extTracks.isEmpty) {
+    if (!hasLocalMatches && !extSearch.isLoading && !hasExtMatches) {
       return EmptyState(
         icon: Icons.music_off_outlined,
         title: 'No matches',
@@ -162,9 +593,41 @@ class _Results extends ConsumerWidget {
 
     return ListView(
       children: [
-        if (tracks.isNotEmpty) ...[
+        if (hasLocalMatches) ...[
           const _Heading('In your library'),
-          for (final (index, track) in tracks.indexed)
+          for (final entry in localArtists.entries)
+            _LocalCollectionTile(
+              title: entry.key,
+              subtitle: 'Artist · In your library',
+              artPath: entry.value.artPath,
+              circular: true,
+              onTap: () {
+                onPlayed();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        GroupScreen(group: TrackGroup.artist, name: entry.key),
+                  ),
+                );
+              },
+            ),
+          for (final entry in localAlbums.entries)
+            _LocalCollectionTile(
+              title: entry.key,
+              subtitle:
+                  'Album · ${entry.value.artist ?? 'Unknown artist'} · In your library',
+              artPath: entry.value.artPath,
+              onTap: () {
+                onPlayed();
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) =>
+                        GroupScreen(group: TrackGroup.album, name: entry.key),
+                  ),
+                );
+              },
+            ),
+          for (final (index, track) in localTracks.indexed)
             TrackTile(
               track: track,
               isCurrent: track.id == currentId,
@@ -172,23 +635,193 @@ class _Results extends ConsumerWidget {
               onTap: () {
                 ref
                     .read(audioHandlerProvider)
-                    .playTracks(tracks, initialIndex: index);
+                    .playTracks(localTracks, initialIndex: index);
                 onPlayed();
               },
               onMenu: () => showTrackMenu(context, ref, track),
             ),
         ],
         if (hasExtensions) ...[
-          if (extTracks.isNotEmpty) const _Heading('Extensions'),
-          for (final extTrack in extTracks)
-            _ExtensionResultTile(
-              result: extTrack,
-              libraryTracks: tracks,
-              onPlayed: onPlayed,
-            ),
+          if (hasExtMatches) const _Heading('Extensions'),
+          if (extArtists.isNotEmpty) ...[
+            if (category == SearchCategory.all)
+              const _SubHeading('Artists'),
+            for (final artist in extArtists)
+              _ExtensionCollectionTile(
+                result: artist,
+                circular: true,
+                onTap: () {
+                  onPlayed();
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => _ExtensionArtistScreen(artist: artist),
+                    ),
+                  );
+                },
+              ),
+          ],
+          if (extAlbums.isNotEmpty) ...[
+            if (category == SearchCategory.all)
+              const _SubHeading('Albums'),
+            for (final album in extAlbums)
+              _ExtensionCollectionTile(
+                result: album,
+                onTap: () {
+                  onPlayed();
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => _ExtensionAlbumScreen(album: album),
+                    ),
+                  );
+                },
+              ),
+          ],
+          if (extSongs.isNotEmpty) ...[
+            if (category == SearchCategory.all &&
+                (extAlbums.isNotEmpty || extArtists.isNotEmpty))
+              const _SubHeading('Songs'),
+            for (final extTrack in extSongs)
+              _ExtensionResultTile(
+                result: extTrack,
+                libraryTracks: rawLocalTracks,
+                onPlayed: onPlayed,
+              ),
+          ],
           if (extSearch.isLoading) const _Progress('Searching extensions…'),
         ],
       ],
+    );
+  }
+}
+
+class _LocalCollectionTile extends StatelessWidget {
+  const _LocalCollectionTile({
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.artPath,
+    this.circular = false,
+  });
+
+  final String title;
+  final String subtitle;
+  final String? artPath;
+  final bool circular;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final text = Theme.of(context).textTheme;
+    return ListTile(
+      leading: ClipRRect(
+        borderRadius: BorderRadius.circular(circular ? 24 : 10),
+        child: Artwork(
+          path: artPath,
+          size: 48,
+          radius: circular ? 24 : 10,
+        ),
+      ),
+      title: Text(
+        title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: text.titleMedium,
+      ),
+      subtitle: Text(
+        subtitle,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: text.bodySmall?.copyWith(color: palette.textSecondary),
+      ),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: palette.textTertiary,
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _ExtensionCollectionTile extends StatelessWidget {
+  const _ExtensionCollectionTile({
+    required this.result,
+    required this.onTap,
+    this.circular = false,
+  });
+
+  final ExtensionTrackResult result;
+  final bool circular;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final text = Theme.of(context).textTheme;
+    final kindLabel = result.isArtist ? 'Artist' : 'Album';
+    final parts = <String>[
+      kindLabel,
+      if (result.artist.isNotEmpty && !result.isArtist) result.artist,
+      if (result.providerName.isNotEmpty) result.providerName,
+    ];
+    return ListTile(
+      leading: _RemoteOrLocalCover(
+        coverUrl: result.coverUrl,
+        size: 48,
+        circular: circular,
+      ),
+      title: Text(
+        result.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: text.titleMedium,
+      ),
+      subtitle: Text(
+        parts.join(' · '),
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: text.bodySmall?.copyWith(color: palette.textSecondary),
+      ),
+      trailing: Icon(
+        Icons.chevron_right_rounded,
+        color: palette.textTertiary,
+      ),
+      onTap: onTap,
+    );
+  }
+}
+
+class _RemoteOrLocalCover extends StatelessWidget {
+  const _RemoteOrLocalCover({
+    required this.coverUrl,
+    required this.size,
+    this.circular = false,
+  });
+
+  final String coverUrl;
+  final double size;
+  final bool circular;
+
+  @override
+  Widget build(BuildContext context) {
+    final radius = circular ? size / 2 : 10.0;
+    final fallback = Artwork(
+      path: null,
+      size: size,
+      radius: radius,
+    );
+    if (coverUrl.isEmpty || !coverUrl.startsWith('http')) {
+      return fallback;
+    }
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radius),
+      child: Image.network(
+        coverUrl,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => fallback,
+      ),
     );
   }
 }
@@ -296,6 +929,319 @@ class _ExtensionResultTile extends ConsumerWidget {
   }
 }
 
+/// Browses an extension album's tracks and lets the user download individual
+/// songs or the entire album into their local library.
+class _ExtensionAlbumScreen extends ConsumerStatefulWidget {
+  const _ExtensionAlbumScreen({required this.album});
+
+  final ExtensionTrackResult album;
+
+  @override
+  ConsumerState<_ExtensionAlbumScreen> createState() =>
+      _ExtensionAlbumScreenState();
+}
+
+class _ExtensionAlbumScreenState extends ConsumerState<_ExtensionAlbumScreen> {
+  ExtensionAlbumDetails? _details;
+  bool _loading = true;
+  String? _error;
+  bool _downloadingAll = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final details = await ref
+          .read(extensionChannelProvider)
+          .getAlbum(
+            providerId: widget.album.providerId,
+            albumId: widget.album.id,
+          );
+      if (!mounted) return;
+      setState(() {
+        _details = details;
+        _loading = false;
+        if (details == null) {
+          _error = 'Could not load album tracks from ${widget.album.providerName}.';
+        }
+      });
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _downloadAll(List<ExtensionTrackResult> tracks) async {
+    if (_downloadingAll || tracks.isEmpty) return;
+    setState(() => _downloadingAll = true);
+    var downloaded = 0;
+    try {
+      for (final track in tracks) {
+        try {
+          final path = await ref
+              .read(extensionControllerProvider.notifier)
+              .downloadTrack(track);
+          if (path != null) downloaded++;
+        } on Object {
+          // Continue with remaining tracks.
+        }
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'Downloaded $downloaded of ${tracks.length} tracks to library.',
+            ),
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _downloadingAll = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final text = Theme.of(context).textTheme;
+    final tracks = _details?.tracks ?? const <ExtensionTrackResult>[];
+    final coverUrl = (_details?.coverUrl.isNotEmpty ?? false)
+        ? _details!.coverUrl
+        : widget.album.coverUrl;
+    final title = (_details?.name.isNotEmpty ?? false)
+        ? _details!.name
+        : widget.album.title;
+    final artist = (_details?.artist.isNotEmpty ?? false)
+        ? _details!.artist
+        : widget.album.artist;
+
+    return NocBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          title: Text(title),
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? EmptyState(
+                icon: Icons.album_outlined,
+                title: title,
+                message: _error!,
+              )
+            : ListView(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 20),
+                    child: Column(
+                      children: [
+                        _RemoteOrLocalCover(
+                          coverUrl: coverUrl,
+                          size: 180,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          title,
+                          textAlign: TextAlign.center,
+                          style: text.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          [
+                            if (artist.isNotEmpty) artist,
+                            if (widget.album.providerName.isNotEmpty)
+                              widget.album.providerName,
+                            '${tracks.length} tracks',
+                          ].join(' · '),
+                          textAlign: TextAlign.center,
+                          style: text.bodySmall?.copyWith(
+                            color: palette.textSecondary,
+                          ),
+                        ),
+                        if (tracks.isNotEmpty) ...[
+                          const SizedBox(height: 16),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 260),
+                            child: PillButton(
+                              icon: _downloadingAll
+                                  ? Icons.hourglass_top_rounded
+                                  : Icons.download_rounded,
+                              label: _downloadingAll
+                                  ? 'Downloading…'
+                                  : 'Download album',
+                              filled: true,
+                              onTap: _downloadingAll
+                                  ? () {}
+                                  : () => _downloadAll(tracks),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  for (final track in tracks)
+                    _ExtensionResultTile(
+                      result: track,
+                      libraryTracks: const [],
+                      onPlayed: () {},
+                    ),
+                ],
+              ),
+      ),
+    );
+  }
+}
+
+/// Browses an extension artist's top tracks and albums.
+class _ExtensionArtistScreen extends ConsumerStatefulWidget {
+  const _ExtensionArtistScreen({required this.artist});
+
+  final ExtensionTrackResult artist;
+
+  @override
+  ConsumerState<_ExtensionArtistScreen> createState() =>
+      _ExtensionArtistScreenState();
+}
+
+class _ExtensionArtistScreenState
+    extends ConsumerState<_ExtensionArtistScreen> {
+  ExtensionArtistDetails? _details;
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final details = await ref
+          .read(extensionChannelProvider)
+          .getArtist(
+            providerId: widget.artist.providerId,
+            artistId: widget.artist.id,
+          );
+      if (!mounted) return;
+      setState(() {
+        _details = details;
+        _loading = false;
+        if (details == null) {
+          _error =
+              'Could not load artist details from ${widget.artist.providerName}.';
+        }
+      });
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = '$e';
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    final text = Theme.of(context).textTheme;
+    final topTracks = _details?.topTracks ?? const <ExtensionTrackResult>[];
+    final albums = _details?.albums ?? const <ExtensionTrackResult>[];
+    final coverUrl = (_details?.coverUrl.isNotEmpty ?? false)
+        ? _details!.coverUrl
+        : widget.artist.coverUrl;
+    final name = (_details?.name.isNotEmpty ?? false)
+        ? _details!.name
+        : widget.artist.title;
+
+    return NocBackdrop(
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          title: Text(name),
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _error != null
+            ? EmptyState(
+                icon: Icons.person_outline_rounded,
+                title: name,
+                message: _error!,
+              )
+            : ListView(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+                    child: Column(
+                      children: [
+                        _RemoteOrLocalCover(
+                          coverUrl: coverUrl,
+                          size: 140,
+                          circular: true,
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          name,
+                          textAlign: TextAlign.center,
+                          style: text.headlineSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        if (widget.artist.providerName.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            widget.artist.providerName,
+                            style: text.bodySmall?.copyWith(
+                              color: palette.textSecondary,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                  if (topTracks.isNotEmpty) ...[
+                    const _Heading('Top songs'),
+                    for (final track in topTracks)
+                      _ExtensionResultTile(
+                        result: track,
+                        libraryTracks: const [],
+                        onPlayed: () {},
+                      ),
+                  ],
+                  if (albums.isNotEmpty) ...[
+                    const _Heading('Albums'),
+                    for (final album in albums)
+                      _ExtensionCollectionTile(
+                        result: album,
+                        onTap: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) =>
+                                  _ExtensionAlbumScreen(album: album),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
+                ],
+              ),
+      ),
+    );
+  }
+}
+
 class _Heading extends StatelessWidget {
   const _Heading(this.title);
 
@@ -309,6 +1255,27 @@ class _Heading extends StatelessWidget {
       child: Text(title, style: Theme.of(context).textTheme.titleMedium),
     ),
   );
+}
+
+class _SubHeading extends StatelessWidget {
+  const _SubHeading(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+      child: Text(
+        title,
+        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+          color: palette.textSecondary,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
 }
 
 class _Progress extends StatelessWidget {

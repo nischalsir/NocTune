@@ -19,12 +19,21 @@ class ExtensionState {
     this.loading = false,
     this.downloadingKeys = const {},
     this.downloadedPaths = const {},
+    this.downloadQueue = const [],
   });
 
   final List<InstalledExtension> extensions;
   final bool loading;
   final Set<String> downloadingKeys;
   final Map<String, String> downloadedPaths;
+  final List<ExtensionDownloadItem> downloadQueue;
+
+  int get activeDownloadCount =>
+      downloadQueue.where((item) => item.isActive).length;
+
+  int get completedDownloadCount => downloadQueue
+      .where((item) => item.status == ExtensionDownloadStatus.completed)
+      .length;
 
   /// True when at least one enabled extension can search or download tracks.
   bool get hasActiveSearchOrDownload => extensions.any(
@@ -35,6 +44,16 @@ class ExtensionState {
             ext.hasDownloadProvider ||
             ext.hasUrlHandler),
   );
+
+  /// Enabled extensions that can be selected as a search source.
+  List<InstalledExtension> get enabledSearchExtensions => [
+    for (final ext in extensions)
+      if (ext.enabled &&
+          (ext.hasMetadataProvider ||
+              ext.hasCustomSearch ||
+              ext.hasDownloadProvider))
+        ext,
+  ];
 
   /// True when at least one enabled extension provides downloads.
   bool get hasActiveDownloader =>
@@ -60,12 +79,14 @@ class ExtensionState {
     bool? loading,
     Set<String>? downloadingKeys,
     Map<String, String>? downloadedPaths,
+    List<ExtensionDownloadItem>? downloadQueue,
   }) {
     return ExtensionState(
       extensions: extensions ?? this.extensions,
       loading: loading ?? this.loading,
       downloadingKeys: downloadingKeys ?? this.downloadingKeys,
       downloadedPaths: downloadedPaths ?? this.downloadedPaths,
+      downloadQueue: downloadQueue ?? this.downloadQueue,
     );
   }
 }
@@ -160,6 +181,37 @@ class ExtensionController extends Notifier<ExtensionState> {
     state = state.copyWith(extensions: list);
   }
 
+  void _upsertQueueItem(ExtensionDownloadItem item) {
+    final existingIndex = state.downloadQueue.indexWhere(
+      (entry) => entry.uniqueKey == item.uniqueKey,
+    );
+    final updated = List<ExtensionDownloadItem>.of(state.downloadQueue);
+    if (existingIndex >= 0) {
+      updated[existingIndex] = item;
+    } else {
+      updated.insert(0, item);
+    }
+    state = state.copyWith(downloadQueue: updated);
+  }
+
+  void removeDownloadItem(String uniqueKey) {
+    state = state.copyWith(
+      downloadQueue: [
+        for (final item in state.downloadQueue)
+          if (item.uniqueKey != uniqueKey) item,
+      ],
+    );
+  }
+
+  void clearFinishedDownloads() {
+    state = state.copyWith(
+      downloadQueue: [
+        for (final item in state.downloadQueue)
+          if (item.isActive) item,
+      ],
+    );
+  }
+
   /// Downloads [track] through the enabled download extensions into the
   /// device's music folder and triggers a library scan so it immediately
   /// appears in the library.
@@ -169,6 +221,13 @@ class ExtensionController extends Notifier<ExtensionState> {
     state = state.copyWith(
       downloadingKeys: {...state.downloadingKeys, key},
     );
+    _upsertQueueItem(
+      ExtensionDownloadItem(
+        track: track,
+        status: ExtensionDownloadStatus.downloading,
+        updatedAt: DateTime.now(),
+      ),
+    );
     try {
       final savedPath = await ref
           .read(extensionChannelProvider)
@@ -177,6 +236,14 @@ class ExtensionController extends Notifier<ExtensionState> {
         state = state.copyWith(
           downloadingKeys: {...state.downloadingKeys}..remove(key),
           downloadedPaths: {...state.downloadedPaths, key: savedPath},
+        );
+        _upsertQueueItem(
+          ExtensionDownloadItem(
+            track: track,
+            status: ExtensionDownloadStatus.completed,
+            updatedAt: DateTime.now(),
+            filePath: savedPath,
+          ),
         );
         try {
           await ref.read(scanControllerProvider.notifier).scan();
@@ -188,10 +255,26 @@ class ExtensionController extends Notifier<ExtensionState> {
       state = state.copyWith(
         downloadingKeys: {...state.downloadingKeys}..remove(key),
       );
+      _upsertQueueItem(
+        ExtensionDownloadItem(
+          track: track,
+          status: ExtensionDownloadStatus.failed,
+          updatedAt: DateTime.now(),
+          errorMessage: 'Track could not be downloaded',
+        ),
+      );
       return null;
-    } on Object {
+    } on Object catch (e) {
       state = state.copyWith(
         downloadingKeys: {...state.downloadingKeys}..remove(key),
+      );
+      _upsertQueueItem(
+        ExtensionDownloadItem(
+          track: track,
+          status: ExtensionDownloadStatus.failed,
+          updatedAt: DateTime.now(),
+          errorMessage: '$e',
+        ),
       );
       rethrow;
     }
@@ -217,4 +300,33 @@ final extensionSearchResultsProvider =
       );
       if (!hasActive || query.trim().isEmpty) return const [];
       return ref.watch(extensionChannelProvider).search(query.trim());
+    });
+
+/// Searches installed & enabled extensions for a [query] with an optional
+/// category [filter] (`'all'`, `'tracks'`, `'albums'`, `'artists'`) and
+/// optional [providerId] (specific extension ID or `'all'`).
+typedef ExtensionSearchRequest = ({
+  String query,
+  String filter,
+  String? providerId,
+});
+
+final extensionFilteredSearchProvider = FutureProvider.autoDispose
+    .family<List<ExtensionTrackResult>, ExtensionSearchRequest>((
+      ref,
+      request,
+    ) async {
+      final hasActive = ref.watch(
+        extensionControllerProvider.select(
+          (state) => state.hasActiveSearchOrDownload,
+        ),
+      );
+      if (!hasActive || request.query.trim().isEmpty) return const [];
+      return ref
+          .watch(extensionChannelProvider)
+          .search(
+            request.query.trim(),
+            filter: request.filter,
+            providerId: request.providerId,
+          );
     });

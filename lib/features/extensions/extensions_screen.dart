@@ -8,6 +8,7 @@ import '../../core/widgets/noc_backdrop.dart';
 import '../../core/widgets/noc_dialog.dart';
 import '../../core/widgets/pill_button.dart';
 import 'extension_controller.dart';
+import 'extension_downloads_screen.dart';
 import 'extension_models.dart';
 
 /// Manages Mornye / SpotiFLAC extension packages (`.spotiflac-ext`, `.sflx`,
@@ -283,6 +284,24 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
             children: [
               _Card(
                 children: [
+                  ListTile(
+                    leading: const Icon(Icons.downloading_rounded),
+                    title: const Text('Download queue'),
+                    subtitle: Text(
+                      state.downloadQueue.isEmpty
+                          ? 'View active and completed extension downloads'
+                          : '${state.activeDownloadCount} active · ${state.completedDownloadCount} completed',
+                    ),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => const ExtensionDownloadsScreen(),
+                        ),
+                      );
+                    },
+                  ),
+                  Divider(height: 1, indent: 56, color: palette.glassBorder),
                   ListTile(
                     leading: const Icon(Icons.folder_open_rounded),
                     title: const Text('Install extension from file'),

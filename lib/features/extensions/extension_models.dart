@@ -154,7 +154,7 @@ class InstalledExtension {
   }
 }
 
-/// A track returned by an extension search or URL resolution.
+/// A track, album, or artist returned by an extension search or URL resolution.
 @immutable
 class ExtensionTrackResult {
   const ExtensionTrackResult({
@@ -168,6 +168,9 @@ class ExtensionTrackResult {
     this.providerId = '',
     this.providerName = '',
     this.audioQuality = '',
+    this.itemType = 'track',
+    this.totalTracks = 0,
+    this.releaseDate = '',
     this.raw = const {},
   });
 
@@ -177,6 +180,14 @@ class ExtensionTrackResult {
         if (entry.key is String) entry.key as String: entry.value,
     };
     final durationMs = (map['duration_ms'] as num?)?.toInt() ?? 0;
+    final rawType = ((map['item_type'] as String?) ?? 'track')
+        .trim()
+        .toLowerCase();
+    final itemType = switch (rawType) {
+      'album' || 'albums' => 'album',
+      'artist' || 'artists' => 'artist',
+      _ => 'track',
+    };
     return ExtensionTrackResult(
       id: (map['id'] as String?) ?? '',
       title: (map['title'] as String?) ?? (map['name'] as String?) ?? 'Unknown',
@@ -190,6 +201,9 @@ class ExtensionTrackResult {
       providerId: (map['provider_id'] as String?) ?? '',
       providerName: (map['provider_name'] as String?) ?? '',
       audioQuality: (map['audio_quality'] as String?) ?? '',
+      itemType: itemType,
+      totalTracks: (map['total_tracks'] as num?)?.toInt() ?? 0,
+      releaseDate: (map['release_date'] as String?) ?? '',
       raw: rawMap,
     );
   }
@@ -204,7 +218,137 @@ class ExtensionTrackResult {
   final String providerId;
   final String providerName;
   final String audioQuality;
+  final String itemType;
+  final int totalTracks;
+  final String releaseDate;
   final Map<String, Object?> raw;
 
-  String get uniqueKey => '$providerId:$id';
+  bool get isTrack => itemType == 'track';
+  bool get isAlbum => itemType == 'album';
+  bool get isArtist => itemType == 'artist';
+
+  String get uniqueKey => '$providerId:$itemType:$id';
+}
+
+/// Full album details and tracklist fetched from an extension via `getAlbum`.
+@immutable
+class ExtensionAlbumDetails {
+  const ExtensionAlbumDetails({
+    required this.id,
+    required this.name,
+    required this.artist,
+    this.coverUrl = '',
+    this.releaseDate = '',
+    this.providerId = '',
+    this.providerName = '',
+    this.tracks = const [],
+  });
+
+  factory ExtensionAlbumDetails.fromMap(Map<Object?, Object?> map) {
+    return ExtensionAlbumDetails(
+      id: (map['id'] as String?) ?? '',
+      name: (map['name'] as String?) ?? '',
+      artist: (map['artist'] as String?) ?? '',
+      coverUrl: (map['cover_url'] as String?) ?? '',
+      releaseDate: (map['release_date'] as String?) ?? '',
+      providerId: (map['provider_id'] as String?) ?? '',
+      providerName: (map['provider_name'] as String?) ?? '',
+      tracks: [
+        for (final item in (map['tracks'] as List<Object?>?) ?? const [])
+          if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
+      ],
+    );
+  }
+
+  final String id;
+  final String name;
+  final String artist;
+  final String coverUrl;
+  final String releaseDate;
+  final String providerId;
+  final String providerName;
+  final List<ExtensionTrackResult> tracks;
+}
+
+/// Artist top tracks and albums fetched from an extension via `getArtist`.
+@immutable
+class ExtensionArtistDetails {
+  const ExtensionArtistDetails({
+    required this.id,
+    required this.name,
+    this.coverUrl = '',
+    this.providerId = '',
+    this.providerName = '',
+    this.topTracks = const [],
+    this.albums = const [],
+  });
+
+  factory ExtensionArtistDetails.fromMap(Map<Object?, Object?> map) {
+    return ExtensionArtistDetails(
+      id: (map['id'] as String?) ?? '',
+      name: (map['name'] as String?) ?? '',
+      coverUrl: (map['cover_url'] as String?) ?? '',
+      providerId: (map['provider_id'] as String?) ?? '',
+      providerName: (map['provider_name'] as String?) ?? '',
+      topTracks: [
+        for (final item in (map['top_tracks'] as List<Object?>?) ?? const [])
+          if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
+      ],
+      albums: [
+        for (final item in (map['albums'] as List<Object?>?) ?? const [])
+          if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
+      ],
+    );
+  }
+
+  final String id;
+  final String name;
+  final String coverUrl;
+  final String providerId;
+  final String providerName;
+  final List<ExtensionTrackResult> topTracks;
+  final List<ExtensionTrackResult> albums;
+}
+
+/// Lifecycle state of an extension track download in the download queue.
+enum ExtensionDownloadStatus { queued, downloading, completed, failed }
+
+/// An entry in the extension download queue / history list.
+@immutable
+class ExtensionDownloadItem {
+  const ExtensionDownloadItem({
+    required this.track,
+    required this.status,
+    required this.updatedAt,
+    this.filePath,
+    this.errorMessage,
+  });
+
+  final ExtensionTrackResult track;
+  final ExtensionDownloadStatus status;
+  final DateTime updatedAt;
+  final String? filePath;
+  final String? errorMessage;
+
+  String get uniqueKey => track.uniqueKey;
+
+  bool get isActive =>
+      status == ExtensionDownloadStatus.queued ||
+      status == ExtensionDownloadStatus.downloading;
+
+  ExtensionDownloadItem copyWith({
+    ExtensionTrackResult? track,
+    ExtensionDownloadStatus? status,
+    DateTime? updatedAt,
+    String? filePath,
+    String? errorMessage,
+  }) {
+    return ExtensionDownloadItem(
+      track: track ?? this.track,
+      status: status ?? this.status,
+      updatedAt: updatedAt ?? this.updatedAt,
+      filePath: filePath ?? this.filePath,
+      errorMessage: errorMessage,
+    );
+  }
 }

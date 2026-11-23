@@ -100,12 +100,16 @@ class ExtensionChannel {
   Future<List<ExtensionTrackResult>> search(
     String query, {
     int limit = 20,
+    String? filter,
+    String? providerId,
   }) async {
     if (!isSupported || query.trim().isEmpty) return const [];
     try {
       final raw = await _channel.invokeListMethod<Object?>('search', {
         'query': query.trim(),
         'limit': limit,
+        if (filter != null) 'filter': filter,
+        if (providerId != null) 'providerId': providerId,
       });
       if (raw == null) return const [];
       return [
@@ -117,6 +121,44 @@ class ExtensionChannel {
       return const [];
     } on MissingPluginException {
       return const [];
+    }
+  }
+
+  Future<ExtensionAlbumDetails?> getAlbum({
+    required String providerId,
+    required String albumId,
+  }) async {
+    if (!isSupported || providerId.isEmpty || albumId.isEmpty) return null;
+    try {
+      final raw = await _channel.invokeMapMethod<Object?, Object?>('getAlbum', {
+        'providerId': providerId,
+        'albumId': albumId,
+      });
+      if (raw == null || raw.isEmpty) return null;
+      return ExtensionAlbumDetails.fromMap(raw);
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  Future<ExtensionArtistDetails?> getArtist({
+    required String providerId,
+    required String artistId,
+  }) async {
+    if (!isSupported || providerId.isEmpty || artistId.isEmpty) return null;
+    try {
+      final raw = await _channel.invokeMapMethod<Object?, Object?>(
+        'getArtist',
+        {'providerId': providerId, 'artistId': artistId},
+      );
+      if (raw == null || raw.isEmpty) return null;
+      return ExtensionArtistDetails.fromMap(raw);
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
     }
   }
 

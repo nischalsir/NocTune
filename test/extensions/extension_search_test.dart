@@ -96,11 +96,21 @@ class _FakeExtensionChannel extends ExtensionChannel {
   Future<List<ExtensionTrackResult>> search(
     String query, {
     int limit = 20,
+    String? filter,
+    String? providerId,
   }) async {
     return [
       for (final item in searchResults)
-        if (item.title.toLowerCase().contains(query.toLowerCase()) ||
-            item.artist.toLowerCase().contains(query.toLowerCase()))
+        if ((providerId == null ||
+                providerId == 'all' ||
+                item.providerId == providerId) &&
+            (filter == null ||
+                filter == 'all' ||
+                (filter == 'tracks' && item.isTrack) ||
+                (filter == 'albums' && item.isAlbum) ||
+                (filter == 'artists' && item.isArtist)) &&
+            (item.title.toLowerCase().contains(query.toLowerCase()) ||
+                item.artist.toLowerCase().contains(query.toLowerCase())))
           item,
     ];
   }
@@ -218,6 +228,18 @@ void main() {
         find.text('Downloaded "Starlight FLAC" to library.'),
         findsOneWidget,
       );
+
+      // Open the Download queue page from Search and verify the completed track is listed.
+      await tester.tap(find.byTooltip('Download queue'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Download queue'), findsOneWidget);
+      expect(find.text('COMPLETED (1)'), findsOneWidget);
+      expect(find.text('Starlight FLAC'), findsOneWidget);
+
+      await tester.tap(find.text('Clear finished'));
+      await tester.pumpAndSettle();
+      expect(find.text('No downloads in queue'), findsOneWidget);
     },
   );
 
@@ -303,6 +325,136 @@ void main() {
         await repository.importedLyrics(track.id),
         contains('First line'),
       );
+    },
+  );
+
+  testWidgets(
+    'Search filters by All, Songs, Albums, Artists and switches extension source',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final preferences = await SharedPreferences.getInstance();
+      final channel = _FakeExtensionChannel(
+        initial: const [
+          InstalledExtension(
+            id: 'deezer',
+            name: 'deezer',
+            displayName: 'Deezer',
+            version: '1.3.7',
+            hasMetadataProvider: true,
+            hasDownloadProvider: true,
+            hasCustomSearch: true,
+          ),
+          InstalledExtension(
+            id: 'jiosaavn',
+            name: 'jiosaavn',
+            displayName: 'JioSaavn',
+            version: '1.0.8',
+            hasMetadataProvider: true,
+            hasDownloadProvider: true,
+            hasCustomSearch: true,
+          ),
+        ],
+        searchResults: const [
+          ExtensionTrackResult(
+            id: 'dz-track-1',
+            title: 'Midnight Song',
+            artist: 'Aurora',
+            providerId: 'deezer',
+            providerName: 'Deezer',
+            itemType: 'track',
+          ),
+          ExtensionTrackResult(
+            id: 'dz-album-1',
+            title: 'Midnight Album',
+            artist: 'Aurora',
+            providerId: 'deezer',
+            providerName: 'Deezer',
+            itemType: 'album',
+          ),
+          ExtensionTrackResult(
+            id: 'dz-artist-1',
+            title: 'Midnight Artist',
+            artist: 'Aurora',
+            providerId: 'deezer',
+            providerName: 'Deezer',
+            itemType: 'artist',
+          ),
+          ExtensionTrackResult(
+            id: 'js-track-1',
+            title: 'Midnight Saavn',
+            artist: 'Aurora',
+            providerId: 'jiosaavn',
+            providerName: 'JioSaavn',
+            itemType: 'track',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(preferences),
+            audioHandlerProvider.overrideWithValue(_FakeHandler()),
+            extensionChannelProvider.overrideWithValue(channel),
+            currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
+            allTracksProvider.overrideWith((ref) => const <Track>[]),
+            searchResultsProvider.overrideWith(
+              (ref, query) => const <Track>[],
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildNocTheme(Brightness.dark, NocAccent.red),
+            home: const Scaffold(body: SearchScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Category chips All, Songs, Albums, Artists and extension chips are shown.
+      expect(find.byKey(const ValueKey('search-category-all')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('search-category-songs')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('search-category-albums')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('search-category-artists')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('search-source-deezer')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('search-source-jiosaavn')),
+        findsOneWidget,
+      );
+
+      await tester.enterText(find.byType(TextField), 'midnight');
+      await tester.pumpAndSettle();
+
+      // Default source is Deezer (first active extension); All shows song, album, artist.
+      expect(find.text('Midnight Song'), findsOneWidget);
+      expect(find.text('Midnight Album'), findsOneWidget);
+      expect(find.text('Midnight Artist'), findsOneWidget);
+      expect(find.text('Midnight Saavn'), findsNothing);
+
+      // Filter to Albums only.
+      await tester.tap(find.byKey(const ValueKey('search-category-albums')));
+      await tester.pumpAndSettle();
+      expect(find.text('Midnight Album'), findsOneWidget);
+      expect(find.text('Midnight Song'), findsNothing);
+
+      // Switch back to Songs and switch extension to JioSaavn.
+      await tester.tap(find.byKey(const ValueKey('search-category-songs')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('search-source-jiosaavn')));
+      await tester.pumpAndSettle();
+      expect(find.text('Midnight Saavn'), findsOneWidget);
+      expect(find.text('Midnight Song'), findsNothing);
     },
   );
 }

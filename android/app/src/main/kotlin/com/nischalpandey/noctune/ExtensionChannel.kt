@@ -86,7 +86,21 @@ class ExtensionChannel(private val context: Context) : MethodChannel.MethodCallH
                         val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
                         val query = args["query"] as? String ?: ""
                         val limit = (args["limit"] as? Number)?.toInt() ?: 20
-                        runtime.search(query, limit)
+                        val filter = args["filter"] as? String
+                        val providerId = args["providerId"] as? String
+                        runtime.search(query, limit, filter, providerId)
+                    }
+                    "getAlbum" -> {
+                        val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                        val providerId = args["providerId"] as? String ?: ""
+                        val albumId = args["albumId"] as? String ?: ""
+                        runtime.getAlbum(providerId, albumId)
+                    }
+                    "getArtist" -> {
+                        val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                        val providerId = args["providerId"] as? String ?: ""
+                        val artistId = args["artistId"] as? String ?: ""
+                        runtime.getArtist(providerId, artistId)
                     }
                     "handleUrl" -> {
                         val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()

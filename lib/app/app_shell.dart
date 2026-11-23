@@ -7,6 +7,7 @@ import '../core/theme/flex_type.dart';
 import '../core/theme/noc_palette.dart';
 import '../core/widgets/noc_backdrop.dart';
 import '../core/widgets/still_when_covered.dart';
+import '../features/extensions/extension_controller.dart';
 import '../features/home/home_screen.dart';
 import '../features/library/library_screen.dart';
 import '../features/library/scan/scan_controller.dart';
@@ -89,6 +90,7 @@ class _AppShellState extends ConsumerState<AppShell> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       // Pick up files added or removed since the last launch.
       ref.read(scanControllerProvider.notifier).refreshIfPermitted();
+      ref.read(extensionControllerProvider);
       _startupPrompts.run();
     });
   }
