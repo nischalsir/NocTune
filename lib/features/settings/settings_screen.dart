@@ -18,8 +18,6 @@ import '../equalizer/equalizer_screen.dart';
 import '../library/duplicates_screen.dart';
 import '../library/scan/scan_banner.dart';
 import '../library/scan/scan_controller.dart';
-import '../online/online_search.dart';
-import '../online/online_source.dart';
 import '../playback/audio_capabilities.dart';
 import '../startup/startup_prompts.dart';
 import '../startup/update_dialog.dart';
@@ -143,8 +141,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ref.watch(updateServiceProvider).value?.isConfigured ?? false;
     final stats = ref.watch(libraryStatsProvider).value;
     final notifications = ref.watch(_notificationAccessProvider).value;
-    final hasJamendo = ref.watch(jamendoSourceProvider) != null;
-    final searchesOnline = ref.watch(onlineSearchEnabledProvider);
     final lyricsPercent = (settings.lyricsScale * 100).round();
     final audioOutput = ref.watch(audioOutputProvider);
     final audioOutputController = ref.read(audioOutputProvider.notifier);
@@ -404,51 +400,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ),
                   ],
-                ],
-              ),
-
-              _Group(
-                title: 'Online',
-                children: [
-                  _SwitchTile(
-                    icon: Icons.travel_explore_rounded,
-                    title: 'Search online music',
-                    subtitle:
-                        'Search also finds music on '
-                        '${hasJamendo ? 'Jamendo, ' : ''}Audius and the '
-                        'Internet Archive, sending what you type to them. '
-                        'Off, search stays on this device.',
-                    value: searchesOnline,
-                    onChanged: ref
-                        .read(onlineSearchEnabledProvider.notifier)
-                        .set,
-                  ),
-                  for (final (source, icon) in [
-                    if (hasJamendo)
-                      (OnlineSourceId.jamendo, Icons.library_music_rounded),
-                    (OnlineSourceId.audius, Icons.graphic_eq_rounded),
-                    (OnlineSourceId.archive, Icons.account_balance_rounded),
-                  ])
-                    _SwitchTile(
-                      icon: icon,
-                      title: source.label,
-                      subtitle: switch (source) {
-                        OnlineSourceId.jamendo =>
-                          'Free music under Creative Commons licences.',
-                        OnlineSourceId.audius =>
-                          'Music artists put up themselves.',
-                        OnlineSourceId.archive =>
-                          'Live shows and recordings free to share.',
-                      },
-                      value: ref.watch(onlineSourceEnabledProvider(source)),
-                      onChanged: searchesOnline
-                          ? ref
-                                .read(
-                                  onlineSourceEnabledProvider(source).notifier,
-                                )
-                                .set
-                          : null,
-                    ),
                 ],
               ),
 

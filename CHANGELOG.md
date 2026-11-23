@@ -9,6 +9,20 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## Unreleased
+
+### Removed
+
+- Online search and everything that came with it: Jamendo, Audius, the
+  Internet Archive, MusicBrainz's "Latest from" releases, streaming,
+  downloads, and the "Search on Spotify" and "Search on YouTube Music"
+  buttons. Search looks only through the library again, and Settings ›
+  Online is gone.
+- On the first launch after updating, songs downloaded through online
+  search (the `Jamendo/`, `Audius/` and `Internet Archive/` folders in the
+  app's music folder) are deleted from the device and the library, with
+  their cached covers and the online settings. This happens once.
+
 ## 1.10.0 (build 19) - 2026-10-27
 
 Published at the owner's request. The automated checks pass, with and

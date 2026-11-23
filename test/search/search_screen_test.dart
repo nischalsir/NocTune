@@ -1,6 +1,3 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,15 +5,6 @@ import 'package:noctune/app/providers.dart';
 import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
 import 'package:noctune/data/models/track.dart';
-import 'package:noctune/data/repositories/library_repository.dart';
-import 'package:noctune/features/online/archive_source.dart';
-import 'package:noctune/features/online/audius_source.dart';
-import 'package:noctune/features/online/external_search.dart';
-import 'package:noctune/features/online/jamendo_source.dart';
-import 'package:noctune/features/online/musicbrainz_source.dart';
-import 'package:noctune/features/online/online_source.dart';
-import 'package:noctune/features/online/online_playback.dart';
-import 'package:noctune/features/online/online_search.dart';
 import 'package:noctune/features/playback/noc_audio_handler.dart';
 import 'package:noctune/features/search/search_history.dart';
 import 'package:noctune/features/search/search_screen.dart';
@@ -24,7 +12,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class _FakeHandler extends Fake implements NocAudioHandler {
   final played = <String>[];
-  final playedUris = <String>[];
 
   /// The titles queued by the last play.
   List<String> queued = [];
@@ -32,70 +19,9 @@ class _FakeHandler extends Fake implements NocAudioHandler {
   @override
   Future<void> playTracks(List<Track> tracks, {int initialIndex = 0}) async {
     played.add(tracks[initialIndex].title);
-    playedUris.add(tracks[initialIndex].uri);
     queued = [for (final track in tracks) track.title];
   }
 }
-
-/// Never asked: nothing in these tests is downloaded.
-class _Repository extends Fake implements LibraryRepository {}
-
-/// Jamendo's answer with one track per title.
-OnlineResponse _jamendo(List<String> titles) => (
-  status: 200,
-  body: jsonEncode({
-    'headers': {'status': 'success', 'code': 0},
-    'results': [
-      for (final (index, title) in titles.indexed)
-        {
-          'id': '${index + 1}',
-          'name': title,
-          'artist_name': 'Lena Orsa',
-          'duration': 180,
-          'audio': 'https://prod-1.storage.jamendo.com/?trackid=${index + 1}',
-          'audiodownload':
-              'https://prod-1.storage.jamendo.com/download/${index + 1}',
-          'audiodownload_allowed': true,
-        },
-    ],
-  }),
-);
-
-/// Audius's answer with one streamable track per title.
-OnlineResponse _audius(List<String> titles) => (
-  status: 200,
-  body: jsonEncode({
-    'data': [
-      for (final (index, title) in titles.indexed)
-        {
-          'id': 'a$index',
-          'title': title,
-          'duration': 120,
-          'user': {'name': 'Beatmaker'},
-          'is_streamable': true,
-          'is_downloadable': false,
-        },
-    ],
-  }),
-);
-
-/// The Internet Archive's answer with one show per title.
-OnlineResponse _archive(List<String> titles) => (
-  status: 200,
-  body: jsonEncode({
-    'response': {
-      'docs': [
-        for (final (index, title) in titles.indexed)
-          {
-            'identifier': 'show$index',
-            'title': title,
-            'creator': 'Mars Hotel',
-            'mediatype': 'etree',
-          },
-      ],
-    },
-  }),
-);
 
 Track _track(int id, String title) => Track(
   id: id,
@@ -112,33 +38,12 @@ Track _track(int id, String title) => Track(
 void main() {
   final library = [_track(1, 'Aashish'), _track(2, 'Balenci')];
 
-  late Directory root;
-  setUp(() => root = Directory.systemTemp.createTempSync('noctune_search'));
-  tearDown(() => root.deleteSync(recursive: true));
-
-  late List<Uri> opened;
-
-  /// [jamendo], [audius] and [archive] answer online searches. Without
-  /// [jamendo] the build has no Jamendo client id, as by default; without
-  /// [audius] or [archive] that source is switched off, so tests never go
-  /// online. [musicBrainz] answers the artist lookup; without it no artist
-  /// is found. [opens] says whether a link opens.
   Future<_FakeHandler> pump(
     WidgetTester tester, {
     List<String> remembered = const [],
-    OnlineFetch? jamendo,
-    OnlineFetch? audius,
-    OnlineFetch? archive,
-    OnlineFetch? musicBrainz,
-    bool Function(Uri url)? opens,
-    Map<String, Object> cached = const {},
   }) async {
-    opened = [];
     SharedPreferences.setMockInitialValues({
       if (remembered.isNotEmpty) 'search_history': remembered,
-      if (audius == null) 'online_source_audius': false,
-      if (archive == null) 'online_source_archive': false,
-      ...cached,
     });
     final preferences = await SharedPreferences.getInstance();
     final handler = _FakeHandler();
@@ -146,48 +51,6 @@ void main() {
       ProviderScope(
         overrides: [
           sharedPreferencesProvider.overrideWithValue(preferences),
-          appPathsProvider.overrideWithValue((
-            artworkDir: '${root.path}/artwork',
-            musicDir: '${root.path}/music',
-            coverDir: '${root.path}/covers',
-          )),
-          onlineSearchDelayProvider.overrideWithValue(Duration.zero),
-          libraryRepositoryProvider.overrideWithValue(_Repository()),
-          jamendoSourceProvider.overrideWithValue(
-            jamendo == null
-                ? null
-                : JamendoSource(
-                    clientId: 'test',
-                    retryDelay: Duration.zero,
-                    fetch: jamendo,
-                  ),
-          ),
-          audiusSourceProvider.overrideWithValue(
-            AudiusSource(
-              fetch: audius ?? (_) async => throw StateError('not asked'),
-            ),
-          ),
-          archiveSourceProvider.overrideWithValue(
-            ArchiveSource(
-              fetch: archive ?? (_) async => throw StateError('not asked'),
-            ),
-          ),
-          musicBrainzSourceProvider.overrideWithValue(
-            MusicBrainzSource(
-              gap: Duration.zero,
-              fetch:
-                  musicBrainz ??
-                  (_) async => (status: 200, body: '{"artists": []}'),
-            ),
-          ),
-          linkOpenerProvider.overrideWithValue((url) async {
-            opened.add(url);
-            return opens?.call(url) ?? true;
-          }),
-          // Covers are not fetched in tests.
-          fileFetcherProvider.overrideWithValue(
-            (url, target) async => throw const SocketException('test'),
-          ),
           audioHandlerProvider.overrideWithValue(handler),
           currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
           allTracksProvider.overrideWith((ref) => library),
@@ -285,350 +148,25 @@ void main() {
     expect(await saved(), isEmpty);
   });
 
-  group('with Jamendo', () {
-    testWidgets('shows the library and Jamendo together', (tester) async {
-      await pump(tester, jamendo: (_) async => _jamendo(['Balenci Live']));
+  testWidgets('says when nothing in the library matches', (tester) async {
+    await pump(tester);
 
-      await tester.enterText(find.byType(TextField), 'bal');
-      await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'zzz');
+    await tester.pumpAndSettle();
 
-      expect(find.text('In your library'), findsOneWidget);
-      expect(find.text('Balenci'), findsOneWidget);
-      expect(find.text('Online'), findsOneWidget);
-      expect(find.text('JAMENDO'), findsOneWidget);
-      expect(find.text('Balenci Live'), findsOneWidget);
-      expect(find.byTooltip('Download Balenci Live'), findsOneWidget);
-    });
-
-    testWidgets('tapping a Jamendo result streams it', (tester) async {
-      final handler = await pump(
-        tester,
-        jamendo: (_) async => _jamendo(['Balenci Live']),
-      );
-
-      await tester.enterText(find.byType(TextField), 'bal');
-      await tester.pumpAndSettle();
-      await tester.runAsync(() async {
-        await tester.tap(find.text('Balenci Live'));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
-      await tester.pumpAndSettle();
-
-      expect(handler.played, ['Balenci Live']);
-      expect(handler.playedUris.single, startsWith('https://prod-1.'));
-      expect(await saved(), ['bal']);
-    });
-
-    testWidgets('Jamendo failing leaves the library results', (tester) async {
-      await pump(tester, jamendo: (_) async => (status: 429, body: ''));
-
-      await tester.enterText(find.byType(TextField), 'bal');
-      await tester.pumpAndSettle();
-
-      expect(find.text('Balenci'), findsOneWidget);
-      expect(
-        find.text('Jamendo is busy right now. Try again in a minute.'),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('a Jamendo error page or bad answer does not break the page', (
-      tester,
-    ) async {
-      await pump(tester, jamendo: (_) async => (status: 200, body: '<html>'));
-
-      await tester.enterText(find.byType(TextField), 'bal');
-      await tester.pumpAndSettle();
-
-      expect(tester.takeException(), isNull);
-      expect(find.text('Balenci'), findsOneWidget);
-      expect(
-        find.text("Jamendo couldn't be reached right now."),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('offline, saved results are marked and not started', (
-      tester,
-    ) async {
-      final handler = await pump(
-        tester,
-        jamendo: (_) async => throw const SocketException('offline'),
-        cached: {
-          'online_search_cache_v2': jsonEncode({
-            'jamendo:night': [
-              OnlineTrack(
-                id: '1',
-                title: 'Night Drive',
-                artist: 'Lena Orsa',
-                streamUrl: Uri.parse(
-                  'https://prod-1.storage.jamendo.com/?trackid=1',
-                ),
-                downloadUrl: Uri.parse(
-                  'https://prod-1.storage.jamendo.com/download/1',
-                ),
-              ).toJson(),
-            ],
-          }),
-        },
-      );
-
-      await tester.enterText(find.byType(TextField), 'night');
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining("You're offline."), findsOneWidget);
-      expect(find.text('Night Drive'), findsOneWidget);
-      expect(find.byTooltip('Needs an internet connection'), findsOneWidget);
-
-      await tester.tap(find.text('Night Drive'));
-      await tester.pumpAndSettle();
-
-      expect(handler.played, isEmpty);
-      expect(
-        find.textContaining('needs an internet connection'),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('offline with nothing saved says so', (tester) async {
-      await pump(
-        tester,
-        jamendo: (_) async => throw const SocketException('offline'),
-      );
-
-      await tester.enterText(find.byType(TextField), 'zzz');
-      await tester.pumpAndSettle();
-
-      expect(find.textContaining('Online results appear once'), findsOneWidget);
-    });
+    expect(find.text('No matches'), findsOneWidget);
+    expect(find.text('Nothing in your library matches "zzz".'), findsOneWidget);
   });
 
-  group('with several sources', () {
-    testWidgets('mixes the sources in turn with their badges', (tester) async {
-      await pump(
-        tester,
-        jamendo: (_) async => _jamendo(['J1', 'J2']),
-        audius: (_) async => _audius(['A1']),
-      );
+  testWidgets('searches only the library, never online', (tester) async {
+    await pump(tester);
 
-      await tester.enterText(find.byType(TextField), 'zz');
-      await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'bal');
+    await tester.pumpAndSettle();
 
-      final y = [
-        for (final title in ['J1', 'A1', 'J2'])
-          tester.getTopLeft(find.text(title)).dy,
-      ];
-      expect(y, orderedEquals([...y]..sort()));
-      expect(find.text('JAMENDO'), findsNWidgets(2));
-      expect(find.text('AUDIUS'), findsOneWidget);
-    });
-
-    testWidgets('one source failing still shows and plays the others', (
-      tester,
-    ) async {
-      final handler = await pump(
-        tester,
-        jamendo: (_) async => _jamendo(['J1']),
-        audius: (_) async => (status: 500, body: ''),
-      );
-
-      await tester.enterText(find.byType(TextField), 'zz');
-      await tester.pumpAndSettle();
-      expect(
-        find.text("Audius couldn't be reached right now."),
-        findsOneWidget,
-      );
-
-      await tester.runAsync(() async {
-        await tester.tap(find.text('J1'));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
-      await tester.pumpAndSettle();
-      expect(handler.played, ['J1']);
-    });
-
-    testWidgets('one source offline does not stop the others', (tester) async {
-      final handler = await pump(
-        tester,
-        jamendo: (_) async => _jamendo(['J1']),
-        audius: (_) async => throw const SocketException('blocked'),
-      );
-
-      await tester.enterText(find.byType(TextField), 'zz');
-      await tester.pumpAndSettle();
-      expect(find.textContaining("You're offline."), findsNothing);
-      expect(
-        find.text("Audius couldn't be reached right now."),
-        findsOneWidget,
-      );
-      expect(find.byTooltip('Needs an internet connection'), findsNothing);
-
-      await tester.runAsync(() async {
-        await tester.tap(find.text('J1'));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
-      await tester.pumpAndSettle();
-      expect(handler.played, ['J1']);
-    });
-
-    testWidgets('a source that fails unexpectedly says so', (tester) async {
-      await pump(
-        tester,
-        jamendo: (_) async => _jamendo(['J1']),
-        audius: (_) async => throw ArgumentError('surprise'),
-      );
-
-      await tester.enterText(find.byType(TextField), 'zz');
-      await tester.pumpAndSettle();
-
-      expect(find.text('J1'), findsOneWidget);
-      expect(
-        find.text("Audius couldn't be reached right now."),
-        findsOneWidget,
-      );
-    });
-
-    testWidgets('tapping a song queues only the songs', (tester) async {
-      final handler = await pump(
-        tester,
-        jamendo: (_) async => _jamendo(['J1']),
-        audius: (_) async => _audius(['A1']),
-        archive: (_) async => _archive(['Live Show']),
-      );
-
-      await tester.enterText(find.byType(TextField), 'zz');
-      await tester.pumpAndSettle();
-      expect(find.text('Live Show'), findsOneWidget);
-      expect(find.text('ARCHIVE'), findsOneWidget);
-      expect(find.text('Mars Hotel · show'), findsOneWidget);
-
-      await tester.runAsync(() async {
-        await tester.tap(find.text('A1'));
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      });
-      await tester.pumpAndSettle();
-      expect(handler.played, ['A1']);
-      expect(handler.queued, ['J1', 'A1']);
-    });
-
-    testWidgets('the Spotify button tries the app, then the website', (
-      tester,
-    ) async {
-      await pump(tester, opens: (url) => url.scheme != 'spotify');
-
-      await tester.enterText(find.byType(TextField), 'love song');
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Search on Spotify'));
-      await tester.pumpAndSettle();
-
-      expect(opened.map((url) => '$url'), [
-        'spotify:search:love%20song',
-        'https://open.spotify.com/search/love%20song',
-      ]);
-    });
-
-    testWidgets('the YouTube Music button opens its search', (tester) async {
-      await pump(tester);
-
-      await tester.enterText(find.byType(TextField), 'love song');
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Search on YouTube Music'));
-      await tester.pumpAndSettle();
-
-      final url = opened.single;
-      expect(url.host, 'music.youtube.com');
-      expect(url.path, '/search');
-      expect(url.queryParameters['q'], 'love song');
-    });
-
-    testWidgets('the buttons show even when nothing matches', (tester) async {
-      await pump(tester, jamendo: (_) async => _jamendo([]));
-
-      await tester.enterText(find.byType(TextField), 'zzz');
-      await tester.pumpAndSettle();
-
-      expect(
-        find.text('Nothing in your library or online matches "zzz".'),
-        findsOneWidget,
-      );
-      expect(find.text('Search on Spotify'), findsOneWidget);
-      expect(find.text('Search on YouTube Music'), findsOneWidget);
-    });
-
-    testWidgets('lists the newest releases of the artist searched for', (
-      tester,
-    ) async {
-      final handler = await pump(
-        tester,
-        musicBrainz: (url) async => (
-          status: 200,
-          body: url.path.endsWith('/artist')
-              ? '{"artists": [{"id": "a1", "name": "Aurora", "score": 100}]}'
-              : url.path.endsWith('/release-group')
-              ? '{"release-groups": ['
-                    '{"id": "r1", "title": "Older", "primary-type": "Album",'
-                    ' "first-release-date": "2025-03-01"},'
-                    '{"id": "r2", "title": "Newest", "primary-type": "Album",'
-                    ' "first-release-date": "2026-10-02"}]}'
-              : '{"releases": [{"status": "Official", "media": [{"tracks": ['
-                    '{"title": "Balenci (feat. Kid)", "length": 200000,'
-                    ' "artist-credit": [{"name": "Aurora", "joinphrase":'
-                    ' " feat. "}, {"name": "Kid", "joinphrase": ""}]},'
-                    '{"title": "Brand New", "length": 180000}]}]}]}',
-        ),
-      );
-
-      await tester.enterText(find.byType(TextField), 'aurora');
-      await tester.pumpAndSettle();
-
-      expect(find.text('Latest from Aurora'), findsOneWidget);
-      expect(find.text('Album · 2026-10-02'), findsOneWidget);
-      expect(
-        tester.getTopLeft(find.text('Newest')).dy,
-        lessThan(tester.getTopLeft(find.text('Older')).dy),
-      );
-
-      // Opens to its songs; the one in the library plays from there.
-      await tester.tap(find.text('Newest'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Balenci (feat. Kid)'), findsOneWidget);
-      expect(
-        find.text('Aurora feat. Kid · In your library · 3:20'),
-        findsOneWidget,
-      );
-      expect(find.text('Play the 1 song you have'), findsOneWidget);
-
-      await tester.tap(find.text('Balenci (feat. Kid)'));
-      await tester.pumpAndSettle();
-      expect(handler.played, ['Balenci']);
-
-      // The whole release opens in Spotify.
-      await tester.tap(find.text('Spotify'));
-      await tester.pumpAndSettle();
-      expect(opened.single, Uri.parse('spotify:search:Aurora%20Newest'));
-
-      // A song not in the library opens elsewhere.
-      await tester.tap(find.text('Brand New'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Open in YouTube Music'));
-      await tester.pumpAndSettle();
-      expect(
-        opened.last,
-        Uri.https('music.youtube.com', '/search', {'q': 'Aurora Brand New'}),
-      );
-    });
-
-    testWidgets('a link that does not open says so', (tester) async {
-      await pump(tester, opens: (_) => false);
-
-      await tester.enterText(find.byType(TextField), 'love');
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Search on Spotify'));
-      await tester.pumpAndSettle();
-
-      expect(find.text("Couldn't open Spotify."), findsOneWidget);
-    });
+    expect(find.text('In your library'), findsOneWidget);
+    expect(find.text('Online'), findsNothing);
+    expect(find.text('Search on Spotify'), findsNothing);
   });
 
   group('the history', () {

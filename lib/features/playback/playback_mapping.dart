@@ -6,8 +6,8 @@ import '../../data/models/track.dart';
 /// Key in [MediaItem.extras] holding the library id of the track.
 const kTrackIdExtra = 'trackId';
 
-/// Describes a track to the system media session. A streamed track, which
-/// is not in the library, carries no library id.
+/// Describes a track to the system media session. A track not yet stored
+/// in the library carries no library id.
 MediaItem mediaItemFromTrack(Track track) => MediaItem(
   id: track.playbackUri.toString(),
   title: track.title,

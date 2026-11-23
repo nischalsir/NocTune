@@ -13,6 +13,7 @@ import 'app/device_profile.dart';
 import 'app/licenses.dart';
 import 'app/providers.dart';
 import 'data/db/app_database.dart';
+import 'data/online_leftovers.dart';
 import 'data/repositories/library_repository.dart';
 import 'features/audio_output/audio_output_settings.dart';
 import 'features/equalizer/equalizer_settings.dart';
@@ -99,8 +100,15 @@ Future<void> main() async {
   );
 
   // Reloading the last queue means opening every file in it; do that once
-  // the first frame is up, not before it.
-  WidgetsBinding.instance.addPostFrameCallback(
-    (_) => session.restoreAndTrack(),
-  );
+  // the first frame is up, not before it. Songs the old online search
+  // downloaded are removed first, once, so the queue doesn't bring them back.
+  WidgetsBinding.instance.addPostFrameCallback((_) async {
+    await removeOnlineLeftovers(
+      preferences: preferences,
+      repository: repository,
+      musicDir: documentsDir.path,
+      artworkDir: p.join(cacheDir.path, 'artwork'),
+    );
+    await session.restoreAndTrack();
+  });
 }

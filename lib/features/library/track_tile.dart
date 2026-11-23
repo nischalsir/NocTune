@@ -64,7 +64,7 @@ class TrackTile extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Artwork(path: track.artPath, url: track.artUrl, size: 48),
+            Artwork(path: track.artPath, size: 48),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
