@@ -30,21 +30,24 @@ void main() {
   late Directory root;
   late String musicDir;
   late String artworkDir;
+  late Database db;
   late LibraryRepository repository;
 
   setUp(() async {
     root = Directory.systemTemp.createTempSync('noctune_leftovers');
     musicDir = p.join(root.path, 'music');
     artworkDir = p.join(root.path, 'artwork');
-    repository = LibraryRepository(
-      await AppDatabase.open(
-        // A file per test: the in-memory database is shared between opens.
-        path: p.join(root.path, 'library.db'),
-        factory: databaseFactoryFfi,
-      ),
+    db = await AppDatabase.open(
+      // A file per test: the in-memory database is shared between opens.
+      path: p.join(root.path, 'library.db'),
+      factory: databaseFactoryFfi,
     );
+    repository = LibraryRepository(db);
   });
-  tearDown(() => root.deleteSync(recursive: true));
+  tearDown(() async {
+    await db.close();
+    root.deleteSync(recursive: true);
+  });
 
   test('removes downloaded songs, their covers and settings, once', () async {
     final kept = _touch(p.join(musicDir, 'Imported', 'mine.flac'));

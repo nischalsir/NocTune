@@ -9,7 +9,11 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
-## Unreleased
+## 1.11.0 (build 20) - 2026-11-22
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller. This build has not been run on a phone: the phone did
+not show the USB debugging authorisation prompt when it was published.
 
 ### Removed
 
