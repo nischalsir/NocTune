@@ -9,6 +9,30 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.15.0 (build 24) - 2026-11-23
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller. Both the universal APK and the arm64-v8a APK share build
+version code 2024 so either one can be installed over earlier arm64-v8a or
+universal releases without a version-code downgrade error.
+
+### Added
+
+- Online streaming playback (`resolveStream`): tapping any extension song in
+  Search, on an Album or Artist page, or in Home's **Suggested for you**
+  shelf immediately streams and plays the track in NocTune's player, while
+  the download button opens the Mornye-style format & service picker.
+- Spotify / LastWave-style **Choose artists & genres you like** picker and
+  **Suggested for you** online song shelf on the Home screen, preserving
+  NocTune's existing UI layout and `HomeShelf` cards.
+- Extension selector moved into the search bar's leading search icon
+  dropdown menu instead of a horizontal slider.
+- Automatic fallback to other enabled providers when a search or download
+  provider fails, plus up to 50 songs returned when searching an artist or
+  browsing an artist page.
+- Live Android system notification with a 0%–100% progress bar during
+  extension downloads.
+
 ## 1.14.0 (build 23) - 2026-11-23
 
 Published at the owner's request. The automated checks pass, with and

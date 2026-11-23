@@ -218,6 +218,27 @@ class ExtensionController extends Notifier<ExtensionState> {
     );
   }
 
+  /// Resolves an immediate stream URL (or local file) for [track] and plays it
+  /// in `NocAudioHandler`.
+  Future<String?> resolvePlayableUri(ExtensionTrackResult track) async {
+    final saved = state.downloadedPaths[track.uniqueKey];
+    if (saved != null && saved.isNotEmpty) return saved;
+    final uri = await ref
+        .read(extensionChannelProvider)
+        .resolveStream(track, musicDir: _musicDir);
+    if (uri != null && uri.isNotEmpty && !uri.startsWith('http')) {
+      state = state.copyWith(
+        downloadedPaths: {...state.downloadedPaths, track.uniqueKey: uri},
+      );
+      try {
+        await ref.read(scanControllerProvider.notifier).scan();
+      } on Object {
+        // In isolated widget tests.
+      }
+    }
+    return uri;
+  }
+
   /// Downloads [track] through the chosen [providerId] and [quality] (or
   /// enabled download extensions in priority order) into the device's music
   /// folder and triggers a library scan so it immediately appears in the

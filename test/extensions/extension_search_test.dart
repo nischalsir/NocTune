@@ -418,7 +418,7 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      // Category chips All, Songs, Albums, Artists and extension chips are shown.
+      // Category chips All, Songs, Albums, Artists and search icon dropdown are shown.
       expect(find.byKey(const ValueKey('search-category-all')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('search-category-songs')),
@@ -433,11 +433,7 @@ void main() {
         findsOneWidget,
       );
       expect(
-        find.byKey(const ValueKey('search-source-deezer')),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('search-source-jiosaavn')),
+        find.byKey(const ValueKey('search-provider-dropdown')),
         findsOneWidget,
       );
 
@@ -456,8 +452,10 @@ void main() {
       expect(find.text('Midnight Album'), findsOneWidget);
       expect(find.text('Midnight Song'), findsNothing);
 
-      // Switch back to Songs and switch extension to JioSaavn.
+      // Switch back to Songs and switch extension to JioSaavn via the search icon dropdown.
       await tester.tap(find.byKey(const ValueKey('search-category-songs')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('search-provider-dropdown')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('search-source-jiosaavn')));
       await tester.pumpAndSettle();

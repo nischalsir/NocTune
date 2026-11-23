@@ -11,6 +11,7 @@ import '../../third_party/spotiflac/overflow_marquee.dart';
 import '../../third_party/spotiflac/runtime_profile_provider.dart';
 import 'now_playing_route.dart';
 import 'now_playing_screen.dart';
+import 'playback_mapping.dart';
 
 /// Height of the mini-player while the tabs are showing. Folded, it is 52,
 /// level with the round buttons on either side of it.
@@ -91,7 +92,7 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> {
                   Hero(
                     tag: kNowPlayingArtworkHero,
                     child: Artwork(
-                      path: mediaItem.artUri?.toFilePath(),
+                      path: artUriToPathOrUrl(mediaItem.artUri),
                       size: compact ? MornyeTheme.tokens.coverMini : 42,
                       radius: compact ? 6 : 8,
                     ),

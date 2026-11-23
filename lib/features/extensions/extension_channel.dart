@@ -99,7 +99,7 @@ class ExtensionChannel {
 
   Future<List<ExtensionTrackResult>> search(
     String query, {
-    int limit = 20,
+    int limit = 50,
     String? filter,
     String? providerId,
   }) async {
@@ -176,6 +176,18 @@ class ExtensionChannel {
       if (quality != null && quality.isNotEmpty) 'quality': quality,
     });
     return raw?['filePath'] as String?;
+  }
+
+  Future<String?> resolveStream(
+    ExtensionTrackResult track, {
+    required String musicDir,
+  }) async {
+    if (!isSupported) return null;
+    final raw = await _channel.invokeMapMethod<Object?, Object?>(
+      'resolveStream',
+      {'track': track.raw, 'musicDir': musicDir},
+    );
+    return raw?['uri'] as String?;
   }
 
   Future<String?> fetchLyrics({

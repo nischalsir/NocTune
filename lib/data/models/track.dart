@@ -109,7 +109,11 @@ class Track {
 
   /// The URI handed to the audio engine.
   Uri get playbackUri =>
-      uri.startsWith('content://') ? Uri.parse(uri) : Uri.file(uri);
+      (uri.startsWith('content://') ||
+          uri.startsWith('http://') ||
+          uri.startsWith('https://'))
+      ? Uri.parse(uri)
+      : Uri.file(uri);
 
   /// Columns describing the file itself. Favourites, play counts and the
   /// date added are owned by the user and never overwritten by a rescan.

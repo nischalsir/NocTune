@@ -16,6 +16,7 @@ import '../extensions/download_format_picker.dart';
 import '../extensions/extension_controller.dart';
 import '../extensions/extension_downloads_screen.dart';
 import '../extensions/extension_models.dart';
+import '../home/taste_artists_shelf.dart';
 import '../library/collection_screen.dart';
 import '../library/track_menu.dart';
 import '../library/track_tile.dart';
@@ -202,7 +203,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
                       hintText: _searchHint(activeSource, searchExtensions),
-                      prefixIcon: const Icon(Icons.search_rounded),
+                      prefixIcon: searchExtensions.isEmpty
+                          ? const Icon(Icons.search_rounded)
+                          : _SearchProviderDropdownButton(
+                              activeSource: activeSource,
+                              searchExtensions: searchExtensions,
+                              onSelected: (sourceId) {
+                                setState(() => _selectedSourceId = sourceId);
+                                _flushExtQuery();
+                              },
+                            ),
                       suffixIcon: _query.isNotEmpty
                           ? IconButton(
                               tooltip: 'Clear search',
@@ -265,64 +275,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               ],
             ),
           ),
-          // Mornye-style extension / source picker bar.
-          if (searchExtensions.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            SizedBox(
-              height: 36,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  for (final ext in searchExtensions)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: _SearchPillChip(
-                        key: ValueKey('search-source-${ext.id}'),
-                        label: ext.displayName,
-                        icon: Icons.extension_rounded,
-                        compact: true,
-                        selected: activeSource == ext.id,
-                        onTap: () {
-                          setState(() => _selectedSourceId = ext.id);
-                          _flushExtQuery();
-                        },
-                      ),
-                    ),
-                  if (searchExtensions.length > 1)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: _SearchPillChip(
-                        key: const ValueKey('search-source-all'),
-                        label: 'All extensions',
-                        icon: Icons.public_rounded,
-                        compact: true,
-                        selected: activeSource == _kSourceAllExtensions,
-                        onTap: () {
-                          setState(
-                            () => _selectedSourceId = _kSourceAllExtensions,
-                          );
-                          _flushExtQuery();
-                        },
-                      ),
-                    ),
-                  Padding(
-                    padding: const EdgeInsets.only(right: 8),
-                    child: _SearchPillChip(
-                      key: const ValueKey('search-source-library'),
-                      label: 'Library only',
-                      icon: Icons.library_music_rounded,
-                      compact: true,
-                      selected: activeSource == _kSourceLibraryOnly,
-                      onTap: () {
-                        setState(() => _selectedSourceId = _kSourceLibraryOnly);
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
           const SizedBox(height: 4),
           Expanded(
             child: _query.trim().isNotEmpty
@@ -351,6 +303,147 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     onSearch: _searchAgain,
                     onClear: ref.read(searchHistoryProvider.notifier).clear,
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SearchProviderDropdownButton extends StatelessWidget {
+  const _SearchProviderDropdownButton({
+    required this.activeSource,
+    required this.searchExtensions,
+    required this.onSelected,
+  });
+
+  final String activeSource;
+  final List<InstalledExtension> searchExtensions;
+  final ValueChanged<String> onSelected;
+
+  IconData _activeIcon() {
+    if (activeSource == _kSourceLibraryOnly) {
+      return Icons.library_music_rounded;
+    }
+    if (activeSource == _kSourceAllExtensions) {
+      return Icons.public_rounded;
+    }
+    return Icons.search_rounded;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.noc;
+    return Padding(
+      padding: const EdgeInsets.only(left: 6),
+      child: PopupMenuButton<String>(
+        key: const ValueKey('search-provider-dropdown'),
+        tooltip: 'Change search provider',
+        offset: const Offset(0, 44),
+        color: palette.glassSolid,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: palette.glassBorder),
+        ),
+        onSelected: onSelected,
+        icon: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(_activeIcon(), size: 20, color: palette.accent),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.arrow_drop_down_rounded,
+              size: 18,
+              color: palette.textSecondary,
+            ),
+          ],
+        ),
+        itemBuilder: (context) => [
+          for (final ext in searchExtensions)
+            PopupMenuItem<String>(
+              key: ValueKey('search-source-${ext.id}'),
+              value: ext.id,
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.extension_rounded,
+                    size: 18,
+                    color: activeSource == ext.id
+                        ? palette.accent
+                        : palette.textSecondary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      ext.displayName,
+                      style: TextStyle(
+                        fontWeight: activeSource == ext.id
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                  if (activeSource == ext.id)
+                    Icon(Icons.check_rounded, size: 18, color: palette.accent),
+                ],
+              ),
+            ),
+          if (searchExtensions.length > 1)
+            PopupMenuItem<String>(
+              key: const ValueKey('search-source-all'),
+              value: _kSourceAllExtensions,
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.public_rounded,
+                    size: 18,
+                    color: activeSource == _kSourceAllExtensions
+                        ? palette.accent
+                        : palette.textSecondary,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'All extensions',
+                      style: TextStyle(
+                        fontWeight: activeSource == _kSourceAllExtensions
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
+                    ),
+                  ),
+                  if (activeSource == _kSourceAllExtensions)
+                    Icon(Icons.check_rounded, size: 18, color: palette.accent),
+                ],
+              ),
+            ),
+          PopupMenuItem<String>(
+            key: const ValueKey('search-source-library'),
+            value: _kSourceLibraryOnly,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.library_music_rounded,
+                  size: 18,
+                  color: activeSource == _kSourceLibraryOnly
+                      ? palette.accent
+                      : palette.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Library only',
+                    style: TextStyle(
+                      fontWeight: activeSource == _kSourceLibraryOnly
+                          ? FontWeight.w700
+                          : FontWeight.w400,
+                    ),
+                  ),
+                ),
+                if (activeSource == _kSourceLibraryOnly)
+                  Icon(Icons.check_rounded, size: 18, color: palette.accent),
+              ],
+            ),
           ),
         ],
       ),
@@ -910,11 +1003,11 @@ class _ExtensionResultTile extends ConsumerWidget {
     return TrackTile(
       track: syntheticTrack,
       onTap: () {
+        onPlayed();
         if (localMatch != null) {
           ref.read(audioHandlerProvider).playTracks([localMatch]);
-          onPlayed();
-        } else if (!isDownloading) {
-          _download(context, ref);
+        } else {
+          playOnlineExtensionTrack(context, ref, result);
         }
       },
       action: isDownloading

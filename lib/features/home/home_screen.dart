@@ -19,6 +19,7 @@ import '../playback/now_playing_screen.dart';
 import 'home_feed.dart';
 import 'home_hero.dart';
 import 'home_rows.dart';
+import 'taste_artists_shelf.dart';
 import 'taste_mix.dart';
 
 /// The home screen: a hero featuring one track, then the listening feed: a
@@ -209,6 +210,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           header,
           const ScanBanner(),
+          const HomeOnlineSuggestionsSection(),
           Expanded(
             child: EmptyState(
               icon: Icons.graphic_eq_rounded,
@@ -373,6 +375,7 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
             const SliverToBoxAdapter(child: SizedBox(height: 10)),
             SliverToBoxAdapter(child: HomeHeaderRow(onShuffleAll: shuffleAll)),
             const SliverToBoxAdapter(child: ScanBanner()),
+            const SliverToBoxAdapter(child: HomeOnlineSuggestionsSection()),
             if (mix.isNotEmpty)
               SliverToBoxAdapter(
                 child: HomeShelf(

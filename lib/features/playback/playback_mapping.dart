@@ -6,6 +6,21 @@ import '../../data/models/track.dart';
 /// Key in [MediaItem.extras] holding the library id of the track.
 const kTrackIdExtra = 'trackId';
 
+/// Converts [MediaItem.artUri] back into a local file path or remote HTTP(S)
+/// URL understood by `Artwork`.
+String? artUriToPathOrUrl(Uri? uri) {
+  if (uri == null) return null;
+  return uri.isScheme('file') ? uri.toFilePath() : uri.toString();
+}
+
+Uri? _artUriFromPath(String? artPath) {
+  if (artPath == null || artPath.isEmpty) return null;
+  if (artPath.startsWith('http://') || artPath.startsWith('https://')) {
+    return Uri.tryParse(artPath);
+  }
+  return Uri.file(artPath);
+}
+
 /// Describes a track to the system media session. A track not yet stored
 /// in the library carries no library id.
 MediaItem mediaItemFromTrack(Track track) => MediaItem(
@@ -15,7 +30,7 @@ MediaItem mediaItemFromTrack(Track track) => MediaItem(
   album: track.album,
   genre: track.genre,
   duration: track.duration > Duration.zero ? track.duration : null,
-  artUri: track.artPath == null ? null : Uri.file(track.artPath!),
+  artUri: _artUriFromPath(track.artPath),
   extras: {if (track.id != 0) kTrackIdExtra: track.id},
 );
 

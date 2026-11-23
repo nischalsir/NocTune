@@ -85,7 +85,7 @@ class ExtensionChannel(private val context: Context) : MethodChannel.MethodCallH
                     "search" -> {
                         val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
                         val query = args["query"] as? String ?: ""
-                        val limit = (args["limit"] as? Number)?.toInt() ?: 20
+                        val limit = (args["limit"] as? Number)?.toInt() ?: 50
                         val filter = args["filter"] as? String
                         val providerId = args["providerId"] as? String
                         runtime.search(query, limit, filter, providerId)
@@ -115,6 +115,13 @@ class ExtensionChannel(private val context: Context) : MethodChannel.MethodCallH
                         val providerId = args["providerId"] as? String
                         val quality = args["quality"] as? String
                         runtime.downloadTrack(track, musicDir, providerId, quality)
+                    }
+                    "resolveStream" -> {
+                        val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                        @Suppress("UNCHECKED_CAST")
+                        val track = args["track"] as? Map<String, Any?> ?: emptyMap()
+                        val musicDir = args["musicDir"] as? String
+                        runtime.resolveStream(track, musicDir)
                     }
                     "fetchLyrics" -> {
                         val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()

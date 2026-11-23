@@ -6,6 +6,7 @@ import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/empty_state.dart';
 import 'noc_audio_handler.dart';
+import 'playback_mapping.dart';
 
 Future<void> showQueueSheet(BuildContext context) => showModalBottomSheet<void>(
   context: context,
@@ -63,7 +64,7 @@ class QueueSheet extends ConsumerWidget {
                       child: ListTile(
                         onTap: () => handler().skipToQueueItem(index),
                         leading: Artwork(
-                          path: item.artUri?.toFilePath(),
+                          path: artUriToPathOrUrl(item.artUri),
                           size: 44,
                         ),
                         title: Text(

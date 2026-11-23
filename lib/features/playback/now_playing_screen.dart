@@ -24,6 +24,7 @@ import '../settings/settings_controller.dart';
 import 'audio_capabilities.dart';
 import 'noc_audio_handler.dart';
 import 'now_playing_route.dart';
+import 'playback_mapping.dart';
 import 'player_colors.dart';
 import 'player_glass_button.dart';
 import 'player_seek_bar.dart';
@@ -135,7 +136,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       : const Duration(milliseconds: 500),
                   child: _Backdrop(
                     key: ValueKey(item?.artUri),
-                    path: item?.artUri?.toFilePath(),
+                    path: artUriToPathOrUrl(item?.artUri),
                   ),
                 ),
                 if (item != null && !sideways)
@@ -150,7 +151,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                       screen.width * _maxCoverZoom,
                     ),
                     child: _ArtworkHero(
-                      path: item.artUri?.toFilePath(),
+                      path: artUriToPathOrUrl(item.artUri),
                       visible: !lyricsOpen,
                     ),
                   ),
@@ -353,28 +354,37 @@ class _BackdropState extends State<_Backdrop> {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          if (path != null)
+          if (path != null && path.isNotEmpty)
             Opacity(
               opacity: 0.9,
               child: ImageFiltered(
                 imageFilter: ImageFilter.blur(sigmaX: 36, sigmaY: 36),
-                child: Image.file(
-                  File(path),
-                  fit: BoxFit.cover,
-                  // Blurred beyond recognition, so a tiny decode is plenty.
-                  cacheWidth: 64,
-                  gaplessPlayback: true,
-                  excludeFromSemantics: true,
-                  errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  frameBuilder: (context, child, frame, _) {
-                    // The picture was taken before the cover had loaded.
-                    if (frame != null && !_coverDrawn) {
-                      _coverDrawn = true;
-                      _picture.clear();
-                    }
-                    return child;
-                  },
-                ),
+                child: (path.startsWith('http://') || path.startsWith('https://'))
+                    ? Image.network(
+                        path,
+                        fit: BoxFit.cover,
+                        cacheWidth: 64,
+                        gaplessPlayback: true,
+                        excludeFromSemantics: true,
+                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                      )
+                    : Image.file(
+                        File(path),
+                        fit: BoxFit.cover,
+                        // Blurred beyond recognition, so a tiny decode is plenty.
+                        cacheWidth: 64,
+                        gaplessPlayback: true,
+                        excludeFromSemantics: true,
+                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                        frameBuilder: (context, child, frame, _) {
+                          // The picture was taken before the cover had loaded.
+                          if (frame != null && !_coverDrawn) {
+                            _coverDrawn = true;
+                            _picture.clear();
+                          }
+                          return child;
+                        },
+                      ),
               ),
             ),
           ColoredBox(color: context.playerShade.withAlpha(0x85)),
@@ -695,7 +705,7 @@ class _NowPlaying extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 8),
             child: Row(
               children: [
-                _Cover(path: item.artUri?.toFilePath(), size: side - 28),
+                _Cover(path: artUriToPathOrUrl(item.artUri), size: side - 28),
                 const SizedBox(width: 24),
                 Expanded(
                   child: SingleChildScrollView(
@@ -807,20 +817,36 @@ class _ArtworkHero extends StatelessWidget {
                   duration: reduceMotion
                       ? Duration.zero
                       : const Duration(milliseconds: 350),
-                  child: Image.file(
-                    File(path),
-                    key: ValueKey(path),
-                    width: double.infinity,
-                    height: double.infinity,
-                    fit: BoxFit.cover,
-                    alignment: Alignment.topCenter,
-                    // Decoded at the width it is shown, not the file's own.
-                    cacheWidth: (width * MediaQuery.devicePixelRatioOf(context))
-                        .round(),
-                    gaplessPlayback: true,
-                    excludeFromSemantics: true,
-                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                  ),
+                  child: (path.startsWith('http://') || path.startsWith('https://'))
+                      ? Image.network(
+                          path,
+                          key: ValueKey(path),
+                          width: double.infinity,
+                          height: double.infinity,
+                          fit: BoxFit.cover,
+                          alignment: Alignment.topCenter,
+                          cacheWidth:
+                              (width * MediaQuery.devicePixelRatioOf(context))
+                                  .round(),
+                          gaplessPlayback: true,
+                          excludeFromSemantics: true,
+                          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                        )
+                      : Image.file(
+                          File(path),
+                          key: ValueKey(path),
+                          width: double.infinity,
+                          height: double.infinity,
+                          fit: BoxFit.cover,
+                          alignment: Alignment.topCenter,
+                          // Decoded at the width it is shown, not the file's own.
+                          cacheWidth:
+                              (width * MediaQuery.devicePixelRatioOf(context))
+                                  .round(),
+                          gaplessPlayback: true,
+                          excludeFromSemantics: true,
+                          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                        ),
                 ),
               ),
       ),

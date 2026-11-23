@@ -1,8 +1,12 @@
 package com.nischalpandey.noctune
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.os.Build
 import android.os.Environment
 import android.util.Base64
+import androidx.core.app.NotificationCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import org.mozilla.javascript.Context as RhinoContext
@@ -57,6 +61,8 @@ class MornyeExtensionRuntime(private val context: Context) {
     private val lock = Any()
     private val extensions = linkedMapOf<String, LoadedExtension>()
     private val searchPool = java.util.concurrent.Executors.newCachedThreadPool()
+    private val activeProgressCallback = ThreadLocal<((Int) -> Unit)?>()
+    private val downloadNotificationSeq = java.util.concurrent.atomic.AtomicInteger(4000)
 
     @Volatile
     private var compiledBootstrapScript: org.mozilla.javascript.Script? = null
@@ -615,6 +621,26 @@ class MornyeExtensionRuntime(private val context: Context) {
             }.onFailure { err ->
                 ext.errorMessage = err.message
             }
+            // If the selected provider failed or returned no matches, automatically
+            // fall back to other enabled search extensions in priority order.
+            if (perSourceResults.isEmpty()) {
+                val fallbackExtensions = synchronized(lock) {
+                    extensions.values.filter {
+                        it.enabled && it.id != ext.id && (it.hasMetadataProvider || it.hasCustomSearch)
+                    }
+                }
+                for (fallbackExt in fallbackExtensions) {
+                    val items = runCatching {
+                        invokeExtensionSearch(fallbackExt, trimmed, limit, canonicalFilter)
+                    }.onFailure { err ->
+                        fallbackExt.errorMessage = err.message
+                    }.getOrDefault(emptyList())
+                    if (items.isNotEmpty()) {
+                        perSourceResults.add(items)
+                        break
+                    }
+                }
+            }
         } else if (active.size > 1) {
             // Run extensions in parallel with a short timeout so slow/unauthenticated
             // extensions never block fast ones.
@@ -848,7 +874,7 @@ class MornyeExtensionRuntime(private val context: Context) {
             "artists" -> "artist"
             else -> "track"
         }
-        return list.mapNotNull { item ->
+        val initialResults = list.mapNotNull { item ->
             val map = item as? Map<*, *> ?: return@mapNotNull null
             val normalized = normalizeTrackMap(map, ext, defaultType)
             val itemType = normalized["item_type"]?.toString() ?: "track"
@@ -859,7 +885,53 @@ class MornyeExtensionRuntime(private val context: Context) {
                 canonicalFilter == "artists" && itemType != "artist" -> null
                 else -> normalized
             }
+        }.toMutableList()
+
+        // Many extensions (e.g. JioSaavn's autocomplete.get or Deezer's mixed search)
+        // only return 3-10 songs in "all" mode. When searching an artist or song in "all"
+        // mode, supplement with a dedicated tracks query so up to 50 songs are returned.
+        val initialTrackCount = initialResults.count { it["item_type"] == "track" }
+        if (canonicalFilter == "all" && initialTrackCount < 25) {
+            val tracksFilterId = resolveExtensionFilterId(ext, "tracks")
+            val targetLimit = max(limit, 50)
+            val extraRaw = runCatching {
+                executeInExtension(ext) { cx, scope, extObj ->
+                    val customFn = ScriptableObject.getProperty(extObj, "customSearch") as? RhinoFunction
+                    if (customFn != null && tracksFilterId.isNotEmpty()) {
+                        val opts = cx.newObject(scope)
+                        ScriptableObject.putProperty(opts, "limit", targetLimit)
+                        ScriptableObject.putProperty(opts, "filter", tracksFilterId)
+                        return@executeInExtension jsToKotlin(customFn.call(cx, scope, extObj, arrayOf<Any?>(query, opts)))
+                    }
+                    val searchFn = ScriptableObject.getProperty(extObj, "searchTracks") as? RhinoFunction
+                        ?: ScriptableObject.getProperty(extObj, "search") as? RhinoFunction
+                        ?: return@executeInExtension null
+                    jsToKotlin(searchFn.call(cx, scope, extObj, arrayOf<Any?>(query, targetLimit)))
+                }
+            }.getOrNull()
+            val extraList: List<*> = when (extraRaw) {
+                is List<*> -> extraRaw
+                is Map<*, *> -> (extraRaw["tracks"] as? List<*>)
+                    ?: (extraRaw["items"] as? List<*>)
+                    ?: (extraRaw["results"] as? List<*>)
+                    ?: emptyList<Any?>()
+                else -> emptyList<Any?>()
+            }
+            val seenTrackIds = initialResults
+                .filter { it["item_type"] == "track" }
+                .mapNotNull { it["id"]?.toString() }
+                .toMutableSet()
+            for (item in extraList) {
+                val map = item as? Map<*, *> ?: continue
+                val normalized = normalizeTrackMap(map, ext, "track")
+                if (normalized["item_type"] != "track") continue
+                val id = normalized["id"]?.toString() ?: continue
+                if (seenTrackIds.add(id)) {
+                    initialResults.add(normalized)
+                }
+            }
         }
+        return initialResults
     }
 
     fun getAlbum(providerId: String, albumId: String): Map<String, Any?> {
@@ -903,13 +975,26 @@ class MornyeExtensionRuntime(private val context: Context) {
             ?: emptyList<Any?>()
         val topTracks = topTracksRaw.mapNotNull { item ->
             (item as? Map<*, *>)?.let { normalizeTrackMap(it, ext, "track") }
-        }
+        }.toMutableList()
         val albums = albumsRaw.mapNotNull { item ->
             (item as? Map<*, *>)?.let { normalizeTrackMap(it, ext, "album") }
         }
+        val artistName = ((raw["name"] ?: raw["title"])?.toString() ?: "").trim()
+        if (artistName.isNotEmpty() && topTracks.size < 40) {
+            runCatching {
+                val moreSongs = invokeExtensionSearch(ext, artistName, 50, "tracks")
+                val seenIds = topTracks.mapNotNull { it["id"]?.toString() }.toMutableSet()
+                for (song in moreSongs) {
+                    val id = song["id"]?.toString() ?: continue
+                    if (seenIds.add(id)) {
+                        topTracks.add(song)
+                    }
+                }
+            }
+        }
         return mapOf(
             "id" to (raw["id"]?.toString() ?: artistId),
-            "name" to ((raw["name"] ?: raw["title"])?.toString() ?: ""),
+            "name" to artistName,
             "cover_url" to ((raw["image_url"] ?: raw["imageUrl"] ?: raw["cover_url"] ?: raw["coverUrl"] ?: raw["images"])?.toString() ?: ""),
             "provider_id" to ext.id,
             "provider_name" to ext.displayName,
@@ -1004,6 +1089,130 @@ class MornyeExtensionRuntime(private val context: Context) {
     }
 
     /**
+     * Resolves an immediate playable audio URI (`https://...` stream URL or
+     * cached local audio file path) for online playback of [rawTrack] without
+     * requiring the user to manually pick a download format first.
+     */
+    fun resolveStream(
+        rawTrack: Map<String, Any?>,
+        musicDirPath: String?,
+    ): Map<String, Any?> {
+        val targetBaseDir = if (!musicDirPath.isNullOrBlank()) File(musicDirPath) else defaultMusicDir
+        val outDir = File(targetBaseDir, "Extensions").apply { mkdirs() }
+        val title = (rawTrack["title"] ?: rawTrack["name"] ?: "Track").toString().trim()
+        val artist = (rawTrack["artist"] ?: rawTrack["artists"] ?: "").toString().trim()
+        val baseFileName = sanitizeFilename(
+            if (artist.isNotBlank()) "$artist - $title" else title
+        ).ifBlank { "track_${System.currentTimeMillis()}" }
+
+        // 1. If already downloaded locally, play the local file immediately.
+        for (extName in listOf("flac", "m4a", "mp3", "ogg", "wav")) {
+            val f = File(outDir, "$baseFileName.$extName")
+            if (f.isFile && f.length() > 0) {
+                return mapOf("uri" to f.absolutePath, "isLocal" to true)
+            }
+        }
+
+        val originId = rawTrack["provider_id"]?.toString() ?: ""
+        val candidates = synchronized(lock) {
+            val enabledDownloaders = extensions.values.filter { it.enabled && it.hasDownloadProvider }.toMutableList()
+            // Prefer JioSaavn first for fast unencrypted direct M4A streaming if origin isn't JioSaavn,
+            // or origin first when origin implements getDownloadUrl.
+            val origin = extensions[originId]
+            if (origin != null && origin.enabled && origin.hasDownloadProvider) {
+                enabledDownloaders.remove(origin)
+                enabledDownloaders.add(0, origin)
+            }
+            enabledDownloaders
+        }
+
+        // 2. Try fast direct stream URL resolution via getDownloadUrl() across enabled providers.
+        for (ext in candidates) {
+            val streamUrl = runCatching {
+                val settings = loadExtensionSettingsMap(ext)
+                val quality = resolveValidQualityForExtension(ext, null, settings)
+                executeInExtension(ext) { cx, scope, extObj ->
+                    val getUrlFn = ScriptableObject.getProperty(extObj, "getDownloadUrl") as? RhinoFunction
+                        ?: return@executeInExtension null
+                    var resolvedTrackId = (rawTrack["id"] ?: "").toString().trim()
+                    var preparedContext: Map<*, *>? = null
+                    var resolvedOnExt = (ext.id == originId && resolvedTrackId.isNotEmpty())
+                    val isrc = (rawTrack["isrc"] ?: "").toString().trim()
+
+                    if (!resolvedOnExt) {
+                        val checkFn = ScriptableObject.getProperty(extObj, "checkAvailability") as? RhinoFunction
+                        if (checkFn != null) {
+                            val checkOpts = kotlinMapToJsObject(
+                                cx,
+                                scope,
+                                mapOf(
+                                    "track" to rawTrack,
+                                    "duration_ms" to (rawTrack["duration_ms"] ?: 0L),
+                                ),
+                            )
+                            var availRaw = runCatching {
+                                jsToKotlin(
+                                    checkFn.call(cx, scope, extObj, arrayOf<Any?>(isrc, title, artist, checkOpts))
+                                ) as? Map<*, *>
+                            }.getOrNull()
+                            if ((availRaw == null || availRaw["available"] == false) && isrc.isNotEmpty()) {
+                                availRaw = runCatching {
+                                    jsToKotlin(
+                                        checkFn.call(cx, scope, extObj, arrayOf<Any?>("", title, artist, checkOpts))
+                                    ) as? Map<*, *>
+                                }.getOrNull()
+                            }
+                            val availId = (availRaw?.get("track_id") ?: availRaw?.get("trackId"))?.toString()?.trim()
+                            if (availRaw != null && availRaw["available"] != false && !availId.isNullOrEmpty()) {
+                                resolvedTrackId = availId
+                                resolvedOnExt = true
+                                preparedContext = (availRaw["prepared_context"] ?: availRaw["preparedContext"]) as? Map<*, *>
+                            }
+                        }
+                    }
+                    if (!resolvedOnExt) {
+                        val searchQuery = if (artist.isNotBlank()) "$title $artist" else title
+                        val searchFn = ScriptableObject.getProperty(extObj, "searchTracks") as? RhinoFunction
+                            ?: ScriptableObject.getProperty(extObj, "search") as? RhinoFunction
+                        val searchRaw = if (searchFn != null) {
+                            jsToKotlin(searchFn.call(cx, scope, extObj, arrayOf<Any?>(searchQuery, 8)))
+                        } else null
+                        val list = (searchRaw as? List<*>) ?: emptyList<Any?>()
+                        val matched = pickBestFallbackTrack(list, title, artist) ?: return@executeInExtension null
+                        val norm = normalizeTrackMap(matched, ext, "track")
+                        resolvedTrackId = norm["id"]?.toString()?.trim() ?: return@executeInExtension null
+                        preparedContext = mapOf("track" to matched)
+                    }
+
+                    val optsMap = mutableMapOf<String, Any?>("quality" to quality, "track" to rawTrack)
+                    if (preparedContext != null) {
+                        optsMap["preparedContext"] = preparedContext
+                        optsMap["prepared_context"] = preparedContext
+                    }
+                    val jsOpts = kotlinMapToJsObject(cx, scope, optsMap)
+                    val res = jsToKotlin(
+                        getUrlFn.call(cx, scope, extObj, arrayOf<Any?>(resolvedTrackId, quality, jsOpts))
+                    )
+                    when (res) {
+                        is String -> res.trim().takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                        is Map<*, *> -> (res["url"] ?: res["stream_url"] ?: res["streamUrl"])
+                            ?.toString()?.trim()?.takeIf { it.startsWith("http://") || it.startsWith("https://") }
+                        else -> null
+                    }
+                }
+            }.getOrNull()
+            if (!streamUrl.isNullOrEmpty()) {
+                return mapOf("uri" to streamUrl, "isLocal" to false, "providerId" to ext.id)
+            }
+        }
+
+        // 3. Fallback: download/decrypt the track through the normal fallback chain and play it.
+        val dl = downloadTrack(rawTrack, musicDirPath)
+        val filePath = dl["filePath"]?.toString() ?: throw IllegalStateException("Could not resolve playable stream")
+        return mapOf("uri" to filePath, "isLocal" to true)
+    }
+
+    /**
      * Downloads [track] through the user-selected [preferredProviderId] (or
      * originating extension / enabled download provider extensions in priority
      * order) with [preferredQuality], embeds metadata + cover art + `.lrc`
@@ -1046,86 +1255,194 @@ class MornyeExtensionRuntime(private val context: Context) {
             if (artist.isNotBlank()) "$artist - $title" else title
         ).ifBlank { "track_${System.currentTimeMillis()}" }
 
+        val notificationId = downloadNotificationSeq.incrementAndGet()
+        ensureDownloadNotificationChannel()
+
         var lastError = "Track not available from enabled extensions"
         for (ext in candidates) {
-            val attempt = runCatching {
-                val settings = loadExtensionSettingsMap(ext)
-                val quality = (if (chosenId == null || ext.id == chosenId) preferredQuality?.trim()?.takeIf { it.isNotEmpty() } else null)
-                    ?: settings["quality"]?.toString()?.takeIf { it.isNotBlank() }
-                    ?: ext.qualityOptions.optJSONObject(0)?.optString("id")?.takeIf { it.isNotBlank() }
-                    ?: "LOSSLESS"
-                val defaultOutFile = File(outDir, "$baseFileName.flac")
-
-                executeInExtension(ext) { cx, scope, extObj ->
-                    val jsTrack = kotlinMapToJsObject(cx, scope, track)
-                    val isrc = (track["isrc"] ?: "").toString().trim()
-                    var resolvedTrackId = (track["id"] ?: "").toString().trim()
-                    var preparedContext: Map<*, *>? = null
-
-                    val checkFn = ScriptableObject.getProperty(extObj, "checkAvailability") as? RhinoFunction
-                    if (checkFn != null) {
-                        val checkOpts = kotlinMapToJsObject(
-                            cx,
-                            scope,
-                            mapOf(
-                                "track" to track,
-                                "duration_ms" to (track["duration_ms"] ?: 0L),
-                                "deezer_id" to (track["deezer_id"] ?: ""),
-                                "tidal_id" to (track["tidal_id"] ?: ""),
-                                "qobuz_id" to (track["qobuz_id"] ?: ""),
-                                "spotify_id" to (track["spotify_id"] ?: ""),
-                                "track_id" to resolvedTrackId,
-                                "url" to (track["external_urls"] ?: ""),
-                            ),
-                        )
-                        val availRaw = jsToKotlin(
-                            checkFn.call(cx, scope, extObj, arrayOf<Any?>(isrc, title, artist, checkOpts))
-                        ) as? Map<*, *>
-                        if (availRaw != null && availRaw["available"] == false) {
-                            val reason = availRaw["reason"]?.toString()?.ifBlank { "Unavailable on ${ext.displayName}" }
-                            throw IllegalStateException(reason ?: "Unavailable")
-                        }
-                        val availId = (availRaw?.get("track_id") ?: availRaw?.get("trackId"))?.toString()?.trim()
-                        if (!availId.isNullOrEmpty()) {
-                            resolvedTrackId = availId
-                            ScriptableObject.putProperty(jsTrack, "id", availId)
-                        }
-                        preparedContext = (availRaw?.get("prepared_context") ?: availRaw?.get("preparedContext")) as? Map<*, *>
-                    }
-
-                    val downloadFn = ScriptableObject.getProperty(extObj, "download") as? RhinoFunction
-                        ?: throw IllegalStateException("${ext.displayName} has no download() function")
-                    val progressFn = object : org.mozilla.javascript.BaseFunction() {
-                        override fun call(
-                            cx: RhinoContext?,
-                            scope: Scriptable?,
-                            thisObj: Scriptable?,
-                            args: Array<out Any?>?,
-                        ): Any = Undefined.instance
-                    }
-                    val optionsMap = mutableMapOf<String, Any?>(
-                        "outputDir" to outDir.absolutePath,
-                        "output_dir" to outDir.absolutePath,
-                        "quality" to quality,
-                        "filename" to defaultOutFile.name,
-                        "track" to track,
-                        "isrc" to isrc,
-                        "duration_ms" to (track["duration_ms"] ?: 0L),
-                    )
-                    if (preparedContext != null) {
-                        optionsMap["preparedContext"] = preparedContext
-                        optionsMap["prepared_context"] = preparedContext
-                    }
-                    val jsOptions = kotlinMapToJsObject(cx, scope, optionsMap)
-                    jsToKotlin(
-                        downloadFn.call(
-                            cx,
-                            scope,
-                            extObj,
-                            arrayOf<Any?>(resolvedTrackId, quality, defaultOutFile.absolutePath, progressFn, jsOptions),
-                        )
+            val subLabel = if (artist.isNotBlank()) "$artist · ${ext.displayName}" else ext.displayName
+            postDownloadProgressNotification(
+                notificationId = notificationId,
+                title = "Downloading $title",
+                subtitle = subLabel,
+                percent = 0,
+                indeterminate = true,
+            )
+            var lastNotifiedPercent = -1
+            var lastNotifiedAtMs = 0L
+            val reportProgress: (Int) -> Unit = { pct ->
+                val clamped = pct.coerceIn(0, 100)
+                val now = System.currentTimeMillis()
+                if (clamped != lastNotifiedPercent && (clamped == 100 || clamped - lastNotifiedPercent >= 2 || now - lastNotifiedAtMs >= 250L)) {
+                    lastNotifiedPercent = clamped
+                    lastNotifiedAtMs = now
+                    postDownloadProgressNotification(
+                        notificationId = notificationId,
+                        title = "Downloading $title",
+                        subtitle = "$subLabel · $clamped%",
+                        percent = clamped,
+                        indeterminate = false,
                     )
                 }
+            }
+            activeProgressCallback.set(reportProgress)
+            val attempt = try {
+                runCatching {
+                    val settings = loadExtensionSettingsMap(ext)
+                    val requestedQ = if (chosenId == null || ext.id == chosenId) {
+                        preferredQuality?.trim()?.takeIf { it.isNotEmpty() }
+                    } else {
+                        null
+                    }
+                    val quality = resolveValidQualityForExtension(ext, requestedQ, settings)
+                    val defaultOutFile = File(outDir, "$baseFileName.flac")
+
+                    executeInExtension(ext) { cx, scope, extObj ->
+                        var effectiveTrackMap: Map<String, Any?> = track
+                        var jsTrack = kotlinMapToJsObject(cx, scope, effectiveTrackMap)
+                        val isrc = (track["isrc"] ?: "").toString().trim()
+                        val originalId = (track["id"] ?: "").toString().trim()
+                        var resolvedTrackId = originalId
+                        var preparedContext: Map<*, *>? = null
+                        var resolvedOnExt = (ext.id == originId && originalId.isNotEmpty())
+
+                        val checkFn = ScriptableObject.getProperty(extObj, "checkAvailability") as? RhinoFunction
+                        if (checkFn != null) {
+                            val checkOpts = kotlinMapToJsObject(
+                                cx,
+                                scope,
+                                mapOf(
+                                    "track" to effectiveTrackMap,
+                                    "duration_ms" to (track["duration_ms"] ?: 0L),
+                                    "deezer_id" to (track["deezer_id"] ?: ""),
+                                    "tidal_id" to (track["tidal_id"] ?: ""),
+                                    "qobuz_id" to (track["qobuz_id"] ?: ""),
+                                    "spotify_id" to (track["spotify_id"] ?: ""),
+                                    "track_id" to resolvedTrackId,
+                                    "url" to (track["external_urls"] ?: ""),
+                                ),
+                            )
+                            var availRaw = runCatching {
+                                jsToKotlin(
+                                    checkFn.call(cx, scope, extObj, arrayOf<Any?>(isrc, title, artist, checkOpts))
+                                ) as? Map<*, *>
+                            }.getOrNull()
+
+                            // If ISRC check failed on a fallback provider (different regional ISRC),
+                            // retry checkAvailability by title + artist without ISRC.
+                            if ((availRaw == null || availRaw["available"] == false) && isrc.isNotEmpty() && ext.id != originId) {
+                                availRaw = runCatching {
+                                    jsToKotlin(
+                                        checkFn.call(cx, scope, extObj, arrayOf<Any?>("", title, artist, checkOpts))
+                                    ) as? Map<*, *>
+                                }.getOrNull()
+                            }
+
+                            val availId = (availRaw?.get("track_id") ?: availRaw?.get("trackId") ?: (availRaw?.get("track") as? Map<*, *>)?.get("id"))?.toString()?.trim()
+                            if (availRaw != null && availRaw["available"] != false && !availId.isNullOrEmpty()) {
+                                resolvedTrackId = availId
+                                resolvedOnExt = true
+                                ScriptableObject.putProperty(jsTrack, "id", availId)
+                                preparedContext = (availRaw["prepared_context"] ?: availRaw["preparedContext"]) as? Map<*, *>
+                            } else if (availRaw != null && availRaw["available"] == false && ext.id == originId) {
+                                val reason = availRaw["reason"]?.toString()?.ifBlank { "Unavailable on ${ext.displayName}" }
+                                throw IllegalStateException(reason ?: "Unavailable")
+                            }
+                        }
+
+                        // If we are falling back to a different provider and checkAvailability did not
+                        // resolve a provider-specific track ID, search this provider directly by title + artist.
+                        if (!resolvedOnExt) {
+                            val searchQuery = if (artist.isNotBlank()) "$title $artist" else title
+                            val extFilterId = resolveExtensionFilterId(ext, "tracks")
+                            val searchRaw = runCatching {
+                                val searchFn = ScriptableObject.getProperty(extObj, "searchTracks") as? RhinoFunction
+                                    ?: ScriptableObject.getProperty(extObj, "search") as? RhinoFunction
+                                if (searchFn != null) {
+                                    jsToKotlin(searchFn.call(cx, scope, extObj, arrayOf<Any?>(searchQuery, 10)))
+                                } else {
+                                    val customFn = ScriptableObject.getProperty(extObj, "customSearch") as? RhinoFunction
+                                    if (customFn != null) {
+                                        val opts = cx.newObject(scope)
+                                        ScriptableObject.putProperty(opts, "limit", 10)
+                                        if (extFilterId.isNotEmpty()) {
+                                            ScriptableObject.putProperty(opts, "filter", extFilterId)
+                                        }
+                                        jsToKotlin(customFn.call(cx, scope, extObj, arrayOf<Any?>(searchQuery, opts)))
+                                    } else {
+                                        null
+                                    }
+                                }
+                            }.getOrNull()
+                            val candidatesList: List<*> = when (searchRaw) {
+                                is List<*> -> searchRaw
+                                is Map<*, *> -> (searchRaw["tracks"] as? List<*>)
+                                    ?: (searchRaw["items"] as? List<*>)
+                                    ?: (searchRaw["results"] as? List<*>)
+                                    ?: emptyList<Any?>()
+                                else -> emptyList<Any?>()
+                            }
+                            val matchedMap = pickBestFallbackTrack(candidatesList, title, artist)
+                                ?: throw IllegalStateException("No matching track found on ${ext.displayName}")
+                            val normalizedMatch = normalizeTrackMap(matchedMap, ext, "track")
+                            val matchedId = normalizedMatch["id"]?.toString()?.trim() ?: ""
+                            if (matchedId.isEmpty()) {
+                                throw IllegalStateException("No valid track ID found on ${ext.displayName}")
+                            }
+                            resolvedTrackId = matchedId
+                            effectiveTrackMap = normalizedMatch
+                            jsTrack = kotlinMapToJsObject(cx, scope, effectiveTrackMap)
+                            preparedContext = mapOf("track" to matchedMap)
+                        }
+
+                        val downloadFn = ScriptableObject.getProperty(extObj, "download") as? RhinoFunction
+                            ?: throw IllegalStateException("${ext.displayName} has no download() function")
+                        val progressFn = object : org.mozilla.javascript.BaseFunction() {
+                            override fun call(
+                                cx: RhinoContext?,
+                                scope: Scriptable?,
+                                thisObj: Scriptable?,
+                                args: Array<out Any?>?,
+                            ): Any {
+                                if (!args.isNullOrEmpty()) {
+                                    val first = (args[0] as? Number)?.toDouble() ?: 0.0
+                                    val second = if (args.size >= 2) (args[1] as? Number)?.toDouble() else null
+                                    val pct = when {
+                                        second != null && second > 0.0 -> ((first / second) * 100.0).toInt()
+                                        first in 0.0..1.0 && first > 0.0 && first < 1.0 -> (first * 100.0).toInt()
+                                        else -> first.toInt()
+                                    }
+                                    reportProgress(pct)
+                                }
+                                return Undefined.instance
+                            }
+                        }
+                        val optionsMap = mutableMapOf<String, Any?>(
+                            "outputDir" to outDir.absolutePath,
+                            "output_dir" to outDir.absolutePath,
+                            "quality" to quality,
+                            "filename" to defaultOutFile.name,
+                            "track" to effectiveTrackMap,
+                            "isrc" to isrc,
+                            "duration_ms" to (effectiveTrackMap["duration_ms"] ?: track["duration_ms"] ?: 0L),
+                        )
+                        if (preparedContext != null) {
+                            optionsMap["preparedContext"] = preparedContext
+                            optionsMap["prepared_context"] = preparedContext
+                        }
+                        val jsOptions = kotlinMapToJsObject(cx, scope, optionsMap)
+                        jsToKotlin(
+                            downloadFn.call(
+                                cx,
+                                scope,
+                                extObj,
+                                arrayOf<Any?>(resolvedTrackId, quality, defaultOutFile.absolutePath, progressFn, jsOptions),
+                            )
+                        )
+                    }
+                }
+            } finally {
+                activeProgressCallback.remove()
             }
 
             val resultObj = attempt.getOrElse { err ->
@@ -1156,6 +1473,12 @@ class MornyeExtensionRuntime(private val context: Context) {
                 runCatching {
                     persistTrackMetadataCoverAndLyrics(finalFile, outDir, baseFileName, track, resultMap)
                 }
+                postDownloadFinishedNotification(
+                    notificationId = notificationId,
+                    title = "Downloaded $title",
+                    subtitle = if (artist.isNotBlank()) "$artist · ${ext.displayName}" else "Saved via ${ext.displayName}",
+                    success = true,
+                )
                 return mapOf(
                     "success" to true,
                     "filePath" to finalFile.absolutePath,
@@ -1166,7 +1489,132 @@ class MornyeExtensionRuntime(private val context: Context) {
                 lastError = "${ext.displayName}: Downloaded file was empty or missing"
             }
         }
+        postDownloadFinishedNotification(
+            notificationId = notificationId,
+            title = "Download failed: $title",
+            subtitle = lastError,
+            success = false,
+        )
         throw IllegalStateException(lastError)
+    }
+
+    private fun ensureDownloadNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            runCatching {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+                val channel = NotificationChannel(
+                    "noctune_downloads",
+                    "Downloads",
+                    NotificationManager.IMPORTANCE_LOW,
+                ).apply {
+                    description = "Shows progress for extension song and album downloads"
+                    setShowBadge(false)
+                }
+                nm.createNotificationChannel(channel)
+            }
+        }
+    }
+
+    private fun postDownloadProgressNotification(
+        notificationId: Int,
+        title: String,
+        subtitle: String,
+        percent: Int,
+        indeterminate: Boolean,
+    ) {
+        runCatching {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val notification = NotificationCompat.Builder(context, "noctune_downloads")
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle(title)
+                .setContentText(subtitle)
+                .setProgress(100, percent.coerceIn(0, 100), indeterminate)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .build()
+            nm.notify(notificationId, notification)
+        }
+    }
+
+    private fun postDownloadFinishedNotification(
+        notificationId: Int,
+        title: String,
+        subtitle: String,
+        success: Boolean,
+    ) {
+        runCatching {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            val notification = NotificationCompat.Builder(context, "noctune_downloads")
+                .setSmallIcon(
+                    if (success) android.R.drawable.stat_sys_download_done
+                    else android.R.drawable.stat_notify_error
+                )
+                .setContentTitle(title)
+                .setContentText(subtitle)
+                .setProgress(0, 0, false)
+                .setOngoing(false)
+                .setAutoCancel(true)
+                .setOnlyAlertOnce(true)
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .build()
+            nm.notify(notificationId, notification)
+        }
+    }
+
+    private fun resolveValidQualityForExtension(
+        ext: LoadedExtension,
+        requestedQuality: String?,
+        settings: Map<String, Any?>,
+    ): String {
+        val declaredIds = mutableListOf<String>()
+        for (i in 0 until ext.qualityOptions.length()) {
+            val id = ext.qualityOptions.optJSONObject(i)?.optString("id")?.trim()
+            if (!id.isNullOrEmpty()) declaredIds.add(id)
+        }
+        if (declaredIds.isEmpty()) {
+            return requestedQuality
+                ?: settings["quality"]?.toString()?.takeIf { it.isNotBlank() }
+                ?: "LOSSLESS"
+        }
+        if (!requestedQuality.isNullOrBlank()) {
+            declaredIds.firstOrNull { it.equals(requestedQuality, ignoreCase = true) }?.let { return it }
+        }
+        val savedQ = settings["quality"]?.toString()?.trim()
+        if (!savedQ.isNullOrEmpty()) {
+            declaredIds.firstOrNull { it.equals(savedQ, ignoreCase = true) }?.let { return it }
+        }
+        return declaredIds.first()
+    }
+
+    private fun pickBestFallbackTrack(
+        candidatesList: List<*>,
+        targetTitle: String,
+        targetArtist: String,
+    ): Map<*, *>? {
+        val normTitle = targetTitle.lowercase(Locale.ROOT).trim()
+        val normArtist = targetArtist.lowercase(Locale.ROOT).trim()
+        var bestMap: Map<*, *>? = null
+        var bestScore = -1.0
+        for (item in candidatesList) {
+            val map = item as? Map<*, *> ?: continue
+            val itemType = (map["item_type"] ?: map["itemType"] ?: map["type"])?.toString()?.lowercase(Locale.ROOT) ?: "track"
+            if (itemType in setOf("album", "artist", "playlist", "show")) continue
+            val candTitle = (map["name"] ?: map["title"] ?: "").toString().lowercase(Locale.ROOT).trim()
+            if (candTitle.isEmpty()) continue
+            val candArtist = (map["artists"] ?: map["artist"] ?: "").toString().lowercase(Locale.ROOT).trim()
+            var score = 0.0
+            if (candTitle == normTitle) score += 70.0
+            else if (candTitle.contains(normTitle) || normTitle.contains(candTitle)) score += 50.0
+            if (normArtist.isNotEmpty() && candArtist.isNotEmpty()) {
+                if (candArtist.contains(normArtist) || normArtist.contains(candArtist)) score += 30.0
+            }
+            if (score > bestScore) {
+                bestScore = score
+                bestMap = map
+            }
+        }
+        return bestMap
     }
 
     private fun persistTrackMetadataCoverAndLyrics(
@@ -1638,20 +2086,51 @@ class MornyeExtensionRuntime(private val context: Context) {
                 return try {
                     val outFile = resolveExtensionFile(extDataDir, outputPath)
                     outFile.parentFile?.mkdirs()
-                    val resp = httpRequestBytes(url, "GET", null, headers)
-                    if (resp.status !in 200..299) {
+                    val progressCb = activeProgressCallback.get()
+                    val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "GET"
+                        connectTimeout = 10_000
+                        readTimeout = 30_000
+                        instanceFollowRedirects = true
+                        setRequestProperty("User-Agent", headers["User-Agent"] ?: headers["user-agent"] ?: "Spotiflac-Extension/1.0")
+                        for ((k, v) in headers) {
+                            setRequestProperty(k, v)
+                        }
+                    }
+                    val status = conn.responseCode
+                    val statusText = conn.responseMessage ?: ""
+                    if (status !in 200..299) {
                         return JSONObject()
                             .put("success", false)
-                            .put("error", "HTTP ${resp.status}: ${resp.statusText}")
+                            .put("error", "HTTP $status: $statusText")
                             .toString()
                     }
-                    outFile.writeBytes(resp.body)
+                    val totalLen = conn.contentLengthLong
+                    val rawStream = conn.inputStream
+                    val encoding = conn.contentEncoding?.lowercase(Locale.ROOT) ?: ""
+                    val decodedStream = if (encoding.contains("gzip")) GZIPInputStream(rawStream) else rawStream
+                    var written = 0L
+                    decodedStream.use { input ->
+                        FileOutputStream(outFile).use { fos ->
+                            val buf = ByteArray(16 * 1024)
+                            while (true) {
+                                val r = input.read(buf)
+                                if (r <= 0) break
+                                fos.write(buf, 0, r)
+                                written += r
+                                if (totalLen > 0 && progressCb != null) {
+                                    progressCb(((written * 100L) / totalLen).toInt().coerceIn(0, 100))
+                                }
+                            }
+                        }
+                    }
+                    progressCb?.invoke(100)
                     JSONObject()
                         .put("success", true)
                         .put("file_path", outFile.absolutePath)
                         .put("filePath", outFile.absolutePath)
                         .put("path", outFile.absolutePath)
-                        .put("bytes_written", resp.body.size)
+                        .put("bytes_written", written)
                         .toString()
                 } catch (e: Throwable) {
                     JSONObject()
@@ -1676,6 +2155,8 @@ class MornyeExtensionRuntime(private val context: Context) {
                     val outFile = resolveExtensionFile(extDataDir, outputPath)
                     outFile.parentFile?.mkdirs()
                     val arr = JSONArray(segmentsJson)
+                    val totalSegs = arr.length().coerceAtLeast(1)
+                    val progressCb = activeProgressCallback.get()
                     FileOutputStream(outFile).use { fos ->
                         for (i in 0 until arr.length()) {
                             val item = arr.get(i)
@@ -1699,6 +2180,7 @@ class MornyeExtensionRuntime(private val context: Context) {
                                 throw IllegalStateException("Segment $i failed with HTTP ${resp.status}")
                             }
                             fos.write(resp.body)
+                            progressCb?.invoke((((i + 1) * 100) / totalSegs).coerceIn(0, 100))
                         }
                     }
                     JSONObject()
