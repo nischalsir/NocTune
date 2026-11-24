@@ -32,10 +32,17 @@ android {
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
-        // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
-        // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
-        // flag during build.
-        versionCode = flutter.versionCode
+        // is added automatically by Flutter (2000 for arm64-v8a). For universal APK builds
+        // (where split-per-abi is not set), add 2000 automatically when versionCode < 1000
+        // so universal and arm64-v8a APKs always share the exact same versionCode and can
+        // be installed interchangeably on all devices without version-downgrade errors.
+        val rawVersionCode = flutter.versionCode
+        val isSplitPerAbi = project.findProperty("split-per-abi")?.toString()?.toBoolean() == true
+        versionCode = if (!isSplitPerAbi && rawVersionCode < 1000) {
+            2000 + rawVersionCode
+        } else {
+            rawVersionCode
+        }
         versionName = flutter.versionName
     }
 

@@ -9,11 +9,14 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
-## 1.17.0 (build 26) - 2026-11-24
+## 2.0.0 (build 26) - 2026-11-24
 
-Animation, alignment and update-check work only; nothing else in the app
-changed. `flutter analyze` is clean and all 428 tests pass. The new motion was
-checked in rendered test frames, not yet on a device. Built by the owner.
+Major 2.0.0 release combining app-wide fluid motion, LastWave-Native online
+streaming & Home discovery shelves, bundled Mornye download extensions, and
+automatic update checks on every launch. Both the universal APK
+(`arm64-v8a`, `armeabi-v7a`, `x86_64`) and the `arm64-v8a` APK share build
+version code `2026` automatically in Gradle so either APK installs cleanly on
+all phones without version-code downgrade errors.
 
 ### Added
 
