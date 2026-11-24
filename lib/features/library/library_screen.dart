@@ -5,7 +5,9 @@ import 'package:path/path.dart' as p;
 import '../../app/providers.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
+import '../../core/widgets/cover_hero.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/first_entrance.dart';
 import '../../core/widgets/frosted.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/repositories/library_repository.dart';
@@ -253,31 +255,36 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> {
                         message: 'Nothing in your library matches "$query".',
                       ),
                     )
-                  : switch (_section) {
-                      LibrarySection.tracks => TrackListView(
-                        tracks: ref.watch(allTracksProvider),
-                        playButtons: true,
-                        empty: const EmptyState(
-                          icon: Icons.library_music_outlined,
-                          title: 'No music yet',
-                          message: 'Add music to see your tracks here.',
-                          action: AddMusicActions(),
+                  // Each section's rows come in the first time it is shown.
+                  : EntranceScope(
+                      key: ValueKey(_section),
+                      id: 'library-${_section.name}',
+                      child: switch (_section) {
+                        LibrarySection.tracks => TrackListView(
+                          tracks: ref.watch(allTracksProvider),
+                          playButtons: true,
+                          empty: const EmptyState(
+                            icon: Icons.library_music_outlined,
+                            title: 'No music yet',
+                            message: 'Add music to see your tracks here.',
+                            action: AddMusicActions(),
+                          ),
                         ),
-                      ),
-                      LibrarySection.albums => const _GroupList(
-                        TrackGroup.album,
-                      ),
-                      LibrarySection.artists => const _GroupList(
-                        TrackGroup.artist,
-                      ),
-                      LibrarySection.genres => const _GroupList(
-                        TrackGroup.genre,
-                      ),
-                      LibrarySection.folders => const _GroupList(
-                        TrackGroup.folder,
-                      ),
-                      LibrarySection.playlists => const _PlaylistList(),
-                    },
+                        LibrarySection.albums => const _GroupList(
+                          TrackGroup.album,
+                        ),
+                        LibrarySection.artists => const _GroupList(
+                          TrackGroup.artist,
+                        ),
+                        LibrarySection.genres => const _GroupList(
+                          TrackGroup.genre,
+                        ),
+                        LibrarySection.folders => const _GroupList(
+                          TrackGroup.folder,
+                        ),
+                        LibrarySection.playlists => const _PlaylistList(),
+                      },
+                    ),
             ),
           ],
         ),
@@ -444,28 +451,39 @@ class _GroupList extends ConsumerWidget {
                 final count =
                     '${summary.trackCount} '
                     '${summary.trackCount == 1 ? 'track' : 'tracks'}';
-                return ListTile(
-                  leading: Artwork(path: summary.artPath, size: 48),
-                  title: Text(
-                    group == TrackGroup.folder
-                        ? p.basename(summary.name)
-                        : summary.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: text.titleSmall,
-                  ),
-                  subtitle: Text(
-                    group == TrackGroup.album && summary.artist != null
-                        ? '${summary.artist} · $count'
-                        : count,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: text.bodySmall,
-                  ),
-                  onTap: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) =>
-                          GroupScreen(group: group, name: summary.name),
+                final heroTag = ('library', group, summary.name);
+                return EntranceItem(
+                  index: index,
+                  child: ListTile(
+                    leading: CoverHero(
+                      tag: heroTag,
+                      child: Artwork(path: summary.artPath, size: 48),
+                    ),
+                    title: Text(
+                      group == TrackGroup.folder
+                          ? p.basename(summary.name)
+                          : summary.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.titleSmall,
+                    ),
+                    subtitle: Text(
+                      group == TrackGroup.album && summary.artist != null
+                          ? '${summary.artist} · $count'
+                          : count,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.bodySmall,
+                    ),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => GroupScreen(
+                          group: group,
+                          name: summary.name,
+                          artPath: summary.artPath,
+                          heroTag: heroTag,
+                        ),
+                      ),
                     ),
                   ),
                 );
@@ -527,23 +545,32 @@ class _PlaylistList extends ConsumerWidget {
           title: Text('New playlist', style: text.titleSmall),
           onTap: create,
         ),
-        for (final playlist in playlists)
-          ListTile(
-            leading: Artwork(path: playlist.cover, size: 48),
-            title: Text(
-              playlist.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: text.titleSmall,
-            ),
-            subtitle: Text(
-              '${playlist.trackCount} '
-              '${playlist.trackCount == 1 ? 'track' : 'tracks'}',
-              style: text.bodySmall,
-            ),
-            onTap: () => Navigator.of(context).push(
-              MaterialPageRoute<void>(
-                builder: (_) => PlaylistScreen(playlist: playlist),
+        for (final (index, playlist) in playlists.indexed)
+          EntranceItem(
+            index: index + 1,
+            child: ListTile(
+              leading: CoverHero(
+                tag: ('library-playlist', playlist.id),
+                child: Artwork(path: playlist.cover, size: 48),
+              ),
+              title: Text(
+                playlist.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: text.titleSmall,
+              ),
+              subtitle: Text(
+                '${playlist.trackCount} '
+                '${playlist.trackCount == 1 ? 'track' : 'tracks'}',
+                style: text.bodySmall,
+              ),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => PlaylistScreen(
+                    playlist: playlist,
+                    heroTag: ('library-playlist', playlist.id),
+                  ),
+                ),
               ),
             ),
           ),

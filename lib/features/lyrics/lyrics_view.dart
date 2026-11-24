@@ -13,6 +13,7 @@ import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/motion.dart';
 import '../../core/theme/flex_type.dart';
+import '../../core/widgets/play_pause_icon.dart';
 import '../../data/models/track.dart';
 import '../playback/noc_audio_handler.dart';
 import '../playback/player_colors.dart';
@@ -1407,7 +1408,11 @@ class _Transport extends ConsumerWidget {
             )
           else
             PlayerGlassButton(
-              icon: playing ? Icons.pause : Icons.play_arrow,
+              glyph: PlayPauseIcon(
+                playing: playing,
+                size: 28,
+                color: context.playerInk.withValues(alpha: 0.94),
+              ),
               label: playing ? 'Pause' : 'Play',
               size: 56,
               iconSize: 28,

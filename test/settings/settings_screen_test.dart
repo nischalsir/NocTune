@@ -117,12 +117,13 @@ void main() {
 
     for (final heading in [
       'APPEARANCE',
-      'PLAYBACK',
-      'LYRICS',
-      'AUDIO',
+      'NAVIGATION BAR',
+      'PLAYER',
+      'SOUND',
       'LIBRARY',
       'PRIVACY',
       'ABOUT',
+      'DEVELOPER',
     ]) {
       await _reveal(tester, find.text(heading));
       expect(find.text(heading), findsOneWidget, reason: heading);

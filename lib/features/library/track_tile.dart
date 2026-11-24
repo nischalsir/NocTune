@@ -4,6 +4,8 @@ import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/glass_circle.dart';
+import '../../core/widgets/play_pause_icon.dart';
+import '../../core/widgets/press_scale.dart';
 import '../../data/models/track.dart';
 
 /// One row in a track list.
@@ -105,9 +107,15 @@ class TrackTile extends StatelessWidget {
                   label: playing ? 'Pause' : 'Play',
                   child: GestureDetector(
                     onTap: onPlayPause,
-                    child: GlassCircle(
-                      playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                      size: 38,
+                    child: PressScale(
+                      child: GlassCircle.glyph(
+                        PlayPauseIcon(
+                          playing: playing,
+                          size: 18,
+                          color: palette.textPrimary,
+                        ),
+                        size: 38,
+                      ),
                     ),
                   ),
                 )
@@ -117,9 +125,8 @@ class TrackTile extends StatelessWidget {
                 ExcludeSemantics(
                   child: GestureDetector(
                     onTap: onTap,
-                    child: const GlassCircle(
-                      Icons.play_arrow_rounded,
-                      size: 38,
+                    child: const PressScale(
+                      child: GlassCircle(Icons.play_arrow_rounded, size: 38),
                     ),
                   ),
                 ),

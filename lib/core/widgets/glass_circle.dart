@@ -8,13 +8,23 @@ import 'frosted.dart';
 /// through.
 class GlassCircle extends StatelessWidget {
   const GlassCircle(
-    this.icon, {
+    IconData this.icon, {
     super.key,
     this.size = 44,
     this.blurBackdrop = false,
-  });
+  }) : glyph = null;
 
-  final IconData icon;
+  /// The same face with a drawing of its own in place of an icon, such as
+  /// one that moves.
+  const GlassCircle.glyph(
+    Widget this.glyph, {
+    super.key,
+    this.size = 44,
+    this.blurBackdrop = false,
+  }) : icon = null;
+
+  final IconData? icon;
+  final Widget? glyph;
   final double size;
   final bool blurBackdrop;
 
@@ -24,7 +34,9 @@ class GlassCircle extends StatelessWidget {
       blurBackdrop: blurBackdrop,
       child: SizedBox.square(
         dimension: size,
-        child: Icon(icon, size: size * 0.46, color: context.noc.textPrimary),
+        child:
+            glyph ??
+            Icon(icon, size: size * 0.46, color: context.noc.textPrimary),
       ),
     );
   }

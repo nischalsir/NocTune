@@ -200,9 +200,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   _SwitchTile(
                     icon: Icons.image_rounded,
                     title: 'Match the cover art',
-                    subtitle:
-                        'The accent follows the artwork of the track that '
-                        'is playing',
+                    subtitle: 'The accent follows the playing track’s artwork',
                     value: settings.accentFromCover,
                     onChanged: controller.setAccentFromCover,
                   ),
@@ -228,9 +226,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ],
                     ),
                   ),
+                ],
+              ),
+
+              _Group(
+                title: 'Navigation bar',
+                children: [
                   _Block(
                     icon: Icons.blur_on_rounded,
-                    title: 'Navigation bar glass',
+                    title: 'Glass',
                     child: Column(
                       children: [
                         Slider(
@@ -272,8 +276,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   _SwitchTile(
                     icon: Icons.unfold_less_rounded,
                     title: 'Fold the navigation bar',
-                    subtitle:
-                        'Tucks the tabs away while you scroll down a page',
+                    subtitle: 'Tucks the tabs away as you scroll down',
                     value: settings.foldNavigationOnScroll,
                     onChanged: controller.setFoldNavigationOnScroll,
                   ),
@@ -281,26 +284,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               ),
 
               _Group(
-                title: 'Playback',
+                title: 'Player',
                 children: [
                   _SwitchTile(
                     icon: Icons.waves_rounded,
                     title: 'Wave seek bar',
-                    subtitle:
-                        'The seek bar in the player moves like a wave while '
-                        'music plays. Off, it is a plain thick bar.',
+                    subtitle: 'Moves like a wave while music plays',
                     value: settings.waveSeekBar,
                     onChanged: controller.setWaveSeekBar,
                   ),
-                ],
-              ),
-
-              _Group(
-                title: 'Lyrics',
-                children: [
                   _Block(
                     icon: Icons.format_size_rounded,
-                    title: 'Text size',
+                    title: 'Lyrics text size',
                     trailing: Text('$lyricsPercent%', style: text.titleSmall),
                     child: Row(
                       children: [
@@ -330,31 +325,31 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     leading: _TileIcon(Icons.lyrics_rounded),
                     title: Text('Where lyrics come from'),
                     subtitle: Text(
-                      'A file you import, an .lrc file beside the track, '
-                      'or lyrics stored inside the audio file. Nothing is '
-                      'downloaded.',
+                      'An imported file, an .lrc beside the track, or the '
+                      'audio file itself. Nothing is downloaded.',
                     ),
                   ),
+                  if (notifications != null)
+                    _Tile(
+                      leading: const _TileIcon(Icons.notifications_rounded),
+                      title: const Text('Playback notification'),
+                      subtitle: Text(
+                        notifications
+                            ? 'On. Controls show in the shade and on the '
+                                  'lock screen.'
+                            : 'Off. Tap to allow controls in the shade.',
+                      ),
+                      trailing: notifications
+                          ? null
+                          : const Icon(Icons.chevron_right_rounded),
+                      onTap: notifications ? null : _allowNotifications,
+                    ),
                 ],
               ),
 
               _Group(
-                title: 'Audio',
+                title: 'Sound',
                 children: [
-                  _Tile(
-                    leading: const _TileIcon(Icons.surround_sound_rounded),
-                    title: const Text('Dolby Atmos'),
-                    subtitle: Text(switch (atmosDecoder) {
-                      true =>
-                        'This device reports a Dolby Atmos decoder. '
-                            'Tracks that are Atmos recordings are decoded '
-                            'by it and labelled in the player.',
-                      false =>
-                        'This device reports no Dolby Atmos decoder, so '
-                            'no track is labelled as Atmos.',
-                      null => 'Checking what this device can decode…',
-                    }),
-                  ),
                   _Tile(
                     leading: const _TileIcon(Icons.graphic_eq_rounded),
                     title: const Text('Equaliser'),
@@ -388,9 +383,9 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       title: 'Output sample rate',
                       child: _Noted(
                         note:
-                            'Android may convert again to what the speaker or '
-                            'headphones support. With FFmpeg, any rate other '
-                            'than Original gives up its headroom.',
+                            'Android may convert again for your speaker or '
+                            'headphones. With FFmpeg, any rate but Original '
+                            'gives up its headroom.',
                         child: MornyeSegmentedControl(
                           labels: const ['Original', '48k', '96k', '192k'],
                           selectedIndex: AudioOutputSettings.rates.indexOf(
@@ -402,32 +397,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       ),
                     ),
                   ],
+                  _Tile(
+                    leading: const _TileIcon(Icons.surround_sound_rounded),
+                    title: const Text('Dolby Atmos'),
+                    subtitle: Text(switch (atmosDecoder) {
+                      true =>
+                        'Supported. Atmos tracks are labelled in the player.',
+                      false => 'Not supported by this device.',
+                      null => 'Checking what this device can decode…',
+                    }),
+                  ),
                 ],
               ),
-
-              if (notifications != null)
-                _Group(
-                  title: 'Notification',
-                  children: [
-                    _Tile(
-                      leading: const _TileIcon(Icons.notifications_rounded),
-                      title: const Text('Playback notification'),
-                      subtitle: Text(
-                        notifications
-                            ? 'Allowed. Playback controls appear in the '
-                                  'notification shade and on the lock '
-                                  'screen.'
-                            : 'Off. Music still plays in the background, '
-                                  'but without controls in the '
-                                  'notification shade.',
-                      ),
-                      trailing: notifications
-                          ? null
-                          : const Icon(Icons.chevron_right_rounded),
-                      onTap: notifications ? null : _allowNotifications,
-                    ),
-                  ],
-                ),
 
               _Group(
                 title: 'Library',
@@ -449,14 +430,14 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     leading: const _TileIcon(Icons.refresh_rounded),
                     title: const Text('Rescan library'),
                     subtitle: const Text(
-                      'Looks for new, changed and removed files',
+                      'Finds new, changed and removed files',
                     ),
                     onTap: ref.read(scanControllerProvider.notifier).scan,
                   ),
                   _Tile(
                     leading: const _TileIcon(Icons.copy_all_rounded),
                     title: const Text('Find duplicates'),
-                    subtitle: const Text('Lists tracks stored more than once'),
+                    subtitle: const Text('Tracks stored more than once'),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute<void>(
@@ -478,17 +459,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                         ),
                       ),
                     ),
-                  _Tile(
-                    leading: _TileIcon(
-                      Icons.history_toggle_off_rounded,
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                    title: const Text('Clear listening history'),
-                    subtitle: const Text(
-                      'Resets play counts and the home screen lists',
-                    ),
-                    onTap: _clearHistory,
-                  ),
                   const ScanBanner(),
                 ],
               ),
@@ -500,9 +470,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     leading: _TileIcon(Icons.lock_rounded),
                     title: Text('Everything stays on this device'),
                     subtitle: Text(
-                      'No account. Your music, file names, lyrics and '
-                      'listening history are never uploaded, and playback '
-                      'works with no connection at all.',
+                      'No account, no uploads. Playback works offline.',
                     ),
                   ),
                   _Tile(
@@ -510,13 +478,21 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     title: const Text('Network use'),
                     subtitle: Text(
                       updatesConfigured
-                          ? 'Only the update check: one small file is '
-                                'fetched to see whether a newer version '
-                                'exists. It sends nothing about you or '
-                                'your library.'
-                          : 'None. This build makes no network requests: '
-                                'update checks are not set up.',
+                          ? 'Only the update check, which sends nothing '
+                                'about you or your library.'
+                          : 'None. This build makes no network requests.',
                     ),
+                  ),
+                  _Tile(
+                    leading: _TileIcon(
+                      Icons.history_toggle_off_rounded,
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                    title: const Text('Clear listening history'),
+                    subtitle: const Text(
+                      'Resets play counts and the home screen lists',
+                    ),
+                    onTap: _clearHistory,
                   ),
                 ],
               ),
@@ -549,10 +525,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                   _Tile(
                     leading: const _TileIcon(Icons.description_rounded),
                     title: const Text('Open-source licences'),
-                    subtitle: const Text(
-                      'The open-source software and typefaces NocTune '
-                      'includes, with their licences',
-                    ),
+                    subtitle: const Text('Software and typefaces NocTune uses'),
                     trailing: const Icon(Icons.chevron_right_rounded),
                     onTap: () => showLicensePage(
                       context: context,
@@ -571,13 +544,18 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       fallback: 'github.com/nischalsir/NocTune',
                     ),
                   ),
+                ],
+              ),
+
+              _Group(
+                title: 'Developer',
+                children: [
                   const _Tile(
                     leading: _TileIcon(Icons.person_rounded),
-                    title: Text('Developed by Nischal Pandey'),
+                    title: Text('Nischal Pandey'),
                     subtitle: Text(
-                      'Designed and built as a private, offline player for '
-                      'the music on your device. No account, no ads, and '
-                      'nothing is uploaded.',
+                      'A private, offline player for the music on your '
+                      'device',
                     ),
                   ),
                   _Tile(
@@ -652,9 +630,7 @@ class _SwitchTile extends StatelessWidget {
 }
 
 /// One row of a card: its icon, its title with a line or two under it, and
-/// a switch or an arrow at the end. Laid out as [_Block] is: the title
-/// starts level with the top of the icon, and the control sits on the
-/// title's line, whatever is under it.
+/// a switch or an arrow at the end, all three centred on one another.
 class _Tile extends StatelessWidget {
   const _Tile({
     required this.leading,
@@ -680,7 +656,6 @@ class _Tile extends StatelessWidget {
     final row = Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           leading,
           const SizedBox(width: 16),
@@ -688,11 +663,7 @@ class _Tile extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                DefaultTextStyle.merge(
-                  style: text.bodyLarge,
-                  textHeightBehavior: _titleHeight,
-                  child: title,
-                ),
+                DefaultTextStyle.merge(style: text.bodyLarge, child: title),
                 if (subtitle != null)
                   DefaultTextStyle.merge(
                     style: text.bodyMedium?.copyWith(
@@ -703,40 +674,13 @@ class _Tile extends StatelessWidget {
               ],
             ),
           ),
-          if (trailing != null) ...[
-            const SizedBox(width: 12),
-            _OnTitleLine(child: trailing),
-          ],
+          if (trailing != null) ...[const SizedBox(width: 12), trailing],
         ],
       ),
     );
     return Opacity(
       opacity: enabled ? 1 : 0.5,
       child: InkWell(onTap: enabled ? onTap : null, child: row),
-    );
-  }
-}
-
-// A row's title starts right at the top of its icon: no space above its
-// first line, so the tops of the letters are level with the icon's tile.
-const _titleHeight = TextHeightBehavior(applyHeightToFirstAscent: false);
-
-/// A switch, an arrow or a figure at the end of a row, centred on the
-/// title's line rather than on the whole row.
-class _OnTitleLine extends StatelessWidget {
-  const _OnTitleLine({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    // As wide as the control; as tall as the line, the control spilling
-    // evenly above and below it.
-    return IntrinsicWidth(
-      child: SizedBox(
-        height: 20,
-        child: OverflowBox(maxHeight: double.infinity, child: child),
-      ),
     );
   }
 }
@@ -756,7 +700,7 @@ class _Group extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
             child: Semantics(
               header: true,
               child: Text(
@@ -788,7 +732,8 @@ class _Group extends StatelessWidget {
   }
 }
 
-/// A setting whose control needs a row of its own under its title.
+/// A setting whose control needs a row of its own under its title: the
+/// title beside the icon, the control under the title.
 class _Block extends StatelessWidget {
   const _Block({
     required this.icon,
@@ -816,20 +761,22 @@ class _Block extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        title,
-                        style: Theme.of(context).textTheme.bodyLarge,
-                        textHeightBehavior: _titleHeight,
+                // As tall as the icon, so the title is level with its middle.
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: _iconSize),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
                       ),
-                    ),
-                    if (trailing != null) _OnTitleLine(child: trailing),
-                  ],
+                      ?trailing,
+                    ],
+                  ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 8),
                 child,
               ],
             ),
@@ -871,8 +818,8 @@ class _TileIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = this.color ?? context.noc.accent;
     return Container(
-      width: 40,
-      height: 40,
+      width: _iconSize,
+      height: _iconSize,
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(12),
@@ -881,3 +828,6 @@ class _TileIcon extends StatelessWidget {
     );
   }
 }
+
+/// The side of the tinted tile each row's icon sits on.
+const _iconSize = 40.0;

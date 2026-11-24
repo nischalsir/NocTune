@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:noctune/app/providers.dart';
 import 'package:noctune/core/theme/noc_palette.dart';
 import 'package:noctune/core/theme/noc_theme.dart';
+import 'package:noctune/core/widgets/play_pause_icon.dart';
 import 'package:noctune/data/db/app_database.dart';
 import 'package:noctune/data/models/track.dart';
 import 'package:noctune/data/repositories/library_repository.dart';
@@ -179,17 +180,17 @@ void main() {
   ) async {
     await pump(tester, current: 'Two');
 
-    Finder inRow(String title, IconData icon) => find.descendant(
+    Finder inRow(String title, Finder matching) => find.descendant(
       of: find.ancestor(of: find.text(title), matching: find.byType(InkWell)),
-      matching: find.byIcon(icon),
+      matching: matching,
     );
-    expect(inRow('Two', Icons.pause_rounded), findsOneWidget);
-    expect(inRow('Two', Icons.play_arrow_rounded), findsNothing);
+    expect(inRow('Two', _playPause(playing: true)), findsOneWidget);
+    expect(inRow('Two', find.byIcon(Icons.play_arrow_rounded)), findsNothing);
     // Every other row still offers to play.
-    expect(inRow('One', Icons.play_arrow_rounded), findsOneWidget);
+    expect(inRow('One', find.byIcon(Icons.play_arrow_rounded)), findsOneWidget);
     expect(find.bySemanticsLabel('Pause'), findsOneWidget);
 
-    await tester.tap(inRow('Two', Icons.pause_rounded));
+    await tester.tap(inRow('Two', _playPause(playing: true)));
 
     expect(handler.calls, ['pause']);
   });
@@ -199,9 +200,9 @@ void main() {
 
     final button = find.descendant(
       of: find.ancestor(of: find.text('Two'), matching: find.byType(InkWell)),
-      matching: find.byIcon(Icons.play_arrow_rounded),
+      matching: _playPause(playing: false),
     );
-    expect(find.byIcon(Icons.pause_rounded), findsNothing);
+    expect(_playPause(playing: true), findsNothing);
 
     await tester.tap(button);
 
@@ -389,3 +390,9 @@ void main() {
     );
   });
 }
+
+/// The round button's morphing play/pause drawing, showing pause when
+/// [playing].
+Finder _playPause({required bool playing}) => find.byWidgetPredicate(
+  (widget) => widget is PlayPauseIcon && widget.playing == playing,
+);

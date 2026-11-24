@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/widgets/artwork.dart';
+import '../../core/widgets/play_pause_icon.dart';
+import '../../core/widgets/press_scale.dart';
 import '../../third_party/spotiflac/mornye_chrome.dart';
 import '../../third_party/spotiflac/mornye_theme.dart';
 import '../../third_party/spotiflac/overflow_marquee.dart';
@@ -69,6 +71,9 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> {
     // stops scrolling after a few passes: every marquee frame re-filters the
     // blurred glass around it.
     final marqueeCycles = ref.watch(mornyeLiquidGlassProvider) ? null : 2;
+    final fade = MediaQuery.disableAnimationsOf(context)
+        ? Duration.zero
+        : const Duration(milliseconds: 250);
 
     final player = Dismissible(
       key: ValueKey('mini-player-${mediaItem.id}'),
@@ -91,78 +96,93 @@ class _MiniPlayerState extends ConsumerState<MiniPlayer> {
                 children: [
                   Hero(
                     tag: kNowPlayingArtworkHero,
-                    child: Artwork(
-                      path: artUriToPathOrUrl(mediaItem.artUri),
-                      size: compact ? MornyeTheme.tokens.coverMini : 42,
-                      radius: compact ? 6 : 8,
+                    // The cover and the words fade over to the next track's.
+                    child: AnimatedSwitcher(
+                      duration: fade,
+                      child: Artwork(
+                        key: ValueKey(mediaItem.artUri),
+                        path: artUriToPathOrUrl(mediaItem.artUri),
+                        size: compact ? MornyeTheme.tokens.coverMini : 42,
+                        radius: compact ? 6 : 8,
+                      ),
                     ),
                   ),
                   SizedBox(width: compact ? 8 : 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        OverflowMarquee(
-                          resetKey: (mediaItem.id, mediaItem.title),
-                          maxCycles: marqueeCycles,
-                          child: Text(
-                            mediaItem.title,
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w600),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                    child: AnimatedSwitcher(
+                      duration: fade,
+                      layoutBuilder: (current, previous) => Stack(
+                        alignment: Alignment.centerLeft,
+                        children: [...previous, ?current],
+                      ),
+                      child: Column(
+                        key: ValueKey(mediaItem.id),
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          OverflowMarquee(
+                            resetKey: (mediaItem.id, mediaItem.title),
+                            maxCycles: marqueeCycles,
+                            child: Text(
+                              mediaItem.title,
+                              style: Theme.of(context).textTheme.titleSmall
+                                  ?.copyWith(fontWeight: FontWeight.w600),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
-                        OverflowMarquee(
-                          resetKey: (mediaItem.id, mediaItem.artist),
-                          maxCycles: marqueeCycles,
-                          child: Text(
-                            mediaItem.artist ?? '',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: Color.lerp(
-                                    colorScheme.onSurfaceVariant,
-                                    colorScheme.onSurface,
-                                    colorScheme.brightness == Brightness.dark
-                                        ? 0.7
-                                        : 0.6,
+                          OverflowMarquee(
+                            resetKey: (mediaItem.id, mediaItem.artist),
+                            maxCycles: marqueeCycles,
+                            child: Text(
+                              mediaItem.artist ?? '',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: Color.lerp(
+                                      colorScheme.onSurfaceVariant,
+                                      colorScheme.onSurface,
+                                      colorScheme.brightness == Brightness.dark
+                                          ? 0.7
+                                          : 0.6,
+                                    ),
                                   ),
-                                ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
-                  IconButton(
-                    color: colorScheme.onSurface,
-                    tooltip: isPlaying ? 'Pause' : 'Play',
-                    icon: isLoading
-                        ? const SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2.5),
-                          )
-                        : Icon(
-                            isPlaying
-                                ? CupertinoIcons.pause_fill
-                                : CupertinoIcons.play_fill,
-                          ),
-                    onPressed: isLoading
-                        ? null
-                        : () {
-                            final handler = ref.read(audioHandlerProvider);
-                            isPlaying ? handler.pause() : handler.play();
-                          },
+                  PressScale(
+                    child: IconButton(
+                      color: colorScheme.onSurface,
+                      tooltip: isPlaying ? 'Pause' : 'Play',
+                      icon: isLoading
+                          ? const SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2.5,
+                              ),
+                            )
+                          : PlayPauseIcon(playing: isPlaying),
+                      onPressed: isLoading
+                          ? null
+                          : () {
+                              final handler = ref.read(audioHandlerProvider);
+                              isPlaying ? handler.pause() : handler.play();
+                            },
+                    ),
                   ),
                   if (!compact)
-                    IconButton(
-                      color: colorScheme.onSurface,
-                      tooltip: 'Next',
-                      icon: const Icon(CupertinoIcons.forward_fill),
-                      onPressed: () =>
-                          ref.read(audioHandlerProvider).skipToNext(),
+                    PressScale(
+                      child: IconButton(
+                        color: colorScheme.onSurface,
+                        tooltip: 'Next',
+                        icon: const Icon(CupertinoIcons.forward_fill),
+                        onPressed: () =>
+                            ref.read(audioHandlerProvider).skipToNext(),
+                      ),
                     ),
                 ],
               ),

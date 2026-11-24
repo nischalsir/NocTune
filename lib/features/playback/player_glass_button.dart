@@ -11,7 +11,8 @@ import 'player_colors.dart';
 class PlayerGlassButton extends StatefulWidget {
   const PlayerGlassButton({
     super.key,
-    required this.icon,
+    this.icon,
+    this.glyph,
     required this.label,
     required this.onTap,
     this.size = 44,
@@ -23,7 +24,10 @@ class PlayerGlassButton extends StatefulWidget {
     this.foreground,
   });
 
-  final IconData icon;
+  final IconData? icon;
+
+  /// Drawn in place of [icon], such as one that moves.
+  final Widget? glyph;
   final String label;
   final VoidCallback? onTap;
   final double size;
@@ -86,13 +90,15 @@ class _PlayerGlassButtonState extends State<PlayerGlassButton> {
                   onTap: widget.onTap,
                   child: SizedBox.square(
                     dimension: widget.size,
-                    child: Icon(
-                      widget.icon,
-                      size: widget.iconSize,
-                      color:
-                          widget.foreground ??
-                          context.playerInk.withValues(alpha: 0.94),
-                    ),
+                    child:
+                        widget.glyph ??
+                        Icon(
+                          widget.icon,
+                          size: widget.iconSize,
+                          color:
+                              widget.foreground ??
+                              context.playerInk.withValues(alpha: 0.94),
+                        ),
                   ),
                 ),
               ),

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/first_entrance.dart';
 import '../../data/models/track.dart';
 import 'track_menu.dart';
 import 'track_tile.dart';
@@ -51,22 +52,25 @@ class TrackListView extends ConsumerWidget {
           itemExtent: 64,
           itemBuilder: (context, index) {
             final track = tracks[index];
-            return TrackTile(
-              track: track,
-              isCurrent: track.id == currentId,
-              playButton: playButtons,
-              playing: playing,
-              onPlayPause: () {
-                final handler = ref.read(audioHandlerProvider);
-                playing ? handler.pause() : handler.play();
-              },
-              onTap: () {
-                ref
-                    .read(audioHandlerProvider)
-                    .playTracks(tracks, initialIndex: index);
-                onPlayed?.call();
-              },
-              onMenu: () => showTrackMenu(context, ref, track),
+            return EntranceItem(
+              index: index,
+              child: TrackTile(
+                track: track,
+                isCurrent: track.id == currentId,
+                playButton: playButtons,
+                playing: playing,
+                onPlayPause: () {
+                  final handler = ref.read(audioHandlerProvider);
+                  playing ? handler.pause() : handler.play();
+                },
+                onTap: () {
+                  ref
+                      .read(audioHandlerProvider)
+                      .playTracks(tracks, initialIndex: index);
+                  onPlayed?.call();
+                },
+                onMenu: () => showTrackMenu(context, ref, track),
+              ),
             );
           },
         );

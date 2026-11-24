@@ -8,6 +8,7 @@ import '../../core/format.dart';
 import '../../core/theme/flex_type.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
+import '../../core/widgets/cover_hero.dart';
 import '../../core/widgets/wave_bars.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/track.dart';
@@ -911,11 +912,16 @@ class HomeGroupRow extends StatelessWidget {
     required this.isArtist,
     required this.onTap,
     this.number,
+    this.heroTag,
   });
 
   final TrackGroupSummary group;
   final bool isArtist;
   final VoidCallback onTap;
+
+  /// Shared with the cover of the page the row opens, which its cover
+  /// grows into.
+  final Object? heroTag;
 
   /// Its place in the list, shown in the first column.
   final int? number;
@@ -937,10 +943,13 @@ class HomeGroupRow extends StatelessWidget {
             child: Row(
               children: [
                 _NumberCell(number),
-                Artwork(
-                  path: group.artPath,
-                  size: 52,
-                  radius: isArtist ? 26 : _artworkRadius,
+                CoverHero(
+                  tag: heroTag,
+                  child: Artwork(
+                    path: group.artPath,
+                    size: 52,
+                    radius: isArtist ? 26 : _artworkRadius,
+                  ),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -1128,10 +1137,15 @@ class HomeShelf extends StatelessWidget {
     required this.title,
     required this.items,
     this.onSeeAll,
+    this.heroTagOf,
   });
 
   final String title;
   final List<ShelfItem> items;
+
+  /// The tag the cover at an index grows into the page it opens with, for a
+  /// shelf whose items open pages.
+  final Object? Function(int index)? heroTagOf;
 
   /// Opens the whole list; there is no "See all" without it.
   final VoidCallback? onSeeAll;
@@ -1196,7 +1210,14 @@ class HomeShelf extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Artwork(path: item.artPath, size: _cover, radius: 16),
+                        CoverHero(
+                          tag: heroTagOf?.call(index),
+                          child: Artwork(
+                            path: item.artPath,
+                            size: _cover,
+                            radius: 16,
+                          ),
+                        ),
                         const SizedBox(height: 8),
                         Text(
                           item.title,

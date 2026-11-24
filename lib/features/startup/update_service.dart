@@ -5,10 +5,15 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Address of the release manifest NocTune checks for updates, set at build
-/// time with `--dart-define=NOCTUNE_UPDATE_MANIFEST=https://…`. When it is
-/// empty, as it is by default, update checks are off and no request is made.
-const kUpdateManifestUrl = String.fromEnvironment('NOCTUNE_UPDATE_MANIFEST');
+/// Address of the release manifest NocTune checks for updates. It defaults to
+/// NocTune's GitHub releases, so a build made without
+/// `--dart-define=NOCTUNE_UPDATE_MANIFEST=https://…` still checks; passing an
+/// empty value turns update checks off and no request is made.
+const kUpdateManifestUrl = String.fromEnvironment(
+  'NOCTUNE_UPDATE_MANIFEST',
+  defaultValue:
+      'https://api.github.com/repos/nischalsir/NocTune/releases/latest',
+);
 
 /// An app version such as `1.4.2` with an optional build number (`1.4.2+17`).
 @immutable
@@ -274,13 +279,9 @@ class UpdateService {
   }) : _prefs = preferences;
 
   static const _manifestKey = 'update_manifest';
-  static const _checkedAtKey = 'update_checked_at';
   static const _skippedKey = 'update_skipped_version';
   static const _laterVersionKey = 'update_later_version';
   static const _laterUntilKey = 'update_later_until';
-
-  /// How long a downloaded manifest is trusted before asking again.
-  static const checkInterval = Duration(hours: 12);
 
   /// How long "Later" silences an optional update.
   static const remindAfter = Duration(days: 3);
@@ -342,7 +343,6 @@ class UpdateService {
       final fresh = await fetch(_fetchUrl);
       release = ReleaseInfo.fromManifest(fresh, isIos: isIos);
       await _prefs.setString(_manifestKey, fresh);
-      await _prefs.setInt(_checkedAtKey, _now().millisecondsSinceEpoch);
     } on Exception {
       return (update: null, checked: false);
     }
@@ -381,23 +381,18 @@ class UpdateService {
     );
   }
 
-  /// The newest release known: freshly downloaded when the cached copy is
-  /// stale, otherwise (or if the download fails) the cached copy.
+  /// The newest release known: freshly downloaded each time the app opens,
+  /// or the cached copy if the download fails.
   Future<ReleaseInfo?> _latestRelease() async {
-    final checkedAt = _prefs.getInt(_checkedAtKey) ?? 0;
-    final age = _now().millisecondsSinceEpoch - checkedAt;
     var body = _prefs.getString(_manifestKey);
-    if (body == null || age < 0 || age > checkInterval.inMilliseconds) {
-      try {
-        final fresh = await fetch(_fetchUrl);
-        // Validate before caching, so a bad response can't stick.
-        ReleaseInfo.fromManifest(fresh, isIos: isIos);
-        body = fresh;
-        await _prefs.setString(_manifestKey, fresh);
-        await _prefs.setInt(_checkedAtKey, _now().millisecondsSinceEpoch);
-      } on Exception {
-        // Offline, timed out or malformed: fall back to what is cached.
-      }
+    try {
+      final fresh = await fetch(_fetchUrl);
+      // Validate before caching, so a bad response can't stick.
+      ReleaseInfo.fromManifest(fresh, isIos: isIos);
+      body = fresh;
+      await _prefs.setString(_manifestKey, fresh);
+    } on Exception {
+      // Offline, timed out or malformed: fall back to what is cached.
     }
     if (body == null) return null;
     try {

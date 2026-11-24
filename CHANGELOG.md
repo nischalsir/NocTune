@@ -9,6 +9,35 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.17.0 (build 26) - 2026-11-24
+
+Animation, alignment and update-check work only; nothing else in the app
+changed. `flutter analyze` is clean and all 428 tests pass. The new motion was
+checked in rendered test frames, not yet on a device. Built by the owner.
+
+### Added
+
+- Motion across the app: album covers grow from a row into the album,
+  playlist and artist pages; play/pause morphs between its two
+  shapes; buttons spring when pressed; queue rows lift, reorder and slide
+  away; the player fades between songs; list rows come in
+  one after another the first time a page loads; Library and Search bounce
+  at the ends of a scroll.
+- The app now asks GitHub for a newer release every time it opens (it used
+  to reuse an answer for up to 12 hours), falling back to the last answer
+  when offline. Settings › About › Check for updates asks on demand.
+
+### Fixed
+
+- Update checks were off in 1.16.0, whose APK was built without the update
+  address. The address now defaults to NocTune's GitHub releases, so every
+  build checks for updates.
+- Settings rows centre their icon, text and switch, and the section
+  headings line up with the icons (they sat at the top of each row before).
+- The provider and mood chips on Home scroll to the edge of the screen
+  instead of being cut off at the page margin, like the chips in Library
+  and Search.
+
 ## 1.16.0 (build 25) - 2026-11-24
 
 Published at the owner's request. The automated checks pass, with and

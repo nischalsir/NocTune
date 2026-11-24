@@ -717,9 +717,10 @@ class HomeOnlineSuggestionsSection extends ConsumerWidget {
       children: [
         if (providerOptions.length > 1)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
+            padding: const EdgeInsets.fromLTRB(0, 12, 0, 2),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
                   for (final p in providerOptions)
@@ -744,9 +745,10 @@ class HomeOnlineSuggestionsSection extends ConsumerWidget {
           ),
         if (feed.chips.isNotEmpty)
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+            padding: const EdgeInsets.fromLTRB(0, 8, 0, 2),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(
                 children: [
                   Padding(

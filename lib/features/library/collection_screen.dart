@@ -10,7 +10,9 @@ import '../../core/format.dart';
 import '../../core/theme/cover_accent.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
+import '../../core/widgets/cover_hero.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/first_entrance.dart';
 import '../../core/widgets/glass_circle.dart';
 import '../../core/widgets/noc_backdrop.dart';
 import '../../core/widgets/pill_button.dart';
@@ -41,6 +43,8 @@ class _CollectionPage extends ConsumerWidget {
     required this.empty,
     this.playlistId,
     this.cover,
+    this.coverHint,
+    this.heroTag,
     this.menuTooltip = 'Options',
     this.menu = const [],
   });
@@ -53,6 +57,15 @@ class _CollectionPage extends ConsumerWidget {
   /// A picture the user chose for this collection, which goes in front of
   /// its tracks' covers.
   final String? cover;
+
+  /// The cover of the row that opened the page. It goes in front while the
+  /// tracks are still being read, so the cover growing out of the row lands
+  /// on the same picture.
+  final String? coverHint;
+
+  /// Shared with the cover of the row that opened the page, which grows
+  /// into this page's cover.
+  final Object? heroTag;
   final String menuTooltip;
   final List<_MenuItem> menu;
 
@@ -63,6 +76,7 @@ class _CollectionPage extends ConsumerWidget {
     // in the order they are listed.
     final covers = {
       ?cover,
+      ?coverHint,
       for (final track in loaded ?? const <Track>[]) ?track.artPath,
     }.take(3).toList();
     final currentId = ref.watch(currentTrackIdProvider);
@@ -79,133 +93,143 @@ class _CollectionPage extends ConsumerWidget {
 
     return NocBackdrop(
       // Its own Material, so the page works on whichever navigator shows it.
-      child: Material(
-        type: MaterialType.transparency,
-        child: Stack(
-          children: [
-            if (covers.isNotEmpty)
-              Positioned(
-                top: 0,
-                left: 0,
-                right: 0,
-                height: screen.height * 0.62,
-                child: _CoverWash(path: covers.first),
-              ),
-            CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(
-                  child: _Header(
-                    title: title,
-                    tracks: loaded,
-                    covers: covers,
-                    onPlay: () => play(shuffled: false),
-                    onShuffle: () => play(shuffled: true),
-                  ),
+      // Its rows come in the first time the collection is opened.
+      child: EntranceScope(
+        id: 'collection-${playlistId ?? title}',
+        child: Material(
+          type: MaterialType.transparency,
+          child: Stack(
+            children: [
+              if (covers.isNotEmpty)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: screen.height * 0.62,
+                  child: _CoverWash(path: covers.first),
                 ),
-                ...tracks.when(
-                  loading: () => const [
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                  ],
-                  error: (error, _) => [
-                    SliverFillRemaining(
-                      hasScrollBody: false,
-                      child: EmptyState(
-                        icon: Icons.error_outline_rounded,
-                        title: "Couldn't load these tracks",
-                        message: '$error',
-                      ),
-                    ),
-                  ],
-                  data: (tracks) => [
-                    if (tracks.isEmpty)
-                      SliverFillRemaining(hasScrollBody: false, child: empty)
-                    else
-                      SliverFixedExtentList.builder(
-                        itemExtent: 64,
-                        itemCount: tracks.length,
-                        itemBuilder: (context, index) {
-                          final track = tracks[index];
-                          return TrackTile(
-                            track: track,
-                            isCurrent: track.id == currentId,
-                            onTap: () => ref
-                                .read(audioHandlerProvider)
-                                .playTracks(tracks, initialIndex: index),
-                            onMenu: () => showTrackMenu(
-                              context,
-                              ref,
-                              track,
-                              playlistId: playlistId,
-                            ),
-                          );
-                        },
-                      ),
-                  ],
-                ),
-                // Clear of the navigation bar and mini-player over the page.
-                SliverToBoxAdapter(child: SizedBox(height: inset.bottom + 16)),
-              ],
-            ),
-            Positioned(
-              top: inset.top + 8,
-              left: math.max(16, inset.left),
-              right: math.max(16, inset.right),
-              child: Row(
-                children: [
-                  Tooltip(
-                    message: 'Back',
-                    excludeFromSemantics: true,
-                    child: Pressable(
-                      semanticLabel: 'Back',
-                      onTap: () => Navigator.of(context).maybePop(),
-                      child: const GlassCircle(
-                        Icons.arrow_back_ios_new_rounded,
-                        blurBackdrop: true,
-                      ),
+              CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(
+                    child: _Header(
+                      title: title,
+                      tracks: loaded,
+                      covers: covers,
+                      heroTag: heroTag,
+                      onPlay: () => play(shuffled: false),
+                      onShuffle: () => play(shuffled: true),
                     ),
                   ),
-                  const Spacer(),
-                  if (menu.isNotEmpty)
-                    PopupMenuButton<VoidCallback>(
-                      tooltip: menuTooltip,
-                      onSelected: (run) => run(),
-                      itemBuilder: (context) => [
-                        for (final (icon, label, run) in menu)
-                          PopupMenuItem(
-                            value: run,
-                            height: 40,
-                            child: Row(
-                              children: [
-                                Icon(
-                                  icon,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                                const SizedBox(width: 12),
-                                Flexible(
-                                  child: Text(
-                                    label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                      ],
-                      child: const GlassCircle(
-                        Icons.more_horiz_rounded,
-                        blurBackdrop: true,
+                  ...tracks.when(
+                    loading: () => const [
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(child: CircularProgressIndicator()),
                       ),
-                    ),
+                    ],
+                    error: (error, _) => [
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: EmptyState(
+                          icon: Icons.error_outline_rounded,
+                          title: "Couldn't load these tracks",
+                          message: '$error',
+                        ),
+                      ),
+                    ],
+                    data: (tracks) => [
+                      if (tracks.isEmpty)
+                        SliverFillRemaining(hasScrollBody: false, child: empty)
+                      else
+                        SliverFixedExtentList.builder(
+                          itemExtent: 64,
+                          itemCount: tracks.length,
+                          itemBuilder: (context, index) {
+                            final track = tracks[index];
+                            return EntranceItem(
+                              index: index,
+                              child: TrackTile(
+                                track: track,
+                                isCurrent: track.id == currentId,
+                                onTap: () => ref
+                                    .read(audioHandlerProvider)
+                                    .playTracks(tracks, initialIndex: index),
+                                onMenu: () => showTrackMenu(
+                                  context,
+                                  ref,
+                                  track,
+                                  playlistId: playlistId,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                    ],
+                  ),
+                  // Clear of the navigation bar and mini-player over the page.
+                  SliverToBoxAdapter(
+                    child: SizedBox(height: inset.bottom + 16),
+                  ),
                 ],
               ),
-            ),
-          ],
+              Positioned(
+                top: inset.top + 8,
+                left: math.max(16, inset.left),
+                right: math.max(16, inset.right),
+                child: Row(
+                  children: [
+                    Tooltip(
+                      message: 'Back',
+                      excludeFromSemantics: true,
+                      child: Pressable(
+                        semanticLabel: 'Back',
+                        onTap: () => Navigator.of(context).maybePop(),
+                        child: const GlassCircle(
+                          Icons.arrow_back_ios_new_rounded,
+                          blurBackdrop: true,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    if (menu.isNotEmpty)
+                      PopupMenuButton<VoidCallback>(
+                        tooltip: menuTooltip,
+                        onSelected: (run) => run(),
+                        itemBuilder: (context) => [
+                          for (final (icon, label, run) in menu)
+                            PopupMenuItem(
+                              value: run,
+                              height: 40,
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    icon,
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .onSurfaceVariant,
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Flexible(
+                                    child: Text(
+                                      label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                        child: const GlassCircle(
+                          Icons.more_horiz_rounded,
+                          blurBackdrop: true,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -218,11 +242,13 @@ class _Header extends StatelessWidget {
     required this.title,
     required this.tracks,
     required this.covers,
+    required this.heroTag,
     required this.onPlay,
     required this.onShuffle,
   });
 
   final String title;
+  final Object? heroTag;
 
   /// Null until the tracks have been read.
   final List<Track>? tracks;
@@ -254,7 +280,11 @@ class _Header extends StatelessWidget {
       padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top + 84),
       child: Column(
         children: [
-          _CoverFan(covers: covers, size: (width * 0.68).clamp(150.0, 300.0)),
+          _CoverFan(
+            covers: covers,
+            heroTag: heroTag,
+            size: (width * 0.68).clamp(150.0, 300.0),
+          ),
           const SizedBox(height: 30),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 24),
@@ -320,9 +350,14 @@ class _Header extends StatelessWidget {
 /// leaning out from behind it like cards held in a hand. With only two the
 /// second would lean out on one side alone, so it is left out.
 class _CoverFan extends StatelessWidget {
-  const _CoverFan({required this.covers, required this.size});
+  const _CoverFan({
+    required this.covers,
+    required this.heroTag,
+    required this.size,
+  });
 
   final List<String> covers;
+  final Object? heroTag;
 
   /// The side of the cover in front.
   final double size;
@@ -371,10 +406,13 @@ class _CoverFan extends StatelessWidget {
                   ),
                 ],
               ),
-              child: Artwork(
-                path: covers.firstOrNull,
-                size: size,
-                radius: size * 0.09,
+              child: CoverHero(
+                tag: heroTag,
+                child: Artwork(
+                  path: covers.firstOrNull,
+                  size: size,
+                  radius: size * 0.09,
+                ),
               ),
             ),
           ],
@@ -433,10 +471,21 @@ class _CoverWash extends ConsumerWidget {
 
 /// The tracks of one album, artist, genre or folder.
 class GroupScreen extends ConsumerWidget {
-  const GroupScreen({super.key, required this.group, required this.name});
+  const GroupScreen({
+    super.key,
+    required this.group,
+    required this.name,
+    this.artPath,
+    this.heroTag,
+  });
 
   final TrackGroup group;
   final String name;
+
+  /// The cover of the row that opened the page, and the tag its cover
+  /// grows into this page's with.
+  final String? artPath;
+  final Object? heroTag;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -444,6 +493,8 @@ class GroupScreen extends ConsumerWidget {
       // A folder is identified by its full path but titled by its name.
       title: group == TrackGroup.folder ? p.basename(name) : name,
       tracks: ref.watch(groupTracksProvider((group: group, name: name))),
+      coverHint: artPath,
+      heroTag: heroTag,
       empty: const EmptyState(
         icon: Icons.music_off_outlined,
         title: 'Nothing here any more',
@@ -495,9 +546,12 @@ class FavouritesScreen extends ConsumerWidget {
 /// One playlist: an album of the user's own making, with tracks they pick
 /// and a cover they can choose.
 class PlaylistScreen extends ConsumerWidget {
-  const PlaylistScreen({super.key, required this.playlist});
+  const PlaylistScreen({super.key, required this.playlist, this.heroTag});
 
   final Playlist playlist;
+
+  /// Shared with the cover of the row that opened the page.
+  final Object? heroTag;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -531,6 +585,8 @@ class PlaylistScreen extends ConsumerWidget {
       title: current.name,
       playlistId: playlist.id,
       cover: current.coverPath,
+      coverHint: current.cover,
+      heroTag: heroTag,
       tracks: tracks,
       empty: EmptyState(
         icon: Icons.playlist_add_rounded,

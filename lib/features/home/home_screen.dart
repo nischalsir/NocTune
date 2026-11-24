@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../../core/theme/flex_type.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/empty_state.dart';
+import '../../core/widgets/first_entrance.dart';
 import '../../core/widgets/frosted.dart';
 import '../../core/widgets/pressable.dart';
 import '../../data/models/track.dart';
@@ -172,10 +173,20 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  void _openGroup(TrackGroup group, String name) {
+  void _openGroup(
+    TrackGroup group,
+    String name, {
+    String? artPath,
+    Object? heroTag,
+  }) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => GroupScreen(group: group, name: name),
+        builder: (_) => GroupScreen(
+          group: group,
+          name: name,
+          artPath: artPath,
+          heroTag: heroTag,
+        ),
       ),
     );
   }
@@ -323,225 +334,254 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
       final row = rows[index];
       return KeyedSubtree(
         key: ValueKey(row.key),
-        child: switch (row) {
-          DateHeaderRow(:final label) => HomeDateHeader(label: label),
-          TrackRow(
-            :final track,
-            :final badge,
-            :final isNowPlaying,
-            :final playedAt,
-          ) =>
-            HomeTrackRow(
-              track: track,
+        child: EntranceItem(
+          index: index,
+          child: switch (row) {
+            DateHeaderRow(:final label) => HomeDateHeader(label: label),
+            TrackRow(
+              :final track,
+              :final badge,
+              :final isNowPlaying,
+              :final playedAt,
+            ) =>
+              HomeTrackRow(
+                track: track,
+                number: numbers[row],
+                // In the play log the last column is when it was played, with
+                // how many times that day under it; elsewhere, the plays.
+                value: playedAt == null
+                    ? badge
+                    : localizations.formatTimeOfDay(
+                        TimeOfDay.fromDateTime(playedAt),
+                        alwaysUse24HourFormat: use24Hour,
+                      ),
+                detail: playedAt == null ? null : badge,
+                isNowPlaying: isNowPlaying,
+                isPlaying: isPlaying,
+                // The track in the player opens the player rather than
+                // starting itself over.
+                onTap: isNowPlaying
+                    ? () => showNowPlaying(context)
+                    : () => ref
+                          .read(audioHandlerProvider)
+                          .playTracks(queue, initialIndex: queueIndex[row]!),
+                onMenu: () => showTrackMenu(context, ref, track),
+              ),
+            AlbumRow(:final album) => HomeGroupRow(
+              group: album,
               number: numbers[row],
-              // In the play log the last column is when it was played, with
-              // how many times that day under it; elsewhere, the plays.
-              value: playedAt == null
-                  ? badge
-                  : localizations.formatTimeOfDay(
-                      TimeOfDay.fromDateTime(playedAt),
-                      alwaysUse24HourFormat: use24Hour,
-                    ),
-              detail: playedAt == null ? null : badge,
-              isNowPlaying: isNowPlaying,
-              isPlaying: isPlaying,
-              // The track in the player opens the player rather than
-              // starting itself over.
-              onTap: isNowPlaying
-                  ? () => showNowPlaying(context)
-                  : () => ref
-                        .read(audioHandlerProvider)
-                        .playTracks(queue, initialIndex: queueIndex[row]!),
-              onMenu: () => showTrackMenu(context, ref, track),
+              isArtist: false,
+              heroTag: ('home-list', TrackGroup.album, album.name),
+              onTap: () => _openGroup(
+                TrackGroup.album,
+                album.name,
+                artPath: album.artPath,
+                heroTag: ('home-list', TrackGroup.album, album.name),
+              ),
             ),
-          AlbumRow(:final album) => HomeGroupRow(
-            group: album,
-            number: numbers[row],
-            isArtist: false,
-            onTap: () => _openGroup(TrackGroup.album, album.name),
-          ),
-          ArtistRow(:final artist) => HomeGroupRow(
-            group: artist,
-            number: numbers[row],
-            isArtist: true,
-            onTap: () => _openGroup(TrackGroup.artist, artist.name),
-          ),
-        },
+            ArtistRow(:final artist) => HomeGroupRow(
+              group: artist,
+              number: numbers[row],
+              isArtist: true,
+              heroTag: ('home-list', TrackGroup.artist, artist.name),
+              onTap: () => _openGroup(
+                TrackGroup.artist,
+                artist.name,
+                artPath: artist.artPath,
+                heroTag: ('home-list', TrackGroup.artist, artist.name),
+              ),
+            ),
+          },
+        ),
       );
     }
 
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 860),
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: featured == null
-                  ? header
-                  : HomeHero(
-                      track: featured,
-                      isCurrent: current != null,
-                      eyebrow: current != null
-                          ? (isPlaying ? 'NOW PLAYING' : 'PAUSED')
-                          : (lastPlayed != null
-                                ? 'JUMP BACK IN'
-                                : 'RECENTLY ADDED'),
-                      search: _searchField(onHero: true),
-                      onPlay: () =>
-                          ref.read(audioHandlerProvider).playTracks([featured]),
-                    ),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 10)),
-            SliverToBoxAdapter(child: HomeHeaderRow(onShuffleAll: shuffleAll)),
-            const SliverToBoxAdapter(child: ScanBanner()),
-            const SliverToBoxAdapter(child: HomeOnlineSuggestionsSection()),
-            if (mix.isNotEmpty)
+        // The list's rows come in the first time Home shows them.
+        child: EntranceScope(
+          id: 'home',
+          child: CustomScrollView(
+            slivers: [
               SliverToBoxAdapter(
-                child: HomeShelf(
-                  title: 'Mixed for you',
-                  items: [
-                    // From your own plays; tapping one plays the mix from it.
-                    for (final (index, track) in mix.indexed)
-                      (
-                        artPath: track.artPath,
-                        title: track.title,
-                        subtitle: track.displayArtist,
-                        onTap: () => ref
-                            .read(audioHandlerProvider)
-                            .playTracks(mix, initialIndex: index),
-                      ),
-                  ],
-                ),
-              ),
-            if (albums.isNotEmpty)
-              SliverToBoxAdapter(
-                child: HomeShelf(
-                  title: 'Albums',
-                  items: [
-                    for (final album in albums)
-                      (
-                        artPath: album.artPath,
-                        title: album.name,
-                        subtitle: album.artist,
-                        onTap: () => _openGroup(TrackGroup.album, album.name),
-                      ),
-                  ],
-                  onSeeAll: widget.onOpenLibrary,
-                ),
-              ),
-            if (favourites.isNotEmpty)
-              SliverToBoxAdapter(
-                child: HomeShelf(
-                  title: 'Favourites',
-                  items: [
-                    // Tapping one plays the favourites from there.
-                    for (final (index, track) in favourites.indexed)
-                      (
-                        artPath: track.artPath,
-                        title: track.title,
-                        subtitle: track.displayArtist,
-                        onTap: () => ref
-                            .read(audioHandlerProvider)
-                            .playTracks(favourites, initialIndex: index),
-                      ),
-                  ],
-                  onSeeAll: () => Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => const FavouritesScreen(),
-                    ),
-                  ),
-                ),
-              ),
-            const SliverToBoxAdapter(child: SizedBox(height: 12)),
-            SliverToBoxAdapter(
-              child: HomeStatsCard(
-                stats: summary,
-                onOpenLibrary: widget.onOpenLibrary,
-              ),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 12)),
-            // One rounded container holding the list heading and its rows.
-            // Rows are built lazily as they scroll into view.
-            SliverPadding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              sliver: DecoratedSliver(
-                decoration: ShapeDecoration(
-                  color: context.feedCard,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(28),
-                    side: context.feedRim,
-                  ),
-                ),
-                sliver: SliverMainAxisGroup(
-                  slivers: [
-                    SliverPadding(
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      sliver: SliverToBoxAdapter(
-                        child: HomeListHeader(
-                          sort: _sort,
-                          onSortChanged: (sort) => setState(() => _sort = sort),
+                child: featured == null
+                    ? header
+                    : HomeHero(
+                        track: featured,
+                        isCurrent: current != null,
+                        eyebrow: current != null
+                            ? (isPlaying ? 'NOW PLAYING' : 'PAUSED')
+                            : (lastPlayed != null
+                                  ? 'JUMP BACK IN'
+                                  : 'RECENTLY ADDED'),
+                        search: _searchField(onHero: true),
+                        onPlay: () => ref.read(audioHandlerProvider).playTracks(
+                          [featured],
                         ),
                       ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 10)),
+              SliverToBoxAdapter(
+                child: HomeHeaderRow(onShuffleAll: shuffleAll),
+              ),
+              const SliverToBoxAdapter(child: ScanBanner()),
+              const SliverToBoxAdapter(child: HomeOnlineSuggestionsSection()),
+              if (mix.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: HomeShelf(
+                    title: 'Mixed for you',
+                    items: [
+                      // From your own plays; tapping one plays the mix from it.
+                      for (final (index, track) in mix.indexed)
+                        (
+                          artPath: track.artPath,
+                          title: track.title,
+                          subtitle: track.displayArtist,
+                          onTap: () => ref
+                              .read(audioHandlerProvider)
+                              .playTracks(mix, initialIndex: index),
+                        ),
+                    ],
+                  ),
+                ),
+              if (albums.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: HomeShelf(
+                    title: 'Albums',
+                    items: [
+                      for (final album in albums)
+                        (
+                          artPath: album.artPath,
+                          title: album.name,
+                          subtitle: album.artist,
+                          onTap: () => _openGroup(
+                            TrackGroup.album,
+                            album.name,
+                            artPath: album.artPath,
+                            heroTag: ('home-shelf', album.name),
+                          ),
+                        ),
+                    ],
+                    heroTagOf: (index) => ('home-shelf', albums[index].name),
+                    onSeeAll: widget.onOpenLibrary,
+                  ),
+                ),
+              if (favourites.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: HomeShelf(
+                    title: 'Favourites',
+                    items: [
+                      // Tapping one plays the favourites from there.
+                      for (final (index, track) in favourites.indexed)
+                        (
+                          artPath: track.artPath,
+                          title: track.title,
+                          subtitle: track.displayArtist,
+                          onTap: () => ref
+                              .read(audioHandlerProvider)
+                              .playTracks(favourites, initialIndex: index),
+                        ),
+                    ],
+                    onSeeAll: () => Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => const FavouritesScreen(),
+                      ),
                     ),
-                    if (rows.isEmpty)
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 48),
-                          child: Text(
-                            loading ? 'Loading…' : 'No tracks yet',
-                            textAlign: TextAlign.center,
-                            style: FlexType.bodyLarge.copyWith(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
+                  ),
+                ),
+              const SliverToBoxAdapter(child: SizedBox(height: 12)),
+              SliverToBoxAdapter(
+                child: HomeStatsCard(
+                  stats: summary,
+                  onOpenLibrary: widget.onOpenLibrary,
+                ),
+              ),
+              const SliverToBoxAdapter(child: SizedBox(height: 12)),
+              // One rounded container holding the list heading and its rows.
+              // Rows are built lazily as they scroll into view.
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                sliver: DecoratedSliver(
+                  decoration: ShapeDecoration(
+                    color: context.feedCard,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(28),
+                      side: context.feedRim,
+                    ),
+                  ),
+                  sliver: SliverMainAxisGroup(
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(horizontal: 14),
+                        sliver: SliverToBoxAdapter(
+                          child: HomeListHeader(
+                            sort: _sort,
+                            onSortChanged: (sort) =>
+                                setState(() => _sort = sort),
+                          ),
+                        ),
+                      ),
+                      if (rows.isEmpty)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 48),
+                            child: Text(
+                              loading ? 'Loading…' : 'No tracks yet',
+                              textAlign: TextAlign.center,
+                              style: FlexType.bodyLarge.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        SliverPadding(
+                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                          sliver: SliverToBoxAdapter(
+                            child: Column(
+                              children: [
+                                HomeListColumns(
+                                  title: switch (_sort) {
+                                    HomeSort.topArtists => 'Artist',
+                                    HomeSort.topAlbums => 'Album',
+                                    _ => 'Song',
+                                  },
+                                  value: _sort == HomeSort.recent
+                                      ? 'Played'
+                                      : 'Plays',
+                                  menu:
+                                      _sort != HomeSort.topArtists &&
+                                      _sort != HomeSort.topAlbums,
+                                ),
+                                // A table of its own height that scrolls
+                                // inside the card, so the page stays the same
+                                // length however much has been played. Short
+                                // lists take only the room they need.
+                                ConstrainedBox(
+                                  constraints: const BoxConstraints(
+                                    maxHeight: _listHeight,
+                                  ),
+                                  child: ListView.builder(
+                                    shrinkWrap: rows.length <= _shortList,
+                                    padding: EdgeInsets.zero,
+                                    itemCount: rows.length,
+                                    itemBuilder: buildRow,
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
                         ),
-                      )
-                    else
-                      SliverPadding(
-                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                        sliver: SliverToBoxAdapter(
-                          child: Column(
-                            children: [
-                              HomeListColumns(
-                                title: switch (_sort) {
-                                  HomeSort.topArtists => 'Artist',
-                                  HomeSort.topAlbums => 'Album',
-                                  _ => 'Song',
-                                },
-                                value: _sort == HomeSort.recent
-                                    ? 'Played'
-                                    : 'Plays',
-                                menu:
-                                    _sort != HomeSort.topArtists &&
-                                    _sort != HomeSort.topAlbums,
-                              ),
-                              // A table of its own height that scrolls
-                              // inside the card, so the page stays the same
-                              // length however much has been played. Short
-                              // lists take only the room they need.
-                              ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxHeight: _listHeight,
-                                ),
-                                child: ListView.builder(
-                                  shrinkWrap: rows.length <= _shortList,
-                                  padding: EdgeInsets.zero,
-                                  itemCount: rows.length,
-                                  itemBuilder: buildRow,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
-            ),
-            SliverToBoxAdapter(child: SizedBox(height: bottomInset + 24)),
-          ],
+              SliverToBoxAdapter(child: SizedBox(height: bottomInset + 24)),
+            ],
+          ),
         ),
       ),
     );

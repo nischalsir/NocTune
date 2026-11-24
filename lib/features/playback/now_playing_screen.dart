@@ -13,6 +13,7 @@ import '../../core/theme/cover_accent.dart';
 import '../../core/theme/flex_type.dart';
 import '../../core/theme/noc_theme.dart';
 import '../../core/widgets/artwork.dart';
+import '../../core/widgets/play_pause_icon.dart';
 import '../../core/widgets/still_when_covered.dart';
 import '../../data/models/track.dart';
 import '../../third_party/spotiflac/overflow_marquee.dart';
@@ -115,11 +116,27 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     };
     final light = brightness == Brightness.light;
 
-    return Theme(
-      data: buildNocTheme(
-        brightness,
-        settings.accent,
-        coverAccent: light ? cover.light : cover.dark,
+    // The accent taken from the cover fades to the next track's along with
+    // the cover. Only the colour is followed: the theme itself is made anew
+    // on every build.
+    final coverAccent = light ? cover.light : cover.dark;
+    return TweenAnimationBuilder<Color?>(
+      tween: ColorTween(end: coverAccent ?? Colors.transparent),
+      duration: reduceMotion
+          ? Duration.zero
+          : const Duration(milliseconds: 450),
+      curve: Curves.easeOut,
+      builder: (context, accent, child) => Theme(
+        data: buildNocTheme(
+          brightness,
+          settings.accent,
+          // Coming from no colour at all, the new one is there at once
+          // rather than fading up from see-through.
+          coverAccent: coverAccent == null
+              ? null
+              : accent?.withValues(alpha: coverAccent.a),
+        ),
+        child: child!,
       ),
       child: AnnotatedRegion<SystemUiOverlayStyle>(
         // Status bar icons that stand out from the player's washes.
@@ -366,7 +383,8 @@ class _BackdropState extends State<_Backdrop> {
               opacity: 0.9,
               child: ImageFiltered(
                 imageFilter: ImageFilter.blur(sigmaX: 36, sigmaY: 36),
-                child: (path.startsWith('http://') || path.startsWith('https://'))
+                child:
+                    (path.startsWith('http://') || path.startsWith('https://'))
                     ? Image.network(
                         path,
                         fit: BoxFit.cover,
@@ -824,7 +842,9 @@ class _ArtworkHero extends StatelessWidget {
                   duration: reduceMotion
                       ? Duration.zero
                       : const Duration(milliseconds: 350),
-                  child: (path.startsWith('http://') || path.startsWith('https://'))
+                  child:
+                      (path.startsWith('http://') ||
+                          path.startsWith('https://'))
                       ? Image.network(
                           path,
                           key: ValueKey(path),
@@ -1223,10 +1243,8 @@ class _PlayPillState extends State<_PlayPill> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(
-                                    widget.playing
-                                        ? Icons.pause
-                                        : Icons.play_arrow,
+                                  PlayPauseIcon(
+                                    playing: widget.playing,
                                     size: 28,
                                     color: context.playerInk,
                                   ),

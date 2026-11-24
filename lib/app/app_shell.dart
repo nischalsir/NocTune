@@ -55,6 +55,9 @@ class _AppShellState extends ConsumerState<AppShell> {
   int _currentIndex = _homeIndex;
   final _homeNavigator = GlobalKey<NavigatorState>();
   final _libraryNavigator = GlobalKey<NavigatorState>();
+  // Covers grow from a row into the page it opens within each of the two.
+  final _homeHeroes = HeroController();
+  final _libraryHeroes = HeroController();
   final _homeKey = GlobalKey<HomeScreenState>();
   final _mornyeChrome = MornyeChromeController();
   DateTime? _lastBackPress;
@@ -98,6 +101,8 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   void dispose() {
     _mornyeChrome.dispose();
+    _homeHeroes.dispose();
+    _libraryHeroes.dispose();
     super.dispose();
   }
 
@@ -261,6 +266,7 @@ class _AppShellState extends ConsumerState<AppShell> {
         'home',
         Navigator(
           key: _homeNavigator,
+          observers: [_homeHeroes],
           onGenerateRoute: (_) => MaterialPageRoute<void>(
             builder: (_) => HomeScreen(
               key: _homeKey,
@@ -272,13 +278,16 @@ class _AppShellState extends ConsumerState<AppShell> {
       ),
       (
         'library',
-        Navigator(
-          key: _libraryNavigator,
-          onGenerateRoute: (_) =>
-              MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
+        _bouncing(
+          Navigator(
+            key: _libraryNavigator,
+            observers: [_libraryHeroes],
+            onGenerateRoute: (_) =>
+                MaterialPageRoute<void>(builder: (_) => const LibraryScreen()),
+          ),
         ),
       ),
-      ('search', const SearchScreen()),
+      ('search', _bouncing(const SearchScreen())),
       ('settings', const SettingsScreen()),
     ];
     // Each destination is built the first time it is opened and then kept,
@@ -394,3 +403,17 @@ class _AppShellState extends ConsumerState<AppShell> {
     );
   }
 }
+
+/// Lists under [child] bounce at their ends, as on an iPhone, instead of
+/// stretching.
+Widget _bouncing(Widget child) => Builder(
+  builder: (context) => ScrollConfiguration(
+    behavior: ScrollConfiguration.of(context).copyWith(
+      physics: const BouncingScrollPhysics(
+        parent: AlwaysScrollableScrollPhysics(),
+      ),
+      overscroll: false,
+    ),
+    child: child,
+  ),
+);

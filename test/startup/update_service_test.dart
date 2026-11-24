@@ -342,13 +342,9 @@ void main() {
       expect(prompt!.release.version.label, '1.2.0');
     });
 
-    test('reuses a recent result instead of downloading again', () async {
+    test('asks the server again every time the app opens', () async {
       await service().check();
-      now = now.add(const Duration(hours: 1));
-      await service().check();
-      expect(fetches, 1);
-
-      now = now.add(const Duration(hours: 12));
+      now = now.add(const Duration(minutes: 1));
       await service().check();
       expect(fetches, 2);
     });

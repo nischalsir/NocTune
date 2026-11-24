@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import 'press_scale.dart';
+
 /// Wraps a tappable widget so it responds the instant a finger lands: it dips
-/// in scale on pointer-down and springs back on release. With reduced motion
-/// on, it dims instead of moving.
+/// in scale on pointer-down and springs back, a touch past its size, on
+/// release. With reduced motion on, it dims instead of moving.
 class Pressable extends StatefulWidget {
   const Pressable({
     super.key,
@@ -40,8 +42,8 @@ class _PressableState extends State<Pressable> {
         onTap: widget.onTap,
         child: AnimatedScale(
           scale: _pressed && !reduceMotion ? 0.95 : 1,
-          duration: const Duration(milliseconds: 110),
-          curve: Curves.easeOut,
+          duration: _pressed ? pressDown : pressRelease,
+          curve: _pressed ? Curves.easeOut : pressSpring,
           child: AnimatedOpacity(
             opacity: _pressed ? 0.8 : 1,
             duration: const Duration(milliseconds: 110),
