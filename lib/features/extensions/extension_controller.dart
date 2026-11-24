@@ -353,17 +353,21 @@ final extensionFilteredSearchProvider = FutureProvider.autoDispose
       ref,
       request,
     ) async {
+      final channel = ref.watch(extensionChannelProvider);
       final hasActive = ref.watch(
         extensionControllerProvider.select(
           (state) => state.hasActiveSearchOrDownload,
         ),
       );
-      if (!hasActive || request.query.trim().isEmpty) return const [];
-      return ref
-          .watch(extensionChannelProvider)
-          .search(
-            request.query.trim(),
-            filter: request.filter,
-            providerId: request.providerId,
-          );
+      final allowOnlineBuiltIn =
+          channel.isSupported && request.providerId == 'ytmusic';
+      if ((!hasActive && !allowOnlineBuiltIn) ||
+          request.query.trim().isEmpty) {
+        return const [];
+      }
+      return channel.search(
+        request.query.trim(),
+        filter: request.filter,
+        providerId: request.providerId,
+      );
     });

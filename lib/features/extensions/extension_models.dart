@@ -310,6 +310,86 @@ class ExtensionArtistDetails {
   final List<ExtensionTrackResult> albums;
 }
 
+/// A mood / activity filter chip from YouTube Music Home (`FEmusic_home`),
+/// matching LastWave-Native's `HomeChip`.
+@immutable
+class ExtensionHomeChip {
+  const ExtensionHomeChip({
+    required this.title,
+    required this.params,
+    this.browseId = 'FEmusic_home',
+  });
+
+  factory ExtensionHomeChip.fromMap(Map<Object?, Object?> map) {
+    return ExtensionHomeChip(
+      title: (map['title'] as String?) ?? '',
+      params: (map['params'] as String?) ?? '',
+      browseId: (map['browseId'] as String?) ?? 'FEmusic_home',
+    );
+  }
+
+  final String title;
+  final String params;
+  final String browseId;
+}
+
+/// Personalized and trending online tracks for the Home discovery shelves,
+/// modelled on LastWave-Native's `FeedRepository` and `LocalTasteSuggestionEngine`.
+@immutable
+class ExtensionHomeFeed {
+  const ExtensionHomeFeed({
+    this.forYou = const [],
+    this.becauseYouListenTo = const [],
+    this.becauseArtist = '',
+    this.freshFinds = const [],
+    this.trending = const [],
+    this.chips = const [],
+    this.providerName = '',
+  });
+
+  factory ExtensionHomeFeed.fromMap(Map<Object?, Object?> map) {
+    return ExtensionHomeFeed(
+      forYou: [
+        for (final item in (map['forYou'] as List<Object?>?) ?? const [])
+          if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
+      ],
+      becauseYouListenTo: [
+        for (final item
+            in (map['becauseYouListenTo'] as List<Object?>?) ?? const [])
+          if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
+      ],
+      becauseArtist: (map['becauseArtist'] as String?) ?? '',
+      freshFinds: [
+        for (final item in (map['freshFinds'] as List<Object?>?) ?? const [])
+          if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
+      ],
+      trending: [
+        for (final item in (map['trending'] as List<Object?>?) ?? const [])
+          if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
+      ],
+      chips: [
+        for (final item in (map['chips'] as List<Object?>?) ?? const [])
+          if (item is Map<Object?, Object?>) ExtensionHomeChip.fromMap(item),
+      ],
+      providerName: (map['providerName'] as String?) ?? '',
+    );
+  }
+
+  final List<ExtensionTrackResult> forYou;
+  final List<ExtensionTrackResult> becauseYouListenTo;
+  final String becauseArtist;
+  final List<ExtensionTrackResult> freshFinds;
+  final List<ExtensionTrackResult> trending;
+  final List<ExtensionHomeChip> chips;
+  final String providerName;
+
+  bool get isEmpty =>
+      forYou.isEmpty &&
+      becauseYouListenTo.isEmpty &&
+      freshFinds.isEmpty &&
+      trending.isEmpty;
+}
+
 /// Lifecycle state of an extension track download in the download queue.
 enum ExtensionDownloadStatus { queued, downloading, completed, failed }
 

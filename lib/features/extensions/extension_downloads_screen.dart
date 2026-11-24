@@ -18,7 +18,6 @@ class ExtensionDownloadsScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final palette = context.noc;
-    final text = Theme.of(context).textTheme;
     final state = ref.watch(extensionControllerProvider);
     final controller = ref.read(extensionControllerProvider.notifier);
     final queue = state.downloadQueue;

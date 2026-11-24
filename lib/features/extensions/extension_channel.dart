@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
@@ -10,7 +12,7 @@ class ExtensionChannel {
 
   static const _channel = MethodChannel('noctune/extensions');
 
-  bool get isSupported => defaultTargetPlatform == TargetPlatform.android;
+  bool get isSupported => !kIsWeb && Platform.isAndroid;
 
   Future<List<InstalledExtension>> init({required String musicDir}) async {
     if (!isSupported) return const [];
@@ -108,8 +110,8 @@ class ExtensionChannel {
       final raw = await _channel.invokeListMethod<Object?>('search', {
         'query': query.trim(),
         'limit': limit,
-        if (filter != null) 'filter': filter,
-        if (providerId != null) 'providerId': providerId,
+        'filter': ?filter,
+        'providerId': ?providerId,
       });
       if (raw == null) return const [];
       return [
@@ -178,6 +180,17 @@ class ExtensionChannel {
     return raw?['filePath'] as String?;
   }
 
+  static int? _lastProxyPort;
+  static String? _lastCodec;
+  static int? _lastBitrate;
+  static int? _lastSampleRate;
+  static int? _lastDurationMs;
+
+  String? get lastResolvedCodec => _lastCodec;
+  int? get lastResolvedBitrate => _lastBitrate;
+  int? get lastResolvedSampleRate => _lastSampleRate;
+  int? get lastResolvedDurationMs => _lastDurationMs;
+
   Future<String?> resolveStream(
     ExtensionTrackResult track, {
     required String musicDir,
@@ -187,7 +200,34 @@ class ExtensionChannel {
       'resolveStream',
       {'track': track.raw, 'musicDir': musicDir},
     );
+    final port = (raw?['proxyPort'] as num?)?.toInt();
+    if (port != null && port > 0) {
+      _lastProxyPort = port;
+    }
+    _lastCodec = raw?['codec'] as String?;
+    _lastBitrate = (raw?['bitrate'] as num?)?.toInt();
+    _lastSampleRate = (raw?['sampleRate'] as num?)?.toInt();
+    _lastDurationMs = (raw?['durationMs'] as num?)?.toInt();
     return raw?['uri'] as String?;
+  }
+
+  /// Builds a local lazy-resolved stream URL for an upcoming track in the
+  /// online play queue so ExoPlayer resolves it on demand when skipped to.
+  String buildLazyStreamUri(ExtensionTrackResult track) {
+    final port = _lastProxyPort;
+    final query = Uri(
+      queryParameters: {
+        'id': track.id,
+        'provider_id': track.providerId,
+        'title': track.title,
+        'artist': track.artist,
+        'duration_ms': '${track.duration.inMilliseconds}',
+      },
+    ).query;
+    if (port != null && port > 0) {
+      return 'http://127.0.0.1:$port/ytlazy?$query';
+    }
+    return 'http://127.0.0.1/ytlazy?$query';
   }
 
   Future<String?> fetchLyrics({
@@ -209,6 +249,34 @@ class ExtensionChannel {
       return null;
     } on MissingPluginException {
       return null;
+    }
+  }
+
+  Future<ExtensionHomeFeed> getHomeFeed({
+    List<String> seedArtists = const [],
+    List<String> seedTracks = const [],
+    String? providerId,
+    String? chipParams,
+  }) async {
+    if (!isSupported) return const ExtensionHomeFeed();
+    try {
+      final raw = await _channel.invokeMapMethod<Object?, Object?>(
+        'getHomeFeed',
+        {
+          'seedArtists': seedArtists,
+          'seedTracks': seedTracks,
+          if (providerId != null && providerId.isNotEmpty)
+            'providerId': providerId,
+          if (chipParams != null && chipParams.isNotEmpty)
+            'chipParams': chipParams,
+        },
+      );
+      if (raw == null || raw.isEmpty) return const ExtensionHomeFeed();
+      return ExtensionHomeFeed.fromMap(raw);
+    } on PlatformException {
+      return const ExtensionHomeFeed();
+    } on MissingPluginException {
+      return const ExtensionHomeFeed();
     }
   }
 

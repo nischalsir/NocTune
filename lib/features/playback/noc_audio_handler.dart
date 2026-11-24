@@ -167,17 +167,38 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
   void _onIndexChanged(int? index) {
     final items = queue.value;
     if (index == null || index >= items.length) return;
-    mediaItem.add(items[index]);
+    var item = items[index];
+    final liveDuration = _player.duration;
+    if ((item.duration == null || item.duration == Duration.zero) &&
+        liveDuration != null &&
+        liveDuration > Duration.zero) {
+      item = item.copyWith(duration: liveDuration);
+      final updated = [...items];
+      updated[index] = item;
+      queue.add(updated);
+    }
+    mediaItem.add(item);
   }
 
   // Some files carry no duration in their tags; once the decoder knows the
   // real length, pass it on so the lock screen scrubber is accurate.
   void _onDurationChanged(Duration? duration) {
     final current = mediaItem.value;
-    if (duration == null || current == null || current.duration == duration) {
+    if (duration == null ||
+        duration <= Duration.zero ||
+        current == null ||
+        current.duration == duration) {
       return;
     }
-    mediaItem.add(current.copyWith(duration: duration));
+    final updatedItem = current.copyWith(duration: duration);
+    mediaItem.add(updatedItem);
+    final idx = _player.currentIndex;
+    final items = queue.value;
+    if (idx != null && idx >= 0 && idx < items.length) {
+      final updatedQueue = [...items];
+      updatedQueue[idx] = items[idx].copyWith(duration: duration);
+      queue.add(updatedQueue);
+    }
   }
 
   // Reaching the end of the queue with repeat off: rest at the start of the
@@ -322,8 +343,18 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> skipToNext() async {
-    final next = _relativeIndex(1);
-    if (next != null) await _player.seek(Duration.zero, index: next);
+    final next =
+        _relativeIndex(1) ??
+        relativeQueueIndex(
+          playOrder: _player.effectiveIndices,
+          currentIndex: _player.currentIndex,
+          offset: 1,
+          wrap: true,
+        );
+    if (next != null) {
+      await _player.seek(Duration.zero, index: next);
+      if (!_player.playing) await _player.play();
+    }
   }
 
   /// Restarts the current track if it is more than a few seconds in,
@@ -336,6 +367,7 @@ class NocAudioHandler extends BaseAudioHandler with SeekHandler {
     } else {
       await _player.seek(Duration.zero, index: previous);
     }
+    if (!_player.playing) await _player.play();
   }
 
   @override

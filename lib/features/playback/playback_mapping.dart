@@ -5,6 +5,11 @@ import '../../data/models/track.dart';
 
 /// Key in [MediaItem.extras] holding the library id of the track.
 const kTrackIdExtra = 'trackId';
+const kCodecExtra = 'codec';
+const kBitrateExtra = 'bitrate';
+const kSampleRateExtra = 'sampleRate';
+const kBitDepthExtra = 'bitDepth';
+const kFolderExtra = 'folder';
 
 /// Converts [MediaItem.artUri] back into a local file path or remote HTTP(S)
 /// URL understood by `Artwork`.
@@ -31,8 +36,44 @@ MediaItem mediaItemFromTrack(Track track) => MediaItem(
   genre: track.genre,
   duration: track.duration > Duration.zero ? track.duration : null,
   artUri: _artUriFromPath(track.artPath),
-  extras: {if (track.id != 0) kTrackIdExtra: track.id},
+  extras: {
+    if (track.id != 0) kTrackIdExtra: track.id,
+    if (track.codec != null) kCodecExtra: track.codec,
+    if (track.bitrate != null) kBitrateExtra: track.bitrate,
+    if (track.sampleRate != null) kSampleRateExtra: track.sampleRate,
+    if (track.bitDepth != null) kBitDepthExtra: track.bitDepth,
+    if (track.folder.isNotEmpty) kFolderExtra: track.folder,
+  },
 );
+
+/// Rebuilds a temporary [Track] from a playing [MediaItem] for online
+/// streaming tracks (`id == 0`) that are not yet saved in the local database.
+Track mediaItemToTrack(MediaItem item) {
+  final now = DateTime.now();
+  final extras = item.extras;
+  final isHttp =
+      item.id.startsWith('http://') || item.id.startsWith('https://');
+  return Track(
+    id: (extras?[kTrackIdExtra] as int?) ?? 0,
+    uri: item.id,
+    fileName: item.title,
+    folder: (extras?[kFolderExtra] as String?) ?? '',
+    title: item.title,
+    artist: item.artist,
+    album: item.album,
+    genre: item.genre,
+    duration: item.duration ?? Duration.zero,
+    artPath: artUriToPathOrUrl(item.artUri),
+    codec: (extras?[kCodecExtra] as String?) ?? (isHttp ? 'aac' : null),
+    bitrate:
+        (extras?[kBitrateExtra] as num?)?.toInt() ?? (isHttp ? 128000 : null),
+    sampleRate:
+        (extras?[kSampleRateExtra] as num?)?.toInt() ?? (isHttp ? 44100 : null),
+    bitDepth: (extras?[kBitDepthExtra] as num?)?.toInt(),
+    dateAdded: now,
+    dateModified: now,
+  );
+}
 
 /// Translates the player's state into what the OS media session shows on the
 /// notification, lock screen and connected devices.

@@ -185,10 +185,16 @@ final currentTrackIdProvider = Provider<int?>(
 );
 
 /// The library's record of the track loaded in the player: its favourite
-/// state, audio format and so on.
+/// state, audio format and so on. Falls back to the playing [MediaItem]
+/// for online streaming tracks (`id == 0`).
 final currentTrackProvider = FutureProvider<Track?>((ref) async {
   final id = ref.watch(currentTrackIdProvider);
-  return id == null ? null : _liveRepository(ref).trackById(id);
+  if (id == null || id == 0) {
+    final item = ref.watch(currentMediaItemProvider).value;
+    if (item != null) return mediaItemToTrack(item);
+    return null;
+  }
+  return _liveRepository(ref).trackById(id);
 });
 
 final queueProvider = StreamProvider<List<MediaItem>>(

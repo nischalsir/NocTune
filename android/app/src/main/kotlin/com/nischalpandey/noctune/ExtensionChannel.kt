@@ -131,6 +131,16 @@ class ExtensionChannel(private val context: Context) : MethodChannel.MethodCallH
                         val durationMs = (args["durationMs"] as? Number)?.toLong() ?: 0L
                         runtime.fetchLyrics(title, artist, album, durationMs)
                     }
+                    "getHomeFeed" -> {
+                        val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                        @Suppress("UNCHECKED_CAST")
+                        val seedArtists = (args["seedArtists"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                        @Suppress("UNCHECKED_CAST")
+                        val seedTracks = (args["seedTracks"] as? List<*>)?.filterIsInstance<String>() ?: emptyList()
+                        val providerId = args["providerId"] as? String
+                        val chipParams = args["chipParams"] as? String
+                        runtime.getHomeFeed(seedArtists, seedTracks, providerId, chipParams)
+                    }
                     else -> {
                         mainHandler.post { result.notImplemented() }
                         return@execute

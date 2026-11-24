@@ -127,6 +127,14 @@ class _FakeExtensionChannel extends ExtensionChannel {
   }
 
   @override
+  Future<String?> resolveStream(
+    ExtensionTrackResult track, {
+    required String musicDir,
+  }) async {
+    return 'http://127.0.0.1:43210/ytstream/${track.id}';
+  }
+
+  @override
   Future<String?> fetchLyrics({
     required String title,
     required String artist,
@@ -139,10 +147,21 @@ class _FakeExtensionChannel extends ExtensionChannel {
 
 class _FakeHandler extends Fake implements NocAudioHandler {
   final played = <String>[];
+  List<Track> lastQueuedTracks = const [];
+  int currentIndex = 0;
 
   @override
   Future<void> playTracks(List<Track> tracks, {int initialIndex = 0}) async {
+    lastQueuedTracks = tracks;
+    currentIndex = initialIndex;
     played.add(tracks[initialIndex].title);
+  }
+
+  @override
+  Future<void> skipToNext() async {
+    if (lastQueuedTracks.isEmpty) return;
+    currentIndex = (currentIndex + 1) % lastQueuedTracks.length;
+    played.add(lastQueuedTracks[currentIndex].title);
   }
 }
 
@@ -187,15 +206,25 @@ void main() {
             providerId: 'qobuz-ext',
             providerName: 'Qobuz Lossless',
           ),
+          ExtensionTrackResult(
+            id: 'ext-2',
+            title: 'Starlight Acoustic',
+            artist: 'Muse',
+            album: 'Black Holes',
+            duration: Duration(minutes: 4),
+            providerId: 'qobuz-ext',
+            providerName: 'Qobuz Lossless',
+          ),
         ],
       );
       final library = [_track(1, 'Starlight Local')];
+      final fakeHandler = _FakeHandler();
 
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
             sharedPreferencesProvider.overrideWithValue(preferences),
-            audioHandlerProvider.overrideWithValue(_FakeHandler()),
+            audioHandlerProvider.overrideWithValue(fakeHandler),
             extensionChannelProvider.overrideWithValue(channel),
             currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
             allTracksProvider.overrideWith((ref) => library),
@@ -221,12 +250,26 @@ void main() {
       expect(find.text('Starlight Local'), findsOneWidget);
       expect(find.text('Extensions'), findsOneWidget);
       expect(find.text('Starlight FLAC'), findsOneWidget);
+      expect(find.text('Starlight Acoustic'), findsOneWidget);
+      // Both separate Play and Download buttons are shown on the search result row.
+      expect(find.byTooltip('Play Starlight FLAC'), findsOneWidget);
+      expect(find.byTooltip('Download Starlight FLAC'), findsOneWidget);
+
+      // Tapping Play queues all online search results so Next advances to the next track.
+      await tester.tap(find.byTooltip('Play Starlight FLAC'));
+      await tester.pumpAndSettle();
+      expect(fakeHandler.lastQueuedTracks.map((t) => t.title), [
+        'Starlight FLAC',
+        'Starlight Acoustic',
+      ]);
+      await fakeHandler.skipToNext();
+      expect(fakeHandler.played, ['Starlight FLAC', 'Starlight Acoustic']);
 
       await tester.tap(find.byTooltip('Download Starlight FLAC'));
       await tester.pumpAndSettle();
 
-      // Mornye-style format & service picker sheet appears before downloading.
-      expect(find.text('Download from'), findsOneWidget);
+      // Format & quality picker sheet appears for the selected provider without provider switching in the middle.
+      expect(find.text('Download from'), findsNothing);
       expect(find.text('Select format & quality'), findsOneWidget);
       await tester.tap(find.byKey(const ValueKey('picker-quality-LOSSLESS')));
       await tester.pumpAndSettle();
@@ -461,6 +504,17 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Midnight Saavn'), findsOneWidget);
       expect(find.text('Midnight Song'), findsNothing);
+
+      // Tap Download on Midnight Saavn: when multiple download extensions are enabled,
+      // the user can choose which extension to download from and pick its format/quality.
+      await tester.tap(find.byTooltip('Download Midnight Saavn'));
+      await tester.pumpAndSettle();
+      expect(find.text('Download extension'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('picker-provider-deezer')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('picker-quality-LOSSLESS')));
+      await tester.pumpAndSettle();
+      expect(channel.downloadedTitles, ['Midnight Saavn:LOSSLESS']);
     },
   );
 }

@@ -16,6 +16,9 @@ import '../../core/widgets/artwork.dart';
 import '../../core/widgets/still_when_covered.dart';
 import '../../data/models/track.dart';
 import '../../third_party/spotiflac/overflow_marquee.dart';
+import '../extensions/download_format_picker.dart';
+import '../extensions/extension_controller.dart';
+import '../extensions/extension_models.dart';
 import '../library/track_menu.dart';
 import '../lyrics/lyrics_offset.dart';
 import '../lyrics/lyrics_source.dart';
@@ -91,7 +94,11 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
     // the previous one.
     final currentId = ref.watch(currentTrackIdProvider);
     final loaded = ref.watch(currentTrackProvider).value;
-    final track = loaded != null && loaded.id == currentId ? loaded : null;
+    final track =
+        loaded != null &&
+            (loaded.id == currentId || (currentId == null && loaded.id == 0))
+        ? loaded
+        : null;
     final lyricsOpen = _showLyrics && item != null && track != null;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     final screen = MediaQuery.sizeOf(context);
@@ -881,7 +888,8 @@ class _Cover extends StatelessWidget {
   }
 }
 
-/// Title over the artist, with favourite and lyrics beside them.
+/// Title over the artist, with download (when playing online), favourite and
+/// lyrics beside them.
 class _Details extends ConsumerWidget {
   const _Details({
     required this.item,
@@ -893,10 +901,95 @@ class _Details extends ConsumerWidget {
   final Track? track;
   final VoidCallback onShowLyrics;
 
+  ExtensionTrackResult _onlineTrackResult(Track? track) {
+    final folder = track?.folder ?? '';
+    final sep = folder.indexOf('|');
+    final providerId = sep > 0 ? folder.substring(0, sep) : '';
+    final extId = sep > 0 && sep + 1 < folder.length
+        ? folder.substring(sep + 1)
+        : item.title;
+    final coverUrl = artUriToPathOrUrl(item.artUri) ?? '';
+    return ExtensionTrackResult(
+      id: extId,
+      title: item.title,
+      artist: item.artist ?? '',
+      album: item.album ?? '',
+      duration: item.duration ?? track?.duration ?? Duration.zero,
+      coverUrl: coverUrl.startsWith('http') ? coverUrl : '',
+      providerId: providerId,
+      providerName: providerId,
+      raw: {
+        'id': extId,
+        'title': item.title,
+        'name': item.title,
+        'artist': item.artist ?? '',
+        'artists': item.artist ?? '',
+        'album': item.album ?? '',
+        'album_name': item.album ?? '',
+        'duration_ms': (item.duration ?? track?.duration ?? Duration.zero)
+            .inMilliseconds,
+        'cover_url': coverUrl.startsWith('http') ? coverUrl : '',
+        'provider_id': providerId,
+      },
+    );
+  }
+
+  Future<void> _downloadOnlineTrack(
+    BuildContext context,
+    WidgetRef ref,
+    ExtensionTrackResult extTrack,
+  ) async {
+    final selection = await showExtensionDownloadPicker(
+      context,
+      ref,
+      title: extTrack.title,
+      artist: extTrack.artist,
+      coverUrl: extTrack.coverUrl,
+      recommendedProviderId: extTrack.providerId,
+    );
+    if (selection == null || !context.mounted) return;
+    try {
+      final path = await ref
+          .read(extensionControllerProvider.notifier)
+          .downloadTrack(
+            extTrack,
+            providerId: selection.providerId,
+            quality: selection.qualityId,
+          );
+      if (!context.mounted) return;
+      if (path != null) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text('Downloaded "${extTrack.title}" to library.'),
+            ),
+          );
+      }
+    } on Object catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final track = this.track;
     final scheme = Theme.of(context).colorScheme;
+    final isOnline =
+        (track != null && track.id == 0) ||
+        item.id.startsWith('http://') ||
+        item.id.startsWith('https://');
+    final extTrack = isOnline ? _onlineTrackResult(track) : null;
+    final extState = isOnline ? ref.watch(extensionControllerProvider) : null;
+    final isDownloading =
+        extTrack != null &&
+        (extState?.downloadingKeys.contains(extTrack.uniqueKey) ?? false);
+    final isDownloaded =
+        extTrack != null &&
+        (extState?.downloadedPaths.containsKey(extTrack.uniqueKey) ?? false);
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -952,6 +1045,29 @@ class _Details extends ConsumerWidget {
           ),
           if (track != null) ...[
             const SizedBox(width: 12),
+            if (isOnline && extTrack != null) ...[
+              PlayerGlassButton(
+                icon: isDownloading
+                    ? Icons.downloading_rounded
+                    : (isDownloaded
+                          ? Icons.download_done_rounded
+                          : Icons.download_rounded),
+                label: isDownloading
+                    ? 'Downloading track'
+                    : (isDownloaded ? 'Downloaded' : 'Download track'),
+                size: 46,
+                color: isDownloaded
+                    ? context.playerInk.withValues(alpha: 0.92)
+                    : null,
+                foreground: isDownloaded
+                    ? scheme.primary
+                    : context.playerInk.withValues(alpha: 0.85),
+                onTap: (isDownloading || isDownloaded)
+                    ? () {}
+                    : () => _downloadOnlineTrack(context, ref, extTrack),
+              ),
+              const SizedBox(width: 8),
+            ],
             PlayerGlassButton(
               icon: track.isFavorite ? Icons.favorite : Icons.favorite_border,
               label: track.isFavorite

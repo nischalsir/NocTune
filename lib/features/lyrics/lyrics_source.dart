@@ -44,12 +44,16 @@ Future<LoadedLyrics?> loadLyrics(
   LibraryRepository repository, {
   ExtensionChannel? extensionChannel,
 }) async {
-  final imported = await repository.importedLyrics(track.id);
-  if (imported != null) {
-    final lyrics = parseLyrics(imported);
-    if (lyrics != null) return LoadedLyrics(lyrics, LyricsOrigin.imported);
+  if (track.id > 0) {
+    final imported = await repository.importedLyrics(track.id);
+    if (imported != null) {
+      final lyrics = parseLyrics(imported);
+      if (lyrics != null) return LoadedLyrics(lyrics, LyricsOrigin.imported);
+    }
   }
-  if (!track.uri.startsWith('content://')) {
+  final isRemoteStream =
+      track.uri.startsWith('http://') || track.uri.startsWith('https://');
+  if (!track.uri.startsWith('content://') && !isRemoteStream) {
     final path = track.uri;
     final found = await Isolate.run(() => readLyricsFromFiles(path));
     for (final (text, origin) in [
@@ -70,7 +74,9 @@ Future<LoadedLyrics?> loadLyrics(
     if (fetched != null) {
       final lyrics = parseLyrics(fetched);
       if (lyrics != null) {
-        await repository.setImportedLyrics(track.id, fetched);
+        if (track.id > 0) {
+          await repository.setImportedLyrics(track.id, fetched);
+        }
         return LoadedLyrics(lyrics, LyricsOrigin.imported);
       }
     }
@@ -117,13 +123,16 @@ final lyricsProvider = FutureProvider.family<LoadedLyrics?, LyricsKey>((
   key,
 ) async {
   final repository = ref.watch(libraryRepositoryProvider);
+  final extChannel = ref.watch(extensionChannelProvider);
   final hasExt = ref.watch(
     extensionControllerProvider.select(
       (state) => state.hasActiveLyrics || state.hasActiveSearchOrDownload,
     ),
   );
-  final channel = hasExt ? ref.watch(extensionChannelProvider) : null;
-  final track = await repository.trackById(key.trackId);
+  final channel = (hasExt || extChannel.isSupported) ? extChannel : null;
+  final track = key.trackId > 0
+      ? await repository.trackById(key.trackId)
+      : ref.watch(currentTrackProvider).value;
   return track == null
       ? null
       : loadLyrics(track, repository, extensionChannel: channel);

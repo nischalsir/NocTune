@@ -9,6 +9,49 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 1.16.0 (build 25) - 2026-11-24
+
+Published at the owner's request. The automated checks pass, with and
+without Impeller. Both the universal APK and the arm64-v8a APK share build
+version code 2025 so either one can be installed over earlier arm64-v8a or
+universal releases without a version-code downgrade error.
+
+### Added
+
+- Separate, distinct **Play** and **Download** buttons on every online/extension
+  search result, album track row, and artist track row so tapping Play
+  immediately streams the track while tapping Download opens the Mornye-style
+  extension & format/quality mode picker (`Deezer`, `Tidal`, `Qobuz`,
+  `JioSaavn`, `YouTube Music`, `SoundCloud`, `Amazon Music`, `Beatport` with
+  `FLAC`, `Hi-Res FLAC`, `24-Bit Max`, `AAC 320 kbps`, `M4A`, `Opus`) without
+  switching providers in the middle.
+- Bundled all Mornye `.sflx` extensions directly in app assets and auto-unpacked
+  them on startup so all Mornye download & metadata providers are available
+  out-of-the-box on Android 13+.
+- Upgraded the Home screen discovery engine with **LastWave-Native** logic and
+  providers: dynamic YouTube Music mood/activity filter chips (*Relax*,
+  *Energize*, *Workout*, *Focus*, *Commute*), provider switcher pills, and four
+  personalized shelves (**Discover for you**, **Because you listen to …**,
+  **Fresh finds**, and **Trending online**) powered by `/youtubei/v1/next`
+  watch-next radio graph and local listening affinity.
+- Full online play queue support so the **Next** and **Previous** buttons (in
+  the mini-player, full-screen player, queue sheet, and system media controls)
+  advance seamlessly across online search results, album tracks, artist top
+  songs, and Home suggestions via lazy on-demand stream resolution, with online
+  audio format badges, seek bar scrubbing, and a direct download button on Now
+  Playing.
+
+### Fixed
+
+- Fixed online playback on Android 9+ by enabling loopback cleartext HTTP for
+  `LocalYtStreamProxy` (`127.0.0.1`), porting LastWave-Native's per-client
+  InnerTube player keys, consent cookies, visitorData bootstrap, and 1 MiB auth
+  boundary stream probing.
+- Added public lossless FLAC mirror fallbacks for Deezer (`/dl/dzr`), Tidal
+  (`/dl/tid`), and Qobuz (`/dl/qbz`) signed session downloads so lossless FLAC
+  downloads succeed even when `api.zarz.moe/v2` requires interactive Turnstile
+  verification.
+
 ## 1.15.0 (build 24) - 2026-11-23
 
 Published at the owner's request. The automated checks pass, with and

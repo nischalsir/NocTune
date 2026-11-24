@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
-import '../../core/widgets/pressable.dart';
 import 'extension_controller.dart';
 import 'extension_models.dart';
 
@@ -15,9 +14,31 @@ typedef ExtensionDownloadSelection = ({
   String qualityLabel,
 });
 
-/// Opens a Mornye-style modal bottom sheet to choose which download service /
-/// extension and audio format / quality (`FLAC`, `Hi-Res FLAC`, `AAC 320 kbps`,
-/// `M4A`, `MP3`, etc.) to use before downloading [track] or an album.
+const _kBuiltInYouTubeDownloader = InstalledExtension(
+  id: 'ytmusic',
+  name: 'ytmusic',
+  displayName: 'YouTube Music',
+  version: '1.0.0',
+  hasMetadataProvider: true,
+  hasDownloadProvider: true,
+  qualityOptions: [
+    ExtensionQualityOption(
+      id: 'm4a',
+      label: 'AAC High Quality (M4A)',
+      description: 'Best available M4A / AAC audio stream',
+    ),
+    ExtensionQualityOption(
+      id: 'opus',
+      label: 'Opus High Bitrate',
+      description: 'High-efficiency WebM / Opus audio stream',
+    ),
+  ],
+);
+
+/// Opens a Mornye-style modal bottom sheet to choose which download extension
+/// (when multiple are enabled) and which audio format / quality mode (`FLAC`,
+/// `Hi-Res FLAC`, `AAC 320 kbps`, `M4A`, `MP3`, etc.) to use before downloading
+/// [track] or an album, without switching providers in the middle.
 Future<ExtensionDownloadSelection?> showExtensionDownloadPicker(
   BuildContext context,
   WidgetRef ref, {
@@ -60,19 +81,45 @@ class _DownloadFormatPickerSheet extends ConsumerStatefulWidget {
 
 class _DownloadFormatPickerSheetState
     extends ConsumerState<_DownloadFormatPickerSheet> {
-  String? _selectedServiceId;
+  String? _selectedProviderId;
 
-  String _resolveSelectedService(List<InstalledExtension> downloaders) {
-    if (downloaders.isEmpty) return '';
-    final current = _selectedServiceId;
-    if (current != null && downloaders.any((e) => e.id == current)) {
-      return current;
+  List<InstalledExtension> _buildAvailableDownloaders(
+    List<InstalledExtension> enabledDownloaders,
+  ) {
+    if (enabledDownloaders.isEmpty) {
+      return const [_kBuiltInYouTubeDownloader];
     }
-    if (widget.recommendedProviderId.isNotEmpty &&
-        downloaders.any((e) => e.id == widget.recommendedProviderId)) {
-      return widget.recommendedProviderId;
+    final hasYtDownloader = enabledDownloaders.any(
+      (ext) => ext.id == 'ytmusic-spotiflac' || ext.id == 'ytmusic',
+    );
+    if (!hasYtDownloader) {
+      return [...enabledDownloaders, _kBuiltInYouTubeDownloader];
     }
-    return downloaders.first.id;
+    return enabledDownloaders;
+  }
+
+  InstalledExtension? _resolveSelectedExtension(
+    List<InstalledExtension> downloaders,
+  ) {
+    if (downloaders.isEmpty) return null;
+    final explicit = _selectedProviderId;
+    if (explicit != null && explicit.isNotEmpty) {
+      for (final ext in downloaders) {
+        if (ext.id == explicit) return ext;
+      }
+    }
+    final rec = widget.recommendedProviderId.trim();
+    if (rec.isNotEmpty) {
+      for (final ext in downloaders) {
+        if (ext.id == rec) return ext;
+      }
+      if (rec == 'ytmusic') {
+        for (final ext in downloaders) {
+          if (ext.id == 'ytmusic-spotiflac') return ext;
+        }
+      }
+    }
+    return downloaders.first;
   }
 
   List<ExtensionQualityOption> _qualitiesFor(InstalledExtension? ext) {
@@ -117,16 +164,22 @@ class _DownloadFormatPickerSheetState
   Widget build(BuildContext context) {
     final palette = context.noc;
     final text = Theme.of(context).textTheme;
-    final downloaders = ref.watch(
+    final enabledDownloaders = ref.watch(
       extensionControllerProvider.select(
         (state) => state.enabledDownloadExtensions,
       ),
     );
-    final selectedId = _resolveSelectedService(downloaders);
-    final selectedExt = downloaders
-        .where((e) => e.id == selectedId)
-        .firstOrNull;
+    final downloaders = _buildAvailableDownloaders(enabledDownloaders);
+    final selectedExt = _resolveSelectedExtension(downloaders);
+    final selectedId = selectedExt?.id ?? '';
     final qualities = _qualitiesFor(selectedExt);
+    final subtitleParts = <String>[
+      if (widget.artist.isNotEmpty) widget.artist,
+      if (selectedExt != null &&
+          selectedExt.displayName.isNotEmpty &&
+          selectedExt.displayName.toLowerCase() != widget.artist.toLowerCase())
+        selectedExt.displayName,
+    ];
 
     return SafeArea(
       child: Padding(
@@ -175,10 +228,10 @@ class _DownloadFormatPickerSheetState
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          if (widget.artist.isNotEmpty) ...[
+                          if (subtitleParts.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
-                              widget.artist,
+                              subtitleParts.join(' · '),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: text.bodySmall?.copyWith(
@@ -194,172 +247,113 @@ class _DownloadFormatPickerSheetState
                 const SizedBox(height: 16),
                 Divider(height: 1, color: palette.glassBorder),
                 const SizedBox(height: 14),
+                if (downloaders.isNotEmpty) ...[
+                  Text(
+                    'Download extension',
+                    style: text.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        for (final ext in downloaders)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              key: ValueKey('picker-provider-${ext.id}'),
+                              label: Text(ext.displayName),
+                              selected: ext.id == selectedId,
+                              onSelected: (_) {
+                                setState(() => _selectedProviderId = ext.id);
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
                 Text(
-                  'Download from',
+                  'Select format & quality',
                   style: text.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
                   ),
                 ),
                 const SizedBox(height: 10),
-                if (downloaders.isEmpty)
-                  Text(
-                    'No download extension is enabled. Enable one in Settings › Extensions.',
-                    style: text.bodySmall?.copyWith(
-                      color: palette.textSecondary,
-                    ),
-                  )
-                else ...[
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                Material(
+                  color: palette.glass,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                    side: BorderSide(color: palette.glassBorder),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  child: Column(
                     children: [
-                      for (final ext in downloaders)
-                        _ServiceChip(
-                          key: ValueKey('picker-service-${ext.id}'),
-                          label: ext.displayName,
-                          recommended: ext.id == widget.recommendedProviderId,
-                          selected: ext.id == selectedId,
-                          onTap: () =>
-                              setState(() => _selectedServiceId = ext.id),
+                      for (final (idx, q) in qualities.indexed) ...[
+                        if (idx > 0)
+                          Divider(
+                            height: 1,
+                            indent: 52,
+                            color: palette.glassBorder,
+                          ),
+                        ListTile(
+                          key: ValueKey('picker-quality-${q.id}'),
+                          leading: Icon(
+                            _qualityIcon(q.id, q.label),
+                            color: palette.accent,
+                          ),
+                          title: Text(
+                            q.label,
+                            style: text.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          subtitle: q.description.isNotEmpty
+                              ? Text(
+                                  q.description,
+                                  style: text.bodySmall?.copyWith(
+                                    color: palette.textSecondary,
+                                  ),
+                                )
+                              : null,
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: ShapeDecoration(
+                              color: palette.accent.withValues(alpha: 0.16),
+                              shape: const StadiumBorder(),
+                            ),
+                            child: Text(
+                              _formatBadge(q.id, q.label),
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: palette.accent,
+                              ),
+                            ),
+                          ),
+                          onTap: () {
+                            Navigator.of(context).pop((
+                              providerId: selectedId,
+                              providerName:
+                                  selectedExt?.displayName ?? selectedId,
+                              qualityId: q.id,
+                              qualityLabel: q.label,
+                            ));
+                          },
                         ),
+                      ],
                     ],
                   ),
-                  const SizedBox(height: 18),
-                  Text(
-                    'Select format & quality',
-                    style: text.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Material(
-                    color: palette.glass,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                      side: BorderSide(color: palette.glassBorder),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Column(
-                      children: [
-                        for (final (idx, q) in qualities.indexed) ...[
-                          if (idx > 0)
-                            Divider(
-                              height: 1,
-                              indent: 52,
-                              color: palette.glassBorder,
-                            ),
-                          ListTile(
-                            key: ValueKey('picker-quality-${q.id}'),
-                            leading: Icon(
-                              _qualityIcon(q.id, q.label),
-                              color: palette.accent,
-                            ),
-                            title: Text(
-                              q.label,
-                              style: text.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            subtitle: q.description.isNotEmpty
-                                ? Text(
-                                    q.description,
-                                    style: text.bodySmall?.copyWith(
-                                      color: palette.textSecondary,
-                                    ),
-                                  )
-                                : null,
-                            trailing: Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 4,
-                              ),
-                              decoration: ShapeDecoration(
-                                color: palette.accent.withValues(alpha: 0.16),
-                                shape: const StadiumBorder(),
-                              ),
-                              child: Text(
-                                _formatBadge(q.id, q.label),
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: palette.accent,
-                                ),
-                              ),
-                            ),
-                            onTap: () {
-                              Navigator.of(context).pop((
-                                providerId: selectedId,
-                                providerName:
-                                    selectedExt?.displayName ?? selectedId,
-                                qualityId: q.id,
-                                qualityLabel: q.label,
-                              ));
-                            },
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ],
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _ServiceChip extends StatelessWidget {
-  const _ServiceChip({
-    super.key,
-    required this.label,
-    required this.selected,
-    required this.recommended,
-    required this.onTap,
-  });
-
-  final String label;
-  final bool selected;
-  final bool recommended;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = context.noc;
-    final fg = selected ? palette.onAccent : palette.textPrimary;
-    return Pressable(
-      semanticLabel: label,
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 160),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: ShapeDecoration(
-          color: selected ? palette.accent : palette.glass,
-          shape: StadiumBorder(
-            side: BorderSide(
-              color: selected ? palette.accent : palette.glassBorder,
-            ),
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              recommended ? Icons.auto_awesome_rounded : Icons.extension_rounded,
-              size: 15,
-              color: fg,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: fg,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
         ),
       ),
     );

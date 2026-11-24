@@ -88,7 +88,7 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
     _syncDrift(widget.wave && playing && !dragging && !reduceMotion);
 
-    final shown = total * fraction;
+    final shown = enabled ? total * fraction : position;
     // Assistive technology moves the position ten seconds at a time.
     final forward = _clamp(position + const Duration(seconds: 10), total);
     final back = _clamp(position - const Duration(seconds: 10), total);

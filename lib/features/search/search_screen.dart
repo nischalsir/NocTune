@@ -38,7 +38,7 @@ enum SearchCategory {
 
 /// Special source selector values alongside individual extension IDs.
 const _kSourceLibraryOnly = '__library__';
-const _kSourceAllExtensions = 'all';
+const _kSourceYtMusicOnline = 'ytmusic';
 
 /// Searches the library and enabled Mornye extensions by Songs, Albums, and
 /// Artists with quick extension switching.
@@ -139,29 +139,37 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     });
   }
 
-  String _resolveActiveSource(List<InstalledExtension> searchExtensions) {
-    if (searchExtensions.isEmpty) return _kSourceLibraryOnly;
+  String _resolveActiveSource(
+    List<InstalledExtension> searchExtensions, {
+    required bool onlineSupported,
+  }) {
     final current = _selectedSourceId;
-    if (current == _kSourceLibraryOnly || current == _kSourceAllExtensions) {
+    if (current == _kSourceLibraryOnly || current == _kSourceYtMusicOnline) {
       return current!;
     }
     if (current != null && searchExtensions.any((e) => e.id == current)) {
       return current;
     }
-    // Default to the primary / highest-priority enabled search extension so
-    // searches query a single fast provider (~250ms) just like Mornye.
-    return searchExtensions.first.id;
+    if (searchExtensions.isNotEmpty) {
+      // Default to the primary / highest-priority enabled search extension so
+      // searches query a single fast provider (~250ms) just like Mornye.
+      return searchExtensions.first.id;
+    }
+    if (onlineSupported) {
+      return _kSourceYtMusicOnline;
+    }
+    return _kSourceLibraryOnly;
   }
 
   String _searchHint(
     String activeSource,
     List<InstalledExtension> searchExtensions,
   ) {
-    if (activeSource == _kSourceLibraryOnly || searchExtensions.isEmpty) {
+    if (activeSource == _kSourceLibraryOnly) {
       return 'Search tracks, artists, albums…';
     }
-    if (activeSource == _kSourceAllExtensions) {
-      return 'Search library & all extensions…';
+    if (activeSource == _kSourceYtMusicOnline) {
+      return 'Search YouTube Music & library…';
     }
     final ext = searchExtensions
         .where((e) => e.id == activeSource)
@@ -180,10 +188,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final palette = context.noc;
     final history = ref.watch(searchHistoryProvider);
     final extState = ref.watch(extensionControllerProvider);
+    final onlineSupported = ref.watch(extensionChannelProvider).isSupported;
     final searchExtensions = extState.enabledSearchExtensions;
-    final activeSource = _resolveActiveSource(searchExtensions);
+    final activeSource = _resolveActiveSource(
+      searchExtensions,
+      onlineSupported: onlineSupported,
+    );
     final queueCount = extState.downloadQueue.length;
     final activeDownloads = extState.activeDownloadCount;
+    final showProviderDropdown =
+        searchExtensions.isNotEmpty || onlineSupported;
 
     return SafeArea(
       bottom: false,
@@ -203,7 +217,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     textInputAction: TextInputAction.search,
                     decoration: InputDecoration(
                       hintText: _searchHint(activeSource, searchExtensions),
-                      prefixIcon: searchExtensions.isEmpty
+                      prefixIcon: !showProviderDropdown
                           ? const Icon(Icons.search_rounded)
                           : _SearchProviderDropdownButton(
                               activeSource: activeSource,
@@ -286,7 +300,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     category: _category,
                     activeSource: activeSource,
                     hasExtensions:
-                        searchExtensions.isNotEmpty &&
+                        (searchExtensions.isNotEmpty || onlineSupported) &&
                         activeSource != _kSourceLibraryOnly,
                     onPlayed: _remember,
                   )
@@ -324,9 +338,6 @@ class _SearchProviderDropdownButton extends StatelessWidget {
   IconData _activeIcon() {
     if (activeSource == _kSourceLibraryOnly) {
       return Icons.library_music_rounded;
-    }
-    if (activeSource == _kSourceAllExtensions) {
-      return Icons.public_rounded;
     }
     return Icons.search_rounded;
   }
@@ -388,35 +399,34 @@ class _SearchProviderDropdownButton extends StatelessWidget {
                 ],
               ),
             ),
-          if (searchExtensions.length > 1)
-            PopupMenuItem<String>(
-              key: const ValueKey('search-source-all'),
-              value: _kSourceAllExtensions,
-              child: Row(
-                children: [
-                  Icon(
-                    Icons.public_rounded,
-                    size: 18,
-                    color: activeSource == _kSourceAllExtensions
-                        ? palette.accent
-                        : palette.textSecondary,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      'All extensions',
-                      style: TextStyle(
-                        fontWeight: activeSource == _kSourceAllExtensions
-                            ? FontWeight.w700
-                            : FontWeight.w400,
-                      ),
+          PopupMenuItem<String>(
+            key: const ValueKey('search-source-ytmusic-online'),
+            value: _kSourceYtMusicOnline,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.play_circle_outline_rounded,
+                  size: 18,
+                  color: activeSource == _kSourceYtMusicOnline
+                      ? palette.accent
+                      : palette.textSecondary,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'YouTube Music (Online)',
+                    style: TextStyle(
+                      fontWeight: activeSource == _kSourceYtMusicOnline
+                          ? FontWeight.w700
+                          : FontWeight.w400,
                     ),
                   ),
-                  if (activeSource == _kSourceAllExtensions)
-                    Icon(Icons.check_rounded, size: 18, color: palette.accent),
-                ],
-              ),
+                ),
+                if (activeSource == _kSourceYtMusicOnline)
+                  Icon(Icons.check_rounded, size: 18, color: palette.accent),
+              ],
             ),
+          ),
           PopupMenuItem<String>(
             key: const ValueKey('search-source-library'),
             value: _kSourceLibraryOnly,
@@ -519,8 +529,7 @@ class _SearchPillChip extends StatelessWidget {
     required this.selected,
     required this.onTap,
     this.icon,
-    this.compact = false,
-  });
+  }) : compact = false;
 
   final String label;
   final IconData? icon;
@@ -604,9 +613,7 @@ class _Results extends ConsumerWidget {
             extensionFilteredSearchProvider((
               query: extQuery,
               filter: category.filterId,
-              providerId: activeSource == _kSourceAllExtensions
-                  ? 'all'
-                  : activeSource,
+              providerId: activeSource,
             )),
           )
         : const AsyncValue<List<ExtensionTrackResult>>.data([]);
@@ -777,6 +784,7 @@ class _Results extends ConsumerWidget {
             for (final extTrack in extSongs)
               _ExtensionResultTile(
                 result: extTrack,
+                queue: extSongs,
                 libraryTracks: rawLocalTracks,
                 onPlayed: onPlayed,
               ),
@@ -925,9 +933,11 @@ class _ExtensionResultTile extends ConsumerWidget {
     required this.result,
     required this.libraryTracks,
     required this.onPlayed,
+    this.queue = const [],
   });
 
   final ExtensionTrackResult result;
+  final List<ExtensionTrackResult> queue;
   final List<Track> libraryTracks;
   final VoidCallback onPlayed;
 
@@ -968,10 +978,15 @@ class _ExtensionResultTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final palette = context.noc;
     final extState = ref.watch(extensionControllerProvider);
     final isDownloading = extState.downloadingKeys.contains(result.uniqueKey);
     final savedPath = extState.downloadedPaths[result.uniqueKey];
     final allLibrary = ref.watch(allTracksProvider).value ?? libraryTracks;
+    final currentItem = ref.watch(currentMediaItemProvider).value;
+    final playing = ref.watch(
+      playbackStateProvider.select((state) => state.value?.playing ?? false),
+    );
     final localMatch = allLibrary.cast<Track?>().firstWhere(
       (t) =>
           t != null &&
@@ -981,6 +996,16 @@ class _ExtensionResultTile extends ConsumerWidget {
                       result.artist.toLowerCase())),
       orElse: () => null,
     );
+
+    final isCurrent =
+        currentItem != null &&
+        ((localMatch != null && currentItem.id == localMatch.uri) ||
+            (currentItem.title.toLowerCase() == result.title.toLowerCase() &&
+                (currentItem.artist ?? '').toLowerCase() ==
+                    (result.artist.isNotEmpty
+                            ? result.artist
+                            : result.providerName)
+                        .toLowerCase()));
 
     final syntheticTrack = Track(
       id: localMatch?.id ?? 0,
@@ -1000,26 +1025,66 @@ class _ExtensionResultTile extends ConsumerWidget {
       dateModified: DateTime(2026),
     );
 
+    void handlePlayTap() {
+      onPlayed();
+      if (isCurrent) {
+        final handler = ref.read(audioHandlerProvider);
+        if (playing) {
+          handler.pause();
+        } else {
+          handler.play();
+        }
+        return;
+      }
+      playOnlineExtensionTrack(context, ref, result, queue: queue);
+    }
+
     return TrackTile(
       track: syntheticTrack,
-      onTap: () {
-        onPlayed();
-        if (localMatch != null) {
-          ref.read(audioHandlerProvider).playTracks([localMatch]);
-        } else {
-          playOnlineExtensionTrack(context, ref, result);
-        }
-      },
-      action: isDownloading
-          ? const Padding(
+      isCurrent: isCurrent,
+      playing: playing,
+      onTap: handlePlayTap,
+      action: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: ValueKey('play-online-${result.uniqueKey}'),
+            tooltip: isCurrent && playing
+                ? 'Pause ${result.title}'
+                : 'Play ${result.title}',
+            onPressed: handlePlayTap,
+            icon: Container(
+              width: 34,
+              height: 34,
+              decoration: ShapeDecoration(
+                color: isCurrent
+                    ? palette.accent
+                    : palette.glass,
+                shape: CircleBorder(
+                  side: BorderSide(
+                    color: isCurrent ? palette.accent : palette.glassBorder,
+                  ),
+                ),
+              ),
+              child: Icon(
+                isCurrent && playing
+                    ? Icons.pause_rounded
+                    : Icons.play_arrow_rounded,
+                size: 20,
+                color: isCurrent ? palette.onAccent : palette.textPrimary,
+              ),
+            ),
+          ),
+          if (isDownloading)
+            const Padding(
               padding: EdgeInsets.all(12),
               child: SizedBox.square(
                 dimension: 20,
                 child: CircularProgressIndicator(strokeWidth: 2),
               ),
             )
-          : localMatch != null || savedPath != null
-          ? IconButton(
+          else if (localMatch != null || savedPath != null)
+            IconButton(
               tooltip: 'Downloaded',
               onPressed: localMatch == null
                   ? null
@@ -1027,13 +1092,20 @@ class _ExtensionResultTile extends ConsumerWidget {
                       ref.read(audioHandlerProvider).playTracks([localMatch]);
                       onPlayed();
                     },
-              icon: const Icon(Icons.download_done_rounded),
+              icon: Icon(
+                Icons.download_done_rounded,
+                color: palette.accent,
+              ),
             )
-          : IconButton(
+          else
+            IconButton(
+              key: ValueKey('download-ext-${result.uniqueKey}'),
               tooltip: 'Download ${result.title}',
               onPressed: () => _download(context, ref),
               icon: const Icon(Icons.download_rounded),
             ),
+        ],
+      ),
     );
   }
 }
@@ -1221,6 +1293,7 @@ class _ExtensionAlbumScreenState extends ConsumerState<_ExtensionAlbumScreen> {
                   for (final track in tracks)
                     _ExtensionResultTile(
                       result: track,
+                      queue: tracks,
                       libraryTracks: const [],
                       onPlayed: () {},
                     ),
@@ -1344,6 +1417,7 @@ class _ExtensionArtistScreenState
                     for (final track in topTracks)
                       _ExtensionResultTile(
                         result: track,
+                        queue: topTracks,
                         libraryTracks: const [],
                         onPlayed: () {},
                       ),
