@@ -54,3 +54,7 @@ app.*.map.json
 
 # Signed builds prepared for a release
 /build/dist/
+
+# Release APKs kept beside the project, and Gradle caches in vendored packages
+/*.apk
+/packages/*/android/.gradle/

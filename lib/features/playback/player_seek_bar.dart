@@ -166,14 +166,15 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
           color: context.playerInk.withValues(alpha: 0.85),
           fontFeatures: const [FontFeature.tabularFigures()],
         );
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        bar,
-        const SizedBox(height: 2),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
+    // The bar and its times sit 4 px in, level with the player's title.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          bar,
+          const SizedBox(height: 2),
+          Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(formatDuration(shown), style: timeStyle),
@@ -184,8 +185,8 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
               ),
             ],
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
