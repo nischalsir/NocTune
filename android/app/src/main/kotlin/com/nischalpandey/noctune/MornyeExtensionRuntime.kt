@@ -5534,7 +5534,13 @@ class MornyeExtensionRuntime(private val context: Context) {
                 while (!serverSocket.isClosed) {
                     val client = runCatching { serverSocket.accept() }.getOrNull() ?: break
                     searchPool.execute {
-                        handleClient(client)
+                        // The player hangs up mid-stream whenever it skips,
+                        // seeks or stops: that ends this stream, never the app.
+                        try {
+                            handleClient(client)
+                        } catch (_: Exception) {
+                            runCatching { client.close() }
+                        }
                     }
                 }
             }, "noctune-yt-stream-proxy").apply {
@@ -5702,16 +5708,19 @@ class MornyeExtensionRuntime(private val context: Context) {
                         break
                     }
                     var chunkBytesRead = 0L
-                    conn.inputStream.use { upstream ->
-                        while (true) {
-                            val r = upstream.read(buf)
-                            if (r <= 0) break
-                            out.write(buf, 0, r)
-                            cursor += r
-                            chunkBytesRead += r
+                    try {
+                        conn.inputStream.use { upstream ->
+                            while (true) {
+                                val r = upstream.read(buf)
+                                if (r <= 0) break
+                                out.write(buf, 0, r)
+                                cursor += r
+                                chunkBytesRead += r
+                            }
                         }
+                    } finally {
+                        conn.disconnect()
                     }
-                    conn.disconnect()
                     out.flush()
                     if (chunkBytesRead <= 0L || (reqEnd < 0L && chunkBytesRead < (chunkEnd - (cursor - chunkBytesRead) + 1L))) {
                         break
