@@ -249,6 +249,7 @@ class _NowPlayingScreenState extends ConsumerState<NowPlayingScreen> {
                                               () => _lyricsFullscreen =
                                                   !_lyricsFullscreen,
                                             ),
+                                            onClose: () => _setLyrics(false),
                                           ),
                                         ),
                                       )

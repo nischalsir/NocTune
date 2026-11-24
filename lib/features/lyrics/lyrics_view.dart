@@ -71,6 +71,7 @@ class LyricsPanel extends ConsumerStatefulWidget {
     required this.duration,
     required this.isFullscreen,
     required this.onToggleFullscreen,
+    required this.onClose,
   });
 
   final Track track;
@@ -82,6 +83,9 @@ class LyricsPanel extends ConsumerStatefulWidget {
   /// are hidden then.
   final bool isFullscreen;
   final VoidCallback onToggleFullscreen;
+
+  /// Goes back to the player, from the button within thumb's reach.
+  final VoidCallback onClose;
 
   @override
   ConsumerState<LyricsPanel> createState() => _LyricsPanelState();
@@ -167,8 +171,20 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
                   ),
                   const SizedBox(height: 6),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
                     children: [
+                      // The same button that opened the lyrics, lit, closes
+                      // them again.
+                      PlayerGlassButton(
+                        icon: Icons.format_quote,
+                        label: 'Close lyrics',
+                        pressedScale: 0.82,
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.28),
+                        foreground: Theme.of(context).colorScheme.primary,
+                        onTap: widget.onClose,
+                      ),
+                      const Spacer(),
                       PlayerGlassButton(
                         icon: Icons.format_size,
                         label: 'Adjust lyrics text size',

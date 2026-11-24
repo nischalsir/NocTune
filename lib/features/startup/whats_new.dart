@@ -5,5 +5,6 @@ const kWhatsNew = <String>[
       'morphs, buttons spring when pressed, and the queue moves with you',
   'Checks for a new version every time the app opens, and from '
       'Settings › Check for updates',
+  'Close the lyrics from a button at the bottom, no need to reach the top',
   'Settings rows and Home chips line up properly',
 ];

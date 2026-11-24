@@ -466,6 +466,20 @@ void main() {
       expect(find.byTooltip('Play'), findsOneWidget);
     });
 
+    testWidgets('close from the button at the bottom', (tester) async {
+      await open(tester, _syncedLyrics);
+
+      // Within thumb's reach: below the lyrics, above the transport.
+      expect(
+        tester.getCenter(find.byTooltip('Close lyrics')).dy,
+        greaterThan(tester.getCenter(find.text('Second line')).dy),
+      );
+      await tester.tap(find.byTooltip('Close lyrics'));
+      await tester.pumpAndSettle();
+      expect(find.text('Second line'), findsNothing);
+      expect(find.text('NOW PLAYING'), findsOneWidget);
+    });
+
     testWidgets('light up the line at the playback position, word by word', (
       tester,
     ) async {

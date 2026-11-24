@@ -26,6 +26,9 @@ checked in rendered test frames, not yet on a device. Built by the owner.
 - The app now asks GitHub for a newer release every time it opens (it used
   to reuse an answer for up to 12 hours), falling back to the last answer
   when offline. Settings › About › Check for updates asks on demand.
+- A close-lyrics button at the bottom left of the lyrics view, within thumb
+  reach (the lyrics button, lit), so you no longer have to reach for the back
+  arrow at the top. It stays in fullscreen lyrics too.
 
 ### Fixed
 
