@@ -16,6 +16,7 @@ import '../library/scan/scan_banner.dart';
 import '../library/track_list_view.dart';
 import '../library/track_menu.dart';
 import '../playback/now_playing_screen.dart';
+import '../playback/playback_mapping.dart';
 import 'home_feed.dart';
 import 'home_hero.dart';
 import 'home_rows.dart';
@@ -195,6 +196,19 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
 
     // Shown while there is no track to feature: an empty or loading library.
     final header = _Header(onOpenSearch: widget.onOpenSearch);
+    final mediaItem = ref.watch(currentMediaItemProvider).value;
+    final playing = ref.watch(currentTrackProvider).value;
+    final current =
+        (currentId != null && playing != null && playing.id == currentId)
+        ? playing
+        : (currentId == null && mediaItem != null)
+        ? (playing != null && playing.id == 0 && playing.uri == mediaItem.id
+              ? playing
+              : mediaItemToTrack(mediaItem))
+        : null;
+    final isPlaying = ref.watch(
+      playbackStateProvider.select((state) => state.value?.playing ?? false),
+    );
 
     final summary = stats.value;
     if (stats.isLoading && summary == null) {
@@ -208,7 +222,17 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
     if (summary == null || summary.trackCount == 0) {
       return Column(
         children: [
-          header,
+          if (current != null)
+            HomeHero(
+              track: current,
+              isCurrent: true,
+              eyebrow: isPlaying ? 'NOW PLAYING' : 'PAUSED',
+              search: _searchField(onHero: true),
+              onPlay: () =>
+                  ref.read(audioHandlerProvider).playTracks([current]),
+            )
+          else
+            header,
           const ScanBanner(),
           const HomeOnlineSuggestionsSection(),
           Expanded(
@@ -262,16 +286,11 @@ class HomeScreenState extends ConsumerState<HomeScreen> {
 
     // The hero features what is in the player; failing that, the last thing
     // played; failing that, the newest arrival.
-    final playing = ref.watch(currentTrackProvider).value;
-    final current = playing != null && playing.id == currentId ? playing : null;
     final lastPlayed = ref.watch(recentlyPlayedProvider).value?.firstOrNull;
     final featured =
         current ??
         lastPlayed ??
         ref.watch(recentlyAddedProvider).value?.firstOrNull;
-    final isPlaying = ref.watch(
-      playbackStateProvider.select((state) => state.value?.playing ?? false),
-    );
     final albums = ref.watch(recentAlbumsProvider).value ?? const [];
     final mix = ref.watch(tasteMixProvider).value ?? const <Track>[];
     final favourites = (ref.watch(favoritesProvider).value ?? const <Track>[])

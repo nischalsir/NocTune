@@ -56,21 +56,34 @@ class HomeHero extends StatelessWidget {
     final artPath = track.artPath;
 
     Widget? art;
-    if (artPath != null) {
-      art = Image.file(
-        File(artPath),
-        fit: BoxFit.cover,
-        alignment: Alignment.topCenter,
-        // Decoded at display size, not the cover's full resolution.
-        cacheWidth:
-            (size.width *
-                    (wide ? 0.62 : 1) *
-                    MediaQuery.devicePixelRatioOf(context))
-                .round(),
-        gaplessPlayback: true,
-        excludeFromSemantics: true,
-        errorBuilder: (_, _, _) => const SizedBox.shrink(),
-      );
+    if (artPath != null && artPath.isNotEmpty) {
+      final decodeWidth =
+          (size.width *
+                  (wide ? 0.62 : 1) *
+                  MediaQuery.devicePixelRatioOf(context))
+              .round();
+      if (artPath.startsWith('http://') || artPath.startsWith('https://')) {
+        art = Image.network(
+          artPath,
+          fit: BoxFit.cover,
+          alignment: Alignment.topCenter,
+          cacheWidth: decodeWidth,
+          gaplessPlayback: true,
+          excludeFromSemantics: true,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        );
+      } else {
+        art = Image.file(
+          File(artPath),
+          fit: BoxFit.cover,
+          alignment: Alignment.topCenter,
+          // Decoded at display size, not the cover's full resolution.
+          cacheWidth: decodeWidth,
+          gaplessPlayback: true,
+          excludeFromSemantics: true,
+          errorBuilder: (_, _, _) => const SizedBox.shrink(),
+        );
+      }
     }
 
     // The hero is dark in both themes, so the glass on it is the dark

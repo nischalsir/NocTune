@@ -189,8 +189,8 @@ final currentTrackIdProvider = Provider<int?>(
 /// for online streaming tracks (`id == 0`).
 final currentTrackProvider = FutureProvider<Track?>((ref) async {
   final id = ref.watch(currentTrackIdProvider);
+  final item = ref.watch(currentMediaItemProvider).value;
   if (id == null || id == 0) {
-    final item = ref.watch(currentMediaItemProvider).value;
     if (item != null) return mediaItemToTrack(item);
     return null;
   }
