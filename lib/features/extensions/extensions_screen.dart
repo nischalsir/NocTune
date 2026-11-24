@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/cupertino.dart' show CupertinoSwitch;
 import 'package:flutter/material.dart';
@@ -10,6 +12,7 @@ import '../../core/widgets/pill_button.dart';
 import 'extension_controller.dart';
 import 'extension_downloads_screen.dart';
 import 'extension_models.dart';
+import 'extension_provider_icon.dart';
 
 /// Manages Mornye / SpotiFLAC extension packages (`.spotiflac-ext`, `.sflx`,
 /// `.mornye-ext`) on the device, using the same cards and switches as Settings
@@ -22,11 +25,57 @@ class ExtensionsScreen extends ConsumerStatefulWidget {
 }
 
 class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      unawaited(
+        ref.read(extensionControllerProvider.notifier).checkForUpdates(),
+      );
+    });
+  }
+
   void _say(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  Future<void> _checkAndUpdateAllExtensions() async {
+    try {
+      final count = await ref
+          .read(extensionControllerProvider.notifier)
+          .checkForUpdates();
+      if (!mounted) return;
+      if (count > 0) {
+        _say('Updating $count extension${count == 1 ? '' : 's'} from Mornye…');
+        await ref
+            .read(extensionControllerProvider.notifier)
+            .updateFromRegistry();
+        _say('All Mornye extensions updated to latest versions.');
+      } else {
+        await ref
+            .read(extensionControllerProvider.notifier)
+            .updateFromRegistry();
+        _say('All Mornye extensions are up to date.');
+      }
+    } on Exception catch (e) {
+      _say('Could not update extensions: $e');
+    }
+  }
+
+  Future<void> _updateSingleExtension(InstalledExtension ext) async {
+    try {
+      _say('Updating ${ext.displayName} from Mornye…');
+      await ref
+          .read(extensionControllerProvider.notifier)
+          .updateFromRegistry(id: ext.id);
+      _say('Updated ${ext.displayName}.');
+    } on Exception catch (e) {
+      _say('Could not update ${ext.displayName}: $e');
+    }
   }
 
   Future<void> _pickAndInstallFile() async {
@@ -68,10 +117,7 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
             filled: true,
             onTap: () => Navigator.of(context).pop(urlController.text.trim()),
           ),
-          PillButton(
-            label: 'Cancel',
-            onTap: () => Navigator.of(context).pop(),
-          ),
+          PillButton(label: 'Cancel', onTap: () => Navigator.of(context).pop()),
         ],
         children: [
           Text(
@@ -84,9 +130,7 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
             controller: urlController,
             autofocus: true,
             keyboardType: TextInputType.url,
-            decoration: const InputDecoration(
-              hintText: 'https://…',
-            ),
+            decoration: const InputDecoration(hintText: 'https://…'),
           ),
         ],
       ),
@@ -155,6 +199,15 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
                   },
                 ),
               PillButton(
+                label: ext.hasUpdate
+                    ? 'Update to v${ext.latestVersion}'
+                    : 'Update from Mornye',
+                onTap: () async {
+                  Navigator.of(context).pop();
+                  await _updateSingleExtension(ext);
+                },
+              ),
+              PillButton(
                 label: 'Remove extension',
                 destructive: true,
                 onTap: () async {
@@ -181,9 +234,8 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
                 const SizedBox(height: 8),
                 Text(
                   ext.errorMessage!,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: Theme.of(context).colorScheme.error,
-                  ),
+                  style: Theme.of(context).textTheme.bodySmall
+                      ?.copyWith(color: Theme.of(context).colorScheme.error),
                 ),
               ],
               if (ext.qualityOptions.isNotEmpty) ...[
@@ -224,7 +276,10 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(s.label, style: Theme.of(context).textTheme.titleSmall),
+                      Text(
+                        s.label,
+                        style: Theme.of(context).textTheme.titleSmall,
+                      ),
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 8,
@@ -303,6 +358,37 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
                   ),
                   Divider(height: 1, indent: 56, color: palette.glassBorder),
                   ListTile(
+                    leading: const Icon(Icons.system_update_alt_rounded),
+                    title: const Text('Update built-in Mornye extensions'),
+                    subtitle: Text(
+                      state.extensions.any((e) => e.hasUpdate)
+                          ? '${state.extensions.where((e) => e.hasUpdate).length} extension update(s) available from Mornye registry'
+                          : 'All Mornye extensions pre-installed · tap to check & sync latest',
+                    ),
+                    trailing: state.extensions.any((e) => e.hasUpdate)
+                        ? Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: ShapeDecoration(
+                              color: palette.accent.withValues(alpha: 0.18),
+                              shape: const StadiumBorder(),
+                            ),
+                            child: Text(
+                              'Update all',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: palette.accent,
+                              ),
+                            ),
+                          )
+                        : const Icon(Icons.refresh_rounded),
+                    onTap: state.loading ? null : _checkAndUpdateAllExtensions,
+                  ),
+                  Divider(height: 1, indent: 56, color: palette.glassBorder),
+                  ListTile(
                     leading: const Icon(Icons.folder_open_rounded),
                     title: const Text('Install extension from file'),
                     subtitle: const Text(
@@ -354,8 +440,51 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
                           color: palette.glassBorder,
                         ),
                       ListTile(
-                        leading: const Icon(Icons.extension_rounded),
-                        title: Text(ext.displayName),
+                        leading: ExtensionProviderIcon(
+                          extensionId: ext.id,
+                          iconPath: ext.iconPath,
+                          size: 40,
+                        ),
+                        title: Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                ext.displayName,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            if (ext.hasUpdate) ...[
+                              const SizedBox(width: 8),
+                              InkWell(
+                                borderRadius: BorderRadius.circular(999),
+                                onTap: state.loading
+                                    ? null
+                                    : () => _updateSingleExtension(ext),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: ShapeDecoration(
+                                    color: palette.accent.withValues(
+                                      alpha: 0.18,
+                                    ),
+                                    shape: const StadiumBorder(),
+                                  ),
+                                  child: Text(
+                                    'Update',
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: palette.accent,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
                         subtitle: Text(
                           ext.description.isNotEmpty
                               ? '${ext.capabilitySummary}\n${ext.description}'
@@ -366,9 +495,9 @@ class _ExtensionsScreenState extends ConsumerState<ExtensionsScreen> {
                             _openExtensionOptions(ext, state.extensions),
                         trailing: CupertinoSwitch(
                           value: ext.enabled,
-                          activeTrackColor: Theme.of(
-                            context,
-                          ).colorScheme.primary,
+                          activeTrackColor: Theme.of(context)
+                              .colorScheme
+                              .primary,
                           onChanged: (value) =>
                               controller.setEnabled(ext.id, value),
                         ),

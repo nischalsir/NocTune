@@ -16,6 +16,7 @@ import '../extensions/download_format_picker.dart';
 import '../extensions/extension_controller.dart';
 import '../extensions/extension_downloads_screen.dart';
 import '../extensions/extension_models.dart';
+import '../extensions/extension_provider_icon.dart';
 import '../home/taste_artists_shelf.dart';
 import '../library/collection_screen.dart';
 import '../library/track_menu.dart';
@@ -39,6 +40,34 @@ enum SearchCategory {
 /// Special source selector values alongside individual extension IDs.
 const _kSourceLibraryOnly = '__library__';
 const _kSourceYtMusicOnline = 'ytmusic';
+
+/// Persistent SharedPreferences key storing the user's last selected search provider.
+const kSelectedSearchProviderPrefKey = 'selected_search_provider_id';
+
+/// Persists and restores the user's selected search engine across app launches
+/// and screen navigation.
+final selectedSearchProviderIdProvider =
+    NotifierProvider<SelectedSearchProviderController, String?>(
+      SelectedSearchProviderController.new,
+    );
+
+class SelectedSearchProviderController extends Notifier<String?> {
+  @override
+  String? build() {
+    final prefs = ref.watch(sharedPreferencesProvider);
+    final saved = prefs.getString(kSelectedSearchProviderPrefKey)?.trim();
+    return (saved != null && saved.isNotEmpty) ? saved : null;
+  }
+
+  Future<void> select(String sourceId) async {
+    final trimmed = sourceId.trim();
+    if (trimmed.isEmpty) return;
+    state = trimmed;
+    await ref
+        .read(sharedPreferencesProvider)
+        .setString(kSelectedSearchProviderPrefKey, trimmed);
+  }
+}
 
 /// Searches the library and enabled Mornye extensions by Songs, Albums, and
 /// Artists with quick extension switching.
@@ -141,14 +170,18 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   String _resolveActiveSource(
     List<InstalledExtension> searchExtensions, {
+    required String? savedSourceId,
     required bool onlineSupported,
   }) {
-    final current = _selectedSourceId;
+    final current = _selectedSourceId ?? savedSourceId;
     if (current == _kSourceLibraryOnly || current == _kSourceYtMusicOnline) {
       return current!;
     }
     if (current != null && searchExtensions.any((e) => e.id == current)) {
       return current;
+    }
+    if (current == 'ytmusic-spotiflac' && onlineSupported) {
+      return _kSourceYtMusicOnline;
     }
     if (searchExtensions.isNotEmpty) {
       // Default to the primary / highest-priority enabled search extension so
@@ -189,9 +222,11 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     final history = ref.watch(searchHistoryProvider);
     final extState = ref.watch(extensionControllerProvider);
     final onlineSupported = ref.watch(extensionChannelProvider).isSupported;
+    final savedSourceId = ref.watch(selectedSearchProviderIdProvider);
     final searchExtensions = extState.enabledSearchExtensions;
     final activeSource = _resolveActiveSource(
       searchExtensions,
+      savedSourceId: savedSourceId,
       onlineSupported: onlineSupported,
     );
     final queueCount = extState.downloadQueue.length;
@@ -224,6 +259,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                               searchExtensions: searchExtensions,
                               onSelected: (sourceId) {
                                 setState(() => _selectedSourceId = sourceId);
+                                unawaited(
+                                  ref
+                                      .read(
+                                        selectedSearchProviderIdProvider
+                                            .notifier,
+                                      )
+                                      .select(sourceId),
+                                );
                                 _flushExtQuery();
                               },
                             ),
@@ -335,16 +378,30 @@ class _SearchProviderDropdownButton extends StatelessWidget {
   final List<InstalledExtension> searchExtensions;
   final ValueChanged<String> onSelected;
 
-  IconData _activeIcon() {
+  Widget _buildActiveLeading(NocPalette palette) {
     if (activeSource == _kSourceLibraryOnly) {
-      return Icons.library_music_rounded;
+      return Icon(
+        Icons.library_music_rounded,
+        size: 20,
+        color: palette.accent,
+      );
     }
-    return Icons.search_rounded;
+    final activeExt = searchExtensions
+        .where((e) => e.id == activeSource)
+        .firstOrNull;
+    return ExtensionProviderIcon(
+      extensionId: activeExt?.id ?? activeSource,
+      iconPath: activeExt?.iconPath ?? '',
+      size: 22,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     final palette = context.noc;
+    final hasBundledYtMusic = searchExtensions.any(
+      (ext) => ext.id == 'ytmusic-spotiflac' || ext.id == 'ytmusic',
+    );
     return Padding(
       padding: const EdgeInsets.only(left: 6),
       child: PopupMenuButton<String>(
@@ -360,7 +417,7 @@ class _SearchProviderDropdownButton extends StatelessWidget {
         icon: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(_activeIcon(), size: 20, color: palette.accent),
+            _buildActiveLeading(palette),
             const SizedBox(width: 2),
             Icon(
               Icons.arrow_drop_down_rounded,
@@ -376,12 +433,10 @@ class _SearchProviderDropdownButton extends StatelessWidget {
               value: ext.id,
               child: Row(
                 children: [
-                  Icon(
-                    Icons.extension_rounded,
-                    size: 18,
-                    color: activeSource == ext.id
-                        ? palette.accent
-                        : palette.textSecondary,
+                  ExtensionProviderIcon(
+                    extensionId: ext.id,
+                    iconPath: ext.iconPath,
+                    size: 22,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -399,34 +454,32 @@ class _SearchProviderDropdownButton extends StatelessWidget {
                 ],
               ),
             ),
-          PopupMenuItem<String>(
-            key: const ValueKey('search-source-ytmusic-online'),
-            value: _kSourceYtMusicOnline,
-            child: Row(
-              children: [
-                Icon(
-                  Icons.play_circle_outline_rounded,
-                  size: 18,
-                  color: activeSource == _kSourceYtMusicOnline
-                      ? palette.accent
-                      : palette.textSecondary,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'YouTube Music (Online)',
-                    style: TextStyle(
-                      fontWeight: activeSource == _kSourceYtMusicOnline
-                          ? FontWeight.w700
-                          : FontWeight.w400,
+          if (!hasBundledYtMusic || activeSource == _kSourceYtMusicOnline)
+            PopupMenuItem<String>(
+              key: const ValueKey('search-source-ytmusic-online'),
+              value: _kSourceYtMusicOnline,
+              child: Row(
+                children: [
+                  const ExtensionProviderIcon(
+                    extensionId: _kSourceYtMusicOnline,
+                    size: 22,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'YouTube Music (Online)',
+                      style: TextStyle(
+                        fontWeight: activeSource == _kSourceYtMusicOnline
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
                     ),
                   ),
-                ),
-                if (activeSource == _kSourceYtMusicOnline)
-                  Icon(Icons.check_rounded, size: 18, color: palette.accent),
-              ],
+                  if (activeSource == _kSourceYtMusicOnline)
+                    Icon(Icons.check_rounded, size: 18, color: palette.accent),
+                ],
+              ),
             ),
-          ),
           PopupMenuItem<String>(
             key: const ValueKey('search-source-library'),
             value: _kSourceLibraryOnly,
@@ -682,6 +735,13 @@ class _Results extends ConsumerWidget {
         icon: Icons.music_off_outlined,
         title: 'No matches',
         message: 'Nothing in your library matches "$query".',
+      );
+    }
+    if (!hasLocalMatches && extSearch.hasError) {
+      return EmptyState(
+        icon: Icons.error_outline_rounded,
+        title: 'Search unavailable',
+        message: '${extSearch.error}',
       );
     }
     if (!hasLocalMatches && !extSearch.isLoading && !hasExtMatches) {

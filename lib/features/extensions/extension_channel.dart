@@ -99,6 +99,26 @@ class ExtensionChannel {
     return _parseExtensions(raw);
   }
 
+  Future<List<InstalledExtension>> checkUpdates() async {
+    if (!isSupported) return const [];
+    try {
+      final raw = await _channel.invokeListMethod<Object?>('checkUpdates');
+      return _parseExtensions(raw);
+    } on PlatformException {
+      return const [];
+    } on MissingPluginException {
+      return const [];
+    }
+  }
+
+  Future<List<InstalledExtension>> updateFromRegistry({String? id}) async {
+    if (!isSupported) return const [];
+    final raw = await _channel.invokeListMethod<Object?>('updateFromRegistry', {
+      if (id != null && id.isNotEmpty) 'id': id,
+    });
+    return _parseExtensions(raw);
+  }
+
   Future<List<ExtensionTrackResult>> search(
     String query, {
     int limit = 50,
@@ -116,8 +136,7 @@ class ExtensionChannel {
       if (raw == null) return const [];
       return [
         for (final item in raw)
-          if (item is Map<Object?, Object?>)
-            ExtensionTrackResult.fromMap(item),
+          if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
       ];
     } on PlatformException {
       return const [];

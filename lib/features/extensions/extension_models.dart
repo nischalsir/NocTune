@@ -78,6 +78,8 @@ class InstalledExtension {
     required this.name,
     required this.displayName,
     required this.version,
+    this.latestVersion = '',
+    this.iconPath = '',
     this.description = '',
     this.enabled = true,
     this.status = 'loaded',
@@ -100,6 +102,8 @@ class InstalledExtension {
       name: name,
       displayName: (map['displayName'] as String?) ?? name,
       version: (map['version'] as String?) ?? '1.0.0',
+      latestVersion: (map['latestVersion'] as String?) ?? '',
+      iconPath: (map['iconPath'] as String?) ?? '',
       description: (map['description'] as String?) ?? '',
       enabled: (map['enabled'] as bool?) ?? true,
       status: (map['status'] as String?) ?? 'loaded',
@@ -128,6 +132,8 @@ class InstalledExtension {
   final String name;
   final String displayName;
   final String version;
+  final String latestVersion;
+  final String iconPath;
   final String description;
   final bool enabled;
   final String status;
@@ -141,6 +147,31 @@ class InstalledExtension {
   final List<ExtensionSettingField> settings;
   final List<ExtensionQualityOption> qualityOptions;
 
+  bool get hasUpdate =>
+      latestVersion.isNotEmpty &&
+      latestVersion != version &&
+      _compareSemver(latestVersion, version) > 0;
+
+  static int _compareSemver(String a, String b) {
+    final pa = a
+        .replaceFirst(RegExp(r'^v'), '')
+        .split('.')
+        .map((s) => int.tryParse(s) ?? 0)
+        .toList();
+    final pb = b
+        .replaceFirst(RegExp(r'^v'), '')
+        .split('.')
+        .map((s) => int.tryParse(s) ?? 0)
+        .toList();
+    final len = pa.length > pb.length ? pa.length : pb.length;
+    for (var i = 0; i < len; i++) {
+      final va = i < pa.length ? pa[i] : 0;
+      final vb = i < pb.length ? pb[i] : 0;
+      if (va != vb) return va.compareTo(vb);
+    }
+    return 0;
+  }
+
   /// Human-readable summary of what this extension provides.
   String get capabilitySummary {
     final roles = <String>[
@@ -149,7 +180,7 @@ class InstalledExtension {
       if (hasLyricsProvider) 'Lyrics',
       if (hasUrlHandler) 'Links',
     ];
-    final prefix = 'v$version';
+    final prefix = hasUpdate ? 'v$version → v$latestVersion' : 'v$version';
     return roles.isEmpty ? prefix : '$prefix · ${roles.join(' · ')}';
   }
 }
@@ -191,10 +222,8 @@ class ExtensionTrackResult {
     return ExtensionTrackResult(
       id: (map['id'] as String?) ?? '',
       title: (map['title'] as String?) ?? (map['name'] as String?) ?? 'Unknown',
-      artist:
-          (map['artist'] as String?) ?? (map['artists'] as String?) ?? '',
-      album:
-          (map['album'] as String?) ?? (map['album_name'] as String?) ?? '',
+      artist: (map['artist'] as String?) ?? (map['artists'] as String?) ?? '',
+      album: (map['album'] as String?) ?? (map['album_name'] as String?) ?? '',
       duration: Duration(milliseconds: durationMs < 0 ? 0 : durationMs),
       coverUrl: (map['cover_url'] as String?) ?? '',
       isrc: (map['isrc'] as String?) ?? '',

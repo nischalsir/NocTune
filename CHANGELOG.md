@@ -9,6 +9,27 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 2.1.0 (build 27) - 2026-11-24
+
+Published at the owner's request. All 14 Mornye extensions are pre-installed in
+the app out of the box with their service icons and one-tap updates from the
+official Mornye Unified Registry (`registry-unified.json`). Both the universal
+APK (`arm64-v8a`, `armeabi-v7a`, `x86_64`) and the `arm64-v8a` APK share build
+version code `2027` so either APK installs cleanly on all Android phones.
+
+### Added
+
+- All 14 Mornye extensions (`Deezer`, `Tidal`, `Qobuz`, `JioSaavn`,
+  `YouTube Music`, `SoundCloud`, `Amazon Music`, `Beatport`, `Spotify Web`,
+  `Apple Music`, `Bugs Music`, `Melon Music`, `Genie Music`, `Jellyfin`) are
+  now pre-installed out of the box and displayed immediately with their
+  provider icons in **Settings › Extensions** and in the download format
+  picker.
+- Built-in **Mornye Extension Updater** in **Settings › Extensions**: checks
+  the official `Mornye-Extension` unified registry for newer extension versions
+  and lets you update individual extensions or all extensions in place with one
+  tap while preserving your enabled state and settings.
+
 ## 2.0.0 (build 26) - 2026-11-24
 
 Major 2.0.0 release combining app-wide fluid motion, LastWave-Native online

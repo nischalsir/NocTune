@@ -5,6 +5,7 @@ import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import 'extension_controller.dart';
 import 'extension_models.dart';
+import 'extension_provider_icon.dart';
 
 /// User selection from the Mornye-style Download Service & Format/Quality Picker.
 typedef ExtensionDownloadSelection = ({
@@ -164,13 +165,39 @@ class _DownloadFormatPickerSheetState
   Widget build(BuildContext context) {
     final palette = context.noc;
     final text = Theme.of(context).textTheme;
+    final allExtensions = ref.watch(
+      extensionControllerProvider.select((state) => state.extensions),
+    );
     final enabledDownloaders = ref.watch(
       extensionControllerProvider.select(
         (state) => state.enabledDownloadExtensions,
       ),
     );
-    final downloaders = _buildAvailableDownloaders(enabledDownloaders);
-    final selectedExt = _resolveSelectedExtension(downloaders);
+    final rec = widget.recommendedProviderId.trim();
+    final originExt = allExtensions.where((e) => e.id == rec).firstOrNull;
+    final isOriginMetadataOnly =
+        originExt != null && !originExt.hasDownloadProvider;
+    final isOriginDirectDownloader =
+        rec == 'ytmusic' ||
+        (originExt != null && originExt.enabled && originExt.hasDownloadProvider);
+
+    final allAvailableDownloaders = _buildAvailableDownloaders(enabledDownloaders);
+    // When the search provider itself supports downloading, lock the download
+    // strictly to that provider so search and download always use the same
+    // provider without silently switching.
+    final downloaders = isOriginDirectDownloader
+        ? [
+            for (final ext in allAvailableDownloaders)
+              if (ext.id == rec ||
+                  (rec == 'ytmusic' &&
+                      (ext.id == 'ytmusic' || ext.id == 'ytmusic-spotiflac')))
+                ext,
+          ]
+        : allAvailableDownloaders;
+    final effectiveDownloaders = downloaders.isNotEmpty
+        ? downloaders
+        : allAvailableDownloaders;
+    final selectedExt = _resolveSelectedExtension(effectiveDownloaders);
     final selectedId = selectedExt?.id ?? '';
     final qualities = _qualitiesFor(selectedExt);
     final subtitleParts = <String>[
@@ -242,12 +269,51 @@ class _DownloadFormatPickerSheetState
                         ],
                       ),
                     ),
+                    if (selectedExt != null)
+                      ExtensionProviderIcon(
+                        extensionId: selectedExt.id,
+                        iconPath: selectedExt.iconPath,
+                        size: 32,
+                      ),
                   ],
                 ),
                 const SizedBox(height: 16),
                 Divider(height: 1, color: palette.glassBorder),
                 const SizedBox(height: 14),
-                if (downloaders.isNotEmpty) ...[
+                if (isOriginMetadataOnly) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: palette.accent.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: palette.accent.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.info_outline_rounded,
+                          size: 18,
+                          color: palette.accent,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            '${originExt.displayName} only supports search & metadata and cannot download audio directly. Select a download extension below to download with your permission.',
+                            style: text.bodySmall?.copyWith(
+                              color: palette.textPrimary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                ],
+                if (!isOriginDirectDownloader &&
+                    effectiveDownloaders.isNotEmpty) ...[
                   Text(
                     'Download extension',
                     style: text.titleSmall?.copyWith(
@@ -259,11 +325,16 @@ class _DownloadFormatPickerSheetState
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        for (final ext in downloaders)
+                        for (final ext in effectiveDownloaders)
                           Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: ChoiceChip(
                               key: ValueKey('picker-provider-${ext.id}'),
+                              avatar: ExtensionProviderIcon(
+                                extensionId: ext.id,
+                                iconPath: ext.iconPath,
+                                size: 20,
+                              ),
                               label: Text(ext.displayName),
                               selected: ext.id == selectedId,
                               onSelected: (_) {
@@ -278,9 +349,7 @@ class _DownloadFormatPickerSheetState
                 ],
                 Text(
                   'Select format & quality',
-                  style: text.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                 ),
                 const SizedBox(height: 10),
                 Material(

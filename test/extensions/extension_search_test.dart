@@ -122,7 +122,10 @@ class _FakeExtensionChannel extends ExtensionChannel {
     String? providerId,
     String? quality,
   }) async {
-    downloadedTitles.add('${track.title}:${quality ?? 'default'}');
+    final effectiveProvider = providerId ?? track.providerId;
+    downloadedTitles.add(
+      '$effectiveProvider:${track.title}:${quality ?? 'default'}',
+    );
     return '$musicDir/Extensions/${track.title}.flac';
   }
 
@@ -274,7 +277,10 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('picker-quality-LOSSLESS')));
       await tester.pumpAndSettle();
 
-      expect(channel.downloadedTitles, ['Starlight FLAC:LOSSLESS']);
+      expect(
+        channel.downloadedTitles,
+        ['qobuz-ext:Starlight FLAC:LOSSLESS'],
+      );
       expect(
         find.text('Downloaded "Starlight FLAC" to library.'),
         findsOneWidget,
@@ -505,16 +511,124 @@ void main() {
       expect(find.text('Midnight Saavn'), findsOneWidget);
       expect(find.text('Midnight Song'), findsNothing);
 
-      // Tap Download on Midnight Saavn: when multiple download extensions are enabled,
-      // the user can choose which extension to download from and pick its format/quality.
+      // Selected search provider is persisted in SharedPreferences.
+      expect(
+        preferences.getString(kSelectedSearchProviderPrefKey),
+        'jiosaavn',
+      );
+
+      // Tap Download on Midnight Saavn: download strictly uses the selected
+      // search provider (jiosaavn) without silently switching to Deezer or YouTube.
       await tester.tap(find.byTooltip('Download Midnight Saavn'));
       await tester.pumpAndSettle();
-      expect(find.text('Download extension'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('picker-provider-deezer')));
-      await tester.pumpAndSettle();
+      expect(find.text('Download extension'), findsNothing);
       await tester.tap(find.byKey(const ValueKey('picker-quality-LOSSLESS')));
       await tester.pumpAndSettle();
-      expect(channel.downloadedTitles, ['Midnight Saavn:LOSSLESS']);
+      expect(
+        channel.downloadedTitles,
+        ['jiosaavn:Midnight Saavn:LOSSLESS'],
+      );
+
+      // Rebuild a fresh SearchScreen with the same SharedPreferences to simulate
+      // closing and reopening the app: JioSaavn remains selected and active.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(preferences),
+            audioHandlerProvider.overrideWithValue(_FakeHandler()),
+            extensionChannelProvider.overrideWithValue(channel),
+            currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
+            allTracksProvider.overrideWith((ref) => const <Track>[]),
+            searchResultsProvider.overrideWith(
+              (ref, query) => const <Track>[],
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildNocTheme(Brightness.dark, NocAccent.red),
+            home: const Scaffold(body: SearchScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'midnight');
+      await tester.pumpAndSettle();
+      expect(find.text('Midnight Saavn'), findsOneWidget);
+      expect(find.text('Midnight Song'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'Metadata-only search provider communicates direct download limitation before allowing download',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        kSelectedSearchProviderPrefKey: 'spotify-web',
+      });
+      final preferences = await SharedPreferences.getInstance();
+      final channel = _FakeExtensionChannel(
+        initial: const [
+          InstalledExtension(
+            id: 'spotify-web',
+            name: 'spotify-web',
+            displayName: 'Spotify Web',
+            version: '1.2.4',
+            hasMetadataProvider: true,
+            hasDownloadProvider: false,
+            hasCustomSearch: true,
+          ),
+          InstalledExtension(
+            id: 'tidal-web',
+            name: 'tidal-web',
+            displayName: 'TIDAL',
+            version: '1.5.5',
+            hasMetadataProvider: true,
+            hasDownloadProvider: true,
+            hasCustomSearch: true,
+          ),
+        ],
+        searchResults: const [
+          ExtensionTrackResult(
+            id: 'sp-1',
+            title: 'Eclipse Track',
+            artist: 'Aurora',
+            providerId: 'spotify-web',
+            providerName: 'Spotify Web',
+            itemType: 'track',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(preferences),
+            audioHandlerProvider.overrideWithValue(_FakeHandler()),
+            extensionChannelProvider.overrideWithValue(channel),
+            currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
+            allTracksProvider.overrideWith((ref) => const <Track>[]),
+            searchResultsProvider.overrideWith(
+              (ref, query) => const <Track>[],
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildNocTheme(Brightness.dark, NocAccent.red),
+            home: const Scaffold(body: SearchScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'eclipse');
+      await tester.pumpAndSettle();
+      expect(find.text('Eclipse Track'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Download Eclipse Track'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining(
+          'Spotify Web only supports search & metadata and cannot download audio directly.',
+        ),
+        findsOneWidget,
+      );
     },
   );
 }

@@ -82,6 +82,16 @@ class ExtensionChannel(private val context: Context) : MethodChannel.MethodCallH
                         runtime.setPriorityOrder(ids)
                         runtime.listExtensions()
                     }
+                    "checkUpdates" -> {
+                        runtime.checkExtensionUpdates()
+                        runtime.listExtensions()
+                    }
+                    "updateFromRegistry" -> {
+                        val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
+                        val id = args["id"] as? String
+                        runtime.updateExtensionsFromRegistry(id)
+                        runtime.listExtensions()
+                    }
                     "search" -> {
                         val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
                         val query = args["query"] as? String ?: ""

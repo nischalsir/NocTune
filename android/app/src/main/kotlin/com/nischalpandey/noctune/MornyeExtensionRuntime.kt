@@ -106,6 +106,26 @@ class MornyeExtensionRuntime(private val context: Context) {
         @Volatile var compiledScript: org.mozilla.javascript.Script? = null,
     )
 
+    private val latestRegistryVersions = ConcurrentHashMap<String, String>()
+    private val latestRegistryUrls = ConcurrentHashMap<String, String>()
+
+    private val bundledAssetMap = linkedMapOf(
+        "deezer" to "deezer.sflx",
+        "tidal-web" to "tidal-web.sflx",
+        "qobuz-web" to "qobuz-web.sflx",
+        "jiosaavn" to "jiosaavn.sflx",
+        "ytmusic-spotiflac" to "ytmusic-spotiflac.sflx",
+        "soundcloud" to "soundcloud.sflx",
+        "amazon" to "amzn.sflx",
+        "beatport" to "beatport.sflx",
+        "spotify-web" to "spotify-web.sflx",
+        "apple-music" to "apple-music.sflx",
+        "bugs-music" to "bugs-music.sflx",
+        "melon-music" to "melon-music.sflx",
+        "genie-music" to "genie-music.sflx",
+        "jellyfin" to "jellyfin.sflx",
+    )
+
     fun init(musicDirPath: String) {
         if (musicDirPath.isNotBlank()) {
             val dir = File(musicDirPath)
@@ -118,72 +138,192 @@ class MornyeExtensionRuntime(private val context: Context) {
         }
     }
 
-    /**
-     * Unpacks Mornye `.sflx` extensions bundled in `assets/mornye_extensions/`
-     * on first run (or if missing from [installedDir]), ensuring all Mornye
-     * download and metadata providers are available out-of-the-box on Android 13+
-     * where `Download/` non-media files are hidden by scoped storage.
-     */
-    private fun installBundledAssetExtensions() {
-        runCatching {
-            val assetFiles = context.assets.list("mornye_extensions")
-                ?.filter { isExtensionPackageName(it) }
-                ?.sorted()
-                ?: emptyList()
-            if (assetFiles.isEmpty()) return
-            val unpackedSet = statePrefs.getStringSet("bundled_assets_v116", emptySet())?.toMutableSet() ?: mutableSetOf()
-            var changed = false
-            for (assetName in assetFiles) {
-                val marker = "v116:$assetName"
-                if (marker in unpackedSet && installedDir.listFiles()?.isNotEmpty() == true) continue
-                val tmp = File(tempDir, "asset_${System.nanoTime()}_$assetName")
-                try {
-                    context.assets.open("mornye_extensions/$assetName").use { input ->
-                        FileOutputStream(tmp).use { output ->
-                            input.copyTo(output)
-                        }
-                    }
-                    val hadExplicitPref = statePrefs.AllKeysContainsEnabledForAsset(tmp)
-                    val extId = installPackage(tmp)
-                    if (!hadExplicitPref && extId == "jellyfin") {
-                        statePrefs.edit().putBoolean("enabled_$extId", false).apply()
-                    }
-                    unpackedSet.add(marker)
-                    changed = true
-                } catch (_: Throwable) {
-                } finally {
-                    tmp.delete()
+    private fun ensureBundledLoaded() {
+        val needsReload = synchronized(lock) { extensions.size < bundledAssetMap.size }
+        if (needsReload) {
+            installBundledAssetExtensions()
+            synchronized(lock) {
+                if (extensions.size < bundledAssetMap.size) {
+                    reloadInstalledLocked()
                 }
-            }
-            if (changed) {
-                val editor = statePrefs.edit().putStringSet("bundled_assets_v116", unpackedSet)
-                if (statePrefs.getString("priority_order", null).isNullOrBlank()) {
-                    editor.putString(
-                        "priority_order",
-                        "deezer,tidal-web,qobuz-web,jiosaavn,ytmusic-spotiflac,soundcloud,amazon,beatport,spotify-web,apple-music,bugs-music,melon-music,genie-music,utilities,jellyfin",
-                    )
-                }
-                editor.apply()
             }
         }
     }
 
-    private fun android.content.SharedPreferences.AllKeysContainsEnabledForAsset(packageFile: File): Boolean {
+    private fun compareSemver(a: String, b: String): Int {
+        val pa = a.trim().removePrefix("v").removePrefix("V").split('.', '-', '+')
+        val pb = b.trim().removePrefix("v").removePrefix("V").split('.', '-', '+')
+        val len = max(pa.size, pb.size)
+        for (i in 0 until len) {
+            val na = pa.getOrNull(i)?.toIntOrNull() ?: 0
+            val nb = pb.getOrNull(i)?.toIntOrNull() ?: 0
+            if (na != nb) return na.compareTo(nb)
+        }
+        return 0
+    }
+
+    private fun readBundledManifestVersion(assetName: String): String {
         return runCatching {
-            ZipInputStream(FileInputStream(packageFile)).use { zis ->
-                var entry = zis.nextEntry
-                while (entry != null) {
-                    if (entry.name.endsWith("manifest.json")) {
-                        val text = String(zis.readBytes(), StandardCharsets.UTF_8)
-                        val manifest = JSONObject(text)
-                        val extId = manifest.optString("id").ifBlank { manifest.optString("name") }.trim()
-                        return@runCatching contains("enabled_$extId")
+            context.assets.open("mornye_extensions/$assetName").use { rawIn ->
+                ZipInputStream(rawIn).use { zis ->
+                    var entry = zis.nextEntry
+                    while (entry != null) {
+                        val cleanName = entry.name.replace('\\', '/').trimStart('/')
+                        if (cleanName == "manifest.json" || cleanName.endsWith("/manifest.json")) {
+                            val jsonText = zis.readBytes().toString(StandardCharsets.UTF_8)
+                            val ver = JSONObject(jsonText).optString("version").trim()
+                            if (ver.isNotEmpty()) return@runCatching ver
+                        }
+                        zis.closeEntry()
+                        entry = zis.nextEntry
                     }
-                    entry = zis.nextEntry
+                    ""
                 }
             }
-            false
-        }.getOrDefault(false)
+        }.getOrDefault("")
+    }
+
+    /**
+     * Unpacks all 14 Mornye JavaScript `.sflx` extensions bundled in
+     * `assets/mornye_extensions/` directly into [installedDir] whenever a
+     * bundled extension directory is missing or when a newer version is bundled
+     * in an app update, while NEVER overwriting a newer version that the user
+     * updated from the Mornye registry.
+     */
+    private fun installBundledAssetExtensions() {
+        runCatching {
+            var anyUnpacked = false
+            for ((extId, assetName) in bundledAssetMap) {
+                val targetDir = File(installedDir, extId)
+                val manifestFile = File(targetDir, "manifest.json")
+                val indexFile = File(targetDir, "index.js")
+                if (manifestFile.isFile && indexFile.isFile) {
+                    val installedVer = runCatching {
+                        JSONObject(manifestFile.readText(StandardCharsets.UTF_8)).optString("version").trim()
+                    }.getOrDefault("")
+                    val bundledVer = readBundledManifestVersion(assetName)
+                    if (installedVer.isNotEmpty() && (bundledVer.isEmpty() || compareSemver(bundledVer, installedVer) <= 0)) {
+                        continue
+                    }
+                }
+                val staging = File(tempDir, "bundle_${System.nanoTime()}_$extId").apply { mkdirs() }
+                try {
+                    context.assets.open("mornye_extensions/$assetName").use { rawIn ->
+                        ZipInputStream(rawIn).use { zis ->
+                            var entry = zis.nextEntry
+                            while (entry != null) {
+                                val cleanName = entry.name.replace('\\', '/').trimStart('/')
+                                if (cleanName.isNotEmpty() && !cleanName.contains("..")) {
+                                    val outFile = File(staging, cleanName)
+                                    if (entry.isDirectory) {
+                                        outFile.mkdirs()
+                                    } else {
+                                        outFile.parentFile?.mkdirs()
+                                        FileOutputStream(outFile).use { fos -> zis.copyTo(fos) }
+                                    }
+                                }
+                                zis.closeEntry()
+                                entry = zis.nextEntry
+                            }
+                        }
+                    }
+                    val rootSource = findExtensionRoot(staging) ?: continue
+                    synchronized(lock) {
+                        if (targetDir.exists()) targetDir.deleteRecursively()
+                        targetDir.mkdirs()
+                        rootSource.copyRecursively(targetDir, overwrite = true)
+                        if (!statePrefs.contains("enabled_$extId")) {
+                            statePrefs.edit().putBoolean("enabled_$extId", extId != "jellyfin").apply()
+                        }
+                    }
+                    anyUnpacked = true
+                } catch (_: Throwable) {
+                } finally {
+                    staging.deleteRecursively()
+                }
+            }
+            if (anyUnpacked && statePrefs.getString("priority_order", null).isNullOrBlank()) {
+                statePrefs.edit().putString(
+                    "priority_order",
+                    bundledAssetMap.keys.joinToString(","),
+                ).apply()
+            }
+        }
+    }
+
+    /**
+     * Checks `https://raw.githubusercontent.com/mornyeapp/Mornye-Extension/main/registry-unified.json`
+     * for newer extension versions and records each extension's latest version
+     * and download URL.
+     */
+    fun checkExtensionUpdates() {
+        ensureBundledLoaded()
+        runCatching {
+            val registryUrl = "https://raw.githubusercontent.com/mornyeapp/Mornye-Extension/main/registry-unified.json"
+            val resp = httpRequestBytes(
+                registryUrl,
+                "GET",
+                null,
+                mapOf("User-Agent" to "NocTune/2.0.0", "Accept" to "application/json"),
+            )
+            if (resp.status !in 200..299) return
+            val obj = JSONObject(String(resp.body, StandardCharsets.UTF_8))
+            val arr = obj.optJSONArray("extensions") ?: return
+            for (i in 0 until arr.length()) {
+                val item = arr.optJSONObject(i) ?: continue
+                val runtime = item.optString("runtime", "javascript").lowercase(Locale.ROOT)
+                if (runtime == "python") continue
+                val id = item.optString("id").ifBlank { item.optString("name") }.trim()
+                val ver = item.optString("version").trim()
+                val dlUrl = item.optString("download_url").trim()
+                if (id.isNotEmpty() && ver.isNotEmpty()) {
+                    latestRegistryVersions[id] = ver
+                }
+                if (id.isNotEmpty() && dlUrl.isNotEmpty()) {
+                    latestRegistryUrls[id] = dlUrl
+                }
+            }
+        }
+    }
+
+    /**
+     * Updates a specific extension ([targetId]) or all extensions from the
+     * official Mornye Unified Registry (`registry-unified.json`), preserving
+     * each extension's enabled state and user settings.
+     */
+    fun updateExtensionsFromRegistry(targetId: String? = null) {
+        checkExtensionUpdates()
+        val idsToUpdate = if (!targetId.isNullOrBlank()) {
+            listOf(targetId.trim())
+        } else {
+            val currentList = synchronized(lock) { extensions.values.toList() }
+            val outdated = currentList.filter { ext ->
+                val latest = latestRegistryVersions[ext.id]
+                !latest.isNullOrBlank() && compareSemver(latest, ext.version) > 0
+            }.map { it.id }
+            if (outdated.isNotEmpty()) outdated else latestRegistryUrls.keys.toList()
+        }
+        for (id in idsToUpdate) {
+            val dlUrl = latestRegistryUrls[id]
+                ?: bundledAssetMap[id]?.let {
+                    "https://raw.githubusercontent.com/mornyeapp/Mornye-Extension/main/extensions/$it"
+                }
+                ?: continue
+            val wasEnabled = synchronized(lock) {
+                extensions[id]?.enabled ?: statePrefs.getBoolean("enabled_$id", id != "jellyfin")
+            }
+            runCatching {
+                val pkgBytes = httpRequestBytes(dlUrl, "GET", null, mapOf("User-Agent" to "NocTune/2.0.0")).body
+                val tmp = File(tempDir, "upd_${System.nanoTime()}_$id.sflx")
+                try {
+                    tmp.writeBytes(pkgBytes)
+                    val installedId = installPackage(tmp)
+                    setEnabled(installedId, wasEnabled)
+                } finally {
+                    tmp.delete()
+                }
+            }
+        }
     }
 
     /**
@@ -536,8 +676,14 @@ class MornyeExtensionRuntime(private val context: Context) {
         }
     }
 
-    fun listExtensions(): List<Map<String, Any?>> = synchronized(lock) {
+    fun listExtensions(): List<Map<String, Any?>> {
+        ensureBundledLoaded()
+        return synchronized(lock) {
         extensions.values.map { ext ->
+            val iconFile = listOf("icon.png", "icon.jpg", "icon.jpeg", "icon.webp")
+                .map { File(ext.dir, it) }
+                .firstOrNull { it.isFile }
+            val latestVer = latestRegistryVersions[ext.id] ?: ""
             val currentSettings = loadExtensionSettingsMap(ext)
             val settingsList = mutableListOf<Map<String, Any?>>()
             for (i in 0 until ext.settingsSchema.length()) {
@@ -595,6 +741,8 @@ class MornyeExtensionRuntime(private val context: Context) {
                 "name" to ext.name,
                 "displayName" to ext.displayName,
                 "version" to ext.version,
+                "latestVersion" to latestVer,
+                "iconPath" to (iconFile?.absolutePath ?: ""),
                 "description" to ext.description,
                 "enabled" to ext.enabled,
                 "status" to ext.status,
@@ -608,6 +756,7 @@ class MornyeExtensionRuntime(private val context: Context) {
                 "settings" to settingsList,
                 "qualityOptions" to qualities,
             )
+        }
         }
     }
 
@@ -667,6 +816,7 @@ class MornyeExtensionRuntime(private val context: Context) {
         filter: String? = null,
         providerId: String? = null,
     ): List<Map<String, Any?>> {
+        ensureBundledLoaded()
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return emptyList()
         if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("spotify:")) {
@@ -686,34 +836,33 @@ class MornyeExtensionRuntime(private val context: Context) {
 
         val requestedProvider = providerId?.trim()?.takeIf { it.isNotEmpty() && it != "all" }
         if (requestedProvider == "ytmusic") {
-            return runCatching { searchYtMusicInnerTube(trimmed, limit, canonicalFilter) }
-                .getOrDefault(emptyList())
+            return searchYtMusicInnerTube(trimmed, limit, canonicalFilter)
+        }
+
+        if (requestedProvider != null) {
+            val targetExt = synchronized(lock) { extensions[requestedProvider] }
+                ?: throw IllegalStateException("Search provider '$requestedProvider' is not installed.")
+            if (!targetExt.enabled) {
+                throw IllegalStateException("${targetExt.displayName} is currently disabled.")
+            }
+            if (!targetExt.hasMetadataProvider && !targetExt.hasCustomSearch) {
+                throw IllegalStateException("${targetExt.displayName} does not support searching.")
+            }
+            return try {
+                invokeExtensionSearch(targetExt, trimmed, limit, canonicalFilter).take(limit)
+            } catch (err: Throwable) {
+                targetExt.errorMessage = err.message
+                throw IllegalStateException("${targetExt.displayName} search failed: ${err.message}", err)
+            }
         }
 
         val active = synchronized(lock) {
-            if (requestedProvider != null) {
-                listOfNotNull(extensions[requestedProvider]?.takeIf { it.enabled })
-            } else {
-                extensions.values.filter { it.enabled && (it.hasMetadataProvider || it.hasCustomSearch) }
-            }
+            extensions.values.filter { it.enabled && (it.hasMetadataProvider || it.hasCustomSearch) }
         }
 
-        // If no search extension is enabled (or requested provider isn't a search extension),
-        // use built-in YouTube Music InnerTube search so online search & playback work
-        // natively like LastWave-Native without requiring extensions.
         if (active.isEmpty()) {
-            if (requestedProvider == null) {
-                return runCatching { searchYtMusicInnerTube(trimmed, limit, canonicalFilter) }
-                    .getOrDefault(emptyList())
-            }
-            val downloader = synchronized(lock) {
-                extensions[requestedProvider]?.takeIf { it.enabled && it.hasDownloadProvider }
-            }
-            if (downloader != null && (canonicalFilter == "all" || canonicalFilter == "tracks")) {
-                return runCatching { searchPublicCatalogForDownloader(trimmed, limit, downloader) }
-                    .getOrDefault(emptyList())
-            }
-            return emptyList()
+            return runCatching { searchYtMusicInnerTube(trimmed, limit, canonicalFilter) }
+                .getOrDefault(emptyList())
         }
 
         val perSourceResults = mutableListOf<List<Map<String, Any?>>>()
@@ -1366,29 +1515,35 @@ class MornyeExtensionRuntime(private val context: Context) {
         preferredProviderId: String? = null,
         preferredQuality: String? = null,
     ): Map<String, Any?> {
+        ensureBundledLoaded()
         val track = enrichTrackIsrcIfNeeded(rawTrack)
         val targetBaseDir = if (!musicDirPath.isNullOrBlank()) File(musicDirPath) else defaultMusicDir
         val outDir = File(targetBaseDir, "Extensions").apply { mkdirs() }
 
         val originId = track["provider_id"]?.toString()?.trim() ?: ""
         val chosenId = preferredProviderId?.trim()?.takeIf { it.isNotEmpty() }
-        val isBuiltInYtDownload = chosenId == "ytmusic" || (
-            chosenId == null && originId == "ytmusic" && synchronized(lock) {
-                extensions.values.none { it.enabled && it.hasDownloadProvider }
+        val targetProviderId = chosenId ?: originId.takeIf { it.isNotEmpty() }
+            ?: throw IllegalStateException("No download provider specified for track.")
+        val isBuiltInYtDownload = targetProviderId == "ytmusic" || (
+            targetProviderId == "ytmusic-spotiflac" && synchronized(lock) {
+                extensions["ytmusic-spotiflac"]?.takeIf { it.enabled && it.hasDownloadProvider } == null
             }
         )
         val ext = if (isBuiltInYtDownload) {
             null
         } else {
             synchronized(lock) {
-                if (chosenId != null) {
-                    extensions[chosenId]?.takeIf { it.enabled && it.hasDownloadProvider }
-                        ?: throw IllegalStateException("Selected download extension '$chosenId' is not enabled.")
-                } else {
-                    extensions[originId]?.takeIf { it.enabled && it.hasDownloadProvider }
-                        ?: (if (originId == "ytmusic") extensions["ytmusic-spotiflac"]?.takeIf { it.enabled && it.hasDownloadProvider } else null)
-                        ?: extensions.values.firstOrNull { it.enabled && it.hasDownloadProvider }
+                val candidate = extensions[targetProviderId]
+                    ?: throw IllegalStateException("Download provider '$targetProviderId' is not installed.")
+                if (!candidate.enabled) {
+                    throw IllegalStateException("${candidate.displayName} is currently disabled.")
                 }
+                if (!candidate.hasDownloadProvider) {
+                    throw IllegalStateException(
+                        "${candidate.displayName} only supports search and metadata and cannot download audio directly."
+                    )
+                }
+                candidate
             }
         }
 
@@ -4765,9 +4920,9 @@ class MornyeExtensionRuntime(private val context: Context) {
     }
 
     /**
-     * Completes a download in the user's selected format (`FLAC` for lossless
-     * selections, `M4A`/`Opus` for lossy selections) when an extension's primary
-     * JS download endpoint is blocked by Turnstile or temporarily unreachable.
+     * Completes a download using ONLY the selected provider's own direct
+     * endpoints when [ext]'s primary JS download handler fails, never switching
+     * or falling back to a different provider.
      */
     private fun downloadFallbackForSelectedExtensionAndQuality(
         ext: LoadedExtension,
@@ -4785,37 +4940,41 @@ class MornyeExtensionRuntime(private val context: Context) {
             qLower.contains("lossless") ||
             qLower.contains("hi_res") ||
             qLower.contains("hi-res") ||
-            (ext.id in setOf("deezer", "tidal-web", "qobuz-web", "amazon", "beatport") && !qLower.contains("high") && !qLower.contains("low") && !qLower.contains("aac") && !qLower.contains("opus"))
+            (!qLower.contains("high") && !qLower.contains("low") && !qLower.contains("aac") && !qLower.contains("opus"))
 
-        if (wantsLossless) {
-            val flacUrl = resolveLosslessFlacUrlFromPublicMirrors(isrc, title, artist)
-            if (!flacUrl.isNullOrEmpty()) {
-                val outFile = File(outDir, "$baseFileName.flac")
-                val dlOk = runCatching {
-                    downloadDirectHttpToFile(flacUrl, outFile, reportProgress)
-                }.getOrDefault(false)
-                if (dlOk && outFile.isFile && outFile.length() > 0) {
-                    return outFile
+        return when (ext.id) {
+            "tidal-web" -> {
+                if (!wantsLossless) return null
+                val flacUrl = resolveLosslessFlacUrlFromPublicMirrors(isrc, title, artist)
+                if (!flacUrl.isNullOrEmpty()) {
+                    val outFile = File(outDir, "$baseFileName.flac")
+                    val dlOk = runCatching {
+                        downloadDirectHttpToFile(flacUrl, outFile, reportProgress)
+                    }.getOrDefault(false)
+                    if (dlOk && outFile.isFile && outFile.length() > 0) outFile else null
+                } else {
+                    null
                 }
             }
-        }
-
-        if (ext.id == "jiosaavn" || !wantsLossless) {
-            val saavnUrl = runCatching { resolveJioSaavnDirectUrl(track) }.getOrNull()
-            if (!saavnUrl.isNullOrEmpty()) {
-                val outFile = File(outDir, "$baseFileName.m4a")
-                val dlOk = runCatching {
-                    downloadDirectHttpToFile(saavnUrl, outFile, reportProgress)
-                }.getOrDefault(false)
-                if (dlOk && outFile.isFile && outFile.length() > 0) {
-                    return outFile
+            "jiosaavn" -> {
+                val saavnUrl = runCatching { resolveJioSaavnDirectUrl(track) }.getOrNull()
+                if (!saavnUrl.isNullOrEmpty()) {
+                    val outFile = File(outDir, "$baseFileName.m4a")
+                    val dlOk = runCatching {
+                        downloadDirectHttpToFile(saavnUrl, outFile, reportProgress)
+                    }.getOrDefault(false)
+                    if (dlOk && outFile.isFile && outFile.length() > 0) outFile else null
+                } else {
+                    null
                 }
             }
+            "ytmusic-spotiflac" -> {
+                runCatching {
+                    downloadYouTubeTrackNative(track, outDir, baseFileName, preferredQuality, reportProgress)
+                }.getOrNull()
+            }
+            else -> null
         }
-
-        return runCatching {
-            downloadYouTubeTrackNative(track, outDir, baseFileName, preferredQuality, reportProgress)
-        }.getOrNull()
     }
 
     private fun downloadDirectHttpToFile(
@@ -4880,6 +5039,7 @@ class MornyeExtensionRuntime(private val context: Context) {
         preferredProviderId: String? = null,
         chipParams: String? = null,
     ): Map<String, Any?> {
+        ensureBundledLoaded()
         val defaultArtists = listOf(
             "The Weeknd",
             "Arijit Singh",
