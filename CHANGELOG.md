@@ -9,6 +9,28 @@ Release channels:
 - **Pre-release**: passes the automated checks, not yet confirmed on a device.
 - **Stable**: also confirmed on a real device.
 
+## 2.1.1 (build 28) - 2026-11-24
+
+Bug-fix update fixing YouTube Music search results using LastWave-Native's
+InnerTube search parser and adding the independent Download Extension Selector
+so you can search with YouTube Music (or any provider) and select any enabled
+download extension (`Deezer`, `Tidal`, `Qobuz`, `JioSaavn`, `YouTube Music`,
+`SoundCloud`, `Amazon Music`, `Beatport`, or custom Mornye extensions) to
+perform the download. Both the universal APK and `arm64-v8a` APK share build
+version code `2028`.
+
+### Fixed & Improved
+
+- Fixed YouTube Music (`ytmusic-spotiflac` / `ytmusic`) search results not
+  displaying by routing YouTube Music search, album, and artist lookups through
+  LastWave-Native's InnerTube search engine with top-result card parsing
+  (`musicCardShelfRenderer`), high-resolution square album artwork
+  (`=w544-h544-l90-rj`), unfiltered + visitor-data retry, and standard YouTube
+  web search fallback.
+- Added the **Download Extension Selector** in the download bottom sheet so
+  search provider and download provider are independently selectable
+  (`Search Provider → Search Results → Select Track → Download Button → Download Extension Selector → Selected Extension → Actual Download`).
+
 ## 2.1.0 (build 27) - 2026-11-24
 
 Published at the owner's request. All 14 Mornye extensions are pre-installed in

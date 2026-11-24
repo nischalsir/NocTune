@@ -517,16 +517,28 @@ void main() {
         'jiosaavn',
       );
 
-      // Tap Download on Midnight Saavn: download strictly uses the selected
-      // search provider (jiosaavn) without silently switching to Deezer or YouTube.
+      // Tap Download on Midnight Saavn: the Download Extension Selector opens
+      // showing all enabled download extensions with their icons and versions,
+      // allowing the user to select Deezer (or any compatible extension) to
+      // handle the actual download independently of the search provider.
       await tester.tap(find.byTooltip('Download Midnight Saavn'));
       await tester.pumpAndSettle();
-      expect(find.text('Download extension'), findsNothing);
+      expect(find.text('Download extension'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('picker-provider-jiosaavn')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('picker-provider-deezer')),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('picker-provider-deezer')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('picker-quality-LOSSLESS')));
       await tester.pumpAndSettle();
       expect(
         channel.downloadedTitles,
-        ['jiosaavn:Midnight Saavn:LOSSLESS'],
+        ['deezer:Midnight Saavn:LOSSLESS'],
       );
 
       // Rebuild a fresh SearchScreen with the same SharedPreferences to simulate
@@ -628,6 +640,141 @@ void main() {
           'Spotify Web only supports search & metadata and cannot download audio directly.',
         ),
         findsOneWidget,
+      );
+      // Unsupported search-only provider (spotify-web) is NOT listed in the
+      // download extension selector chips, while download-capable TIDAL is listed.
+      expect(
+        find.byKey(const ValueKey('picker-provider-spotify-web')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('picker-provider-tidal-web')),
+        findsOneWidget,
+      );
+    },
+  );
+
+  testWidgets(
+    'YouTube Music search displays results and downloads via selected Mornye extension in Download Extension Selector',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        kSelectedSearchProviderPrefKey: 'ytmusic-spotiflac',
+      });
+      final preferences = await SharedPreferences.getInstance();
+      final channel = _FakeExtensionChannel(
+        initial: const [
+          InstalledExtension(
+            id: 'ytmusic-spotiflac',
+            name: 'ytmusic-spotiflac',
+            displayName: 'YouTube Music',
+            version: '2.4.8',
+            hasMetadataProvider: true,
+            hasDownloadProvider: true,
+            hasCustomSearch: true,
+          ),
+          InstalledExtension(
+            id: 'mornye-lossless',
+            name: 'mornye-lossless',
+            displayName: 'Mornye',
+            version: '1.2.0',
+            hasMetadataProvider: true,
+            hasDownloadProvider: true,
+            hasCustomSearch: true,
+          ),
+          InstalledExtension(
+            id: 'deezer',
+            name: 'deezer',
+            displayName: 'Deezer',
+            version: '1.3.12',
+            hasMetadataProvider: true,
+            hasDownloadProvider: true,
+            hasCustomSearch: true,
+          ),
+        ],
+        searchResults: const [
+          ExtensionTrackResult(
+            id: 'dQw4w9WgXcQ',
+            title: 'Blinding Lights',
+            artist: 'The Weeknd',
+            album: 'After Hours',
+            coverUrl: 'https://lh3.googleusercontent.com/sample=w544-h544-l90-rj',
+            duration: Duration(minutes: 3, seconds: 20),
+            providerId: 'ytmusic-spotiflac',
+            providerName: 'YouTube Music',
+            itemType: 'track',
+          ),
+          ExtensionTrackResult(
+            id: 'SaveYourTears',
+            title: 'Save Your Tears',
+            artist: 'The Weeknd',
+            album: 'After Hours',
+            coverUrl: 'https://lh3.googleusercontent.com/sample2=w544-h544-l90-rj',
+            duration: Duration(minutes: 3, seconds: 35),
+            providerId: 'ytmusic-spotiflac',
+            providerName: 'YouTube Music',
+            itemType: 'track',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            sharedPreferencesProvider.overrideWithValue(preferences),
+            audioHandlerProvider.overrideWithValue(_FakeHandler()),
+            extensionChannelProvider.overrideWithValue(channel),
+            currentMediaItemProvider.overrideWith((ref) => Stream.value(null)),
+            allTracksProvider.overrideWith((ref) => const <Track>[]),
+            searchResultsProvider.overrideWith(
+              (ref, query) => const <Track>[],
+            ),
+          ],
+          child: MaterialApp(
+            theme: buildNocTheme(Brightness.dark, NocAccent.red),
+            home: const Scaffold(body: SearchScreen()),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.enterText(find.byType(TextField), 'weeknd');
+      await tester.pumpAndSettle();
+
+      // Both YouTube Music tracks display properly with artist and album metadata.
+      expect(find.text('Blinding Lights'), findsOneWidget);
+      expect(find.text('Save Your Tears'), findsOneWidget);
+      expect(find.textContaining('The Weeknd'), findsWidgets);
+
+      // Press Download on Blinding Lights -> opens Download Extension Selector
+      // showing YouTube Music, Mornye, and Deezer.
+      await tester.tap(find.byTooltip('Download Blinding Lights'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Download extension'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('picker-provider-ytmusic-spotiflac')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('picker-provider-mornye-lossless')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('picker-provider-deezer')),
+        findsOneWidget,
+      );
+
+      // Select Mornye in the Download Extension Selector -> routes download through Mornye!
+      await tester.tap(
+        find.byKey(const ValueKey('picker-provider-mornye-lossless')),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('picker-quality-LOSSLESS')));
+      await tester.pumpAndSettle();
+
+      expect(
+        channel.downloadedTitles,
+        ['mornye-lossless:Blinding Lights:LOSSLESS'],
       );
     },
   );

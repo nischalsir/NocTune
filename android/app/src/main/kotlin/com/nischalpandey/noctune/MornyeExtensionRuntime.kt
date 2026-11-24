@@ -835,8 +835,19 @@ class MornyeExtensionRuntime(private val context: Context) {
         }
 
         val requestedProvider = providerId?.trim()?.takeIf { it.isNotEmpty() && it != "all" }
-        if (requestedProvider == "ytmusic") {
-            return searchYtMusicInnerTube(trimmed, limit, canonicalFilter)
+        if (requestedProvider == "ytmusic" || requestedProvider == "ytmusic-spotiflac") {
+            if (requestedProvider == "ytmusic-spotiflac") {
+                val ytExt = synchronized(lock) { extensions["ytmusic-spotiflac"] }
+                if (ytExt != null && !ytExt.enabled) {
+                    throw IllegalStateException("${ytExt.displayName} is currently disabled.")
+                }
+            }
+            return searchYtMusicInnerTube(
+                query = trimmed,
+                limit = limit,
+                canonicalFilter = canonicalFilter,
+                providerIdLabel = requestedProvider,
+            )
         }
 
         if (requestedProvider != null) {
@@ -1155,8 +1166,8 @@ class MornyeExtensionRuntime(private val context: Context) {
     }
 
     fun getAlbum(providerId: String, albumId: String): Map<String, Any?> {
-        if (providerId == "ytmusic") {
-            return getYtMusicAlbumInnerTube(albumId)
+        if (providerId == "ytmusic" || providerId == "ytmusic-spotiflac") {
+            return getYtMusicAlbumInnerTube(albumId, providerIdLabel = providerId)
         }
         val ext = synchronized(lock) { extensions[providerId] }
             ?: throw IllegalArgumentException("Extension not found: $providerId")
@@ -1182,8 +1193,8 @@ class MornyeExtensionRuntime(private val context: Context) {
     }
 
     fun getArtist(providerId: String, artistId: String): Map<String, Any?> {
-        if (providerId == "ytmusic") {
-            return getYtMusicArtistInnerTube(artistId)
+        if (providerId == "ytmusic" || providerId == "ytmusic-spotiflac") {
+            return getYtMusicArtistInnerTube(artistId, providerIdLabel = providerId)
         }
         val ext = synchronized(lock) { extensions[providerId] }
             ?: throw IllegalArgumentException("Extension not found: $providerId")
@@ -1524,11 +1535,13 @@ class MornyeExtensionRuntime(private val context: Context) {
         val chosenId = preferredProviderId?.trim()?.takeIf { it.isNotEmpty() }
         val targetProviderId = chosenId ?: originId.takeIf { it.isNotEmpty() }
             ?: throw IllegalStateException("No download provider specified for track.")
-        val isBuiltInYtDownload = targetProviderId == "ytmusic" || (
-            targetProviderId == "ytmusic-spotiflac" && synchronized(lock) {
-                extensions["ytmusic-spotiflac"]?.takeIf { it.enabled && it.hasDownloadProvider } == null
+        if (targetProviderId == "ytmusic-spotiflac") {
+            val ytExt = synchronized(lock) { extensions["ytmusic-spotiflac"] }
+            if (ytExt != null && !ytExt.enabled) {
+                throw IllegalStateException("${ytExt.displayName} is currently disabled.")
             }
-        )
+        }
+        val isBuiltInYtDownload = targetProviderId == "ytmusic" || targetProviderId == "ytmusic-spotiflac"
         val ext = if (isBuiltInYtDownload) {
             null
         } else {
@@ -1548,7 +1561,7 @@ class MornyeExtensionRuntime(private val context: Context) {
         }
 
         val providerDisplayName = ext?.displayName ?: "YouTube Music"
-        val providerIdLabel = ext?.id ?: "ytmusic"
+        val providerIdLabel = ext?.id ?: targetProviderId
         val title = (track["title"] ?: track["name"] ?: "Track").toString().trim()
         val artist = (track["artist"] ?: track["artists"] ?: "").toString().trim()
         val baseFileName = sanitizeFilename(
@@ -1610,7 +1623,7 @@ class MornyeExtensionRuntime(private val context: Context) {
             return mapOf(
                 "success" to true,
                 "filePath" to finalFile.absolutePath,
-                "providerId" to "ytmusic",
+                "providerId" to providerIdLabel,
                 "providerName" to "YouTube Music",
             )
         }
@@ -1671,6 +1684,21 @@ class MornyeExtensionRuntime(private val context: Context) {
                         }
                     }
 
+                    val matchTitle = title
+                        .replace(
+                            Regex(
+                                "\\s*[(\\[]\\s*(?:official\\s*(?:music\\s*)?(?:video|audio|lyric\\s*video|visualizer)|lyric(?:s|\\s*video)?|audio|hd|4k|hq|visualizer)\\s*[)\\]]",
+                                RegexOption.IGNORE_CASE,
+                            ),
+                            "",
+                        )
+                        .trim()
+                        .ifBlank { title }
+                    val matchArtist = artist
+                        .replace(Regex("\\s*-\\s*Topic$", RegexOption.IGNORE_CASE), "")
+                        .trim()
+                        .ifBlank { artist }
+
                     // Follow Mornye's backend/downloads.rs contract:
                     // Do NOT call checkAvailability when downloading directly from the track's own
                     // provider (direct = true). Only run checkAvailability when matching a track
@@ -1696,14 +1724,14 @@ class MornyeExtensionRuntime(private val context: Context) {
                             )
                             var availRaw = runCatching {
                                 jsToKotlin(
-                                    checkFn.call(cx, scope, extObj, arrayOf<Any?>(isrc, title, artist, checkOpts))
+                                    checkFn.call(cx, scope, extObj, arrayOf<Any?>(isrc, matchTitle, matchArtist, checkOpts))
                                 ) as? Map<*, *>
                             }.getOrNull()
 
                             if ((availRaw == null || availRaw["available"] == false) && isrc.isNotEmpty()) {
                                 availRaw = runCatching {
                                     jsToKotlin(
-                                        checkFn.call(cx, scope, extObj, arrayOf<Any?>("", title, artist, checkOpts))
+                                        checkFn.call(cx, scope, extObj, arrayOf<Any?>("", matchTitle, matchArtist, checkOpts))
                                     ) as? Map<*, *>
                                 }.getOrNull()
                             }
@@ -1716,14 +1744,19 @@ class MornyeExtensionRuntime(private val context: Context) {
                                 if (!availId.isNullOrEmpty()) {
                                     resolvedTrackId = availId
                                 }
+                                val availTrackMap = (availRaw["track"] as? Map<*, *>)?.let { normalizeTrackMap(it, ext, "track") }
+                                if (availTrackMap != null) {
+                                    effectiveTrackMap = availTrackMap
+                                }
                                 resolvedOnExt = true
                                 preparedContext = availPrep ?: mapOf("host_track" to effectiveTrackMap)
+                                activeDownloadTrack.set(effectiveTrackMap)
                             }
                         }
                     }
 
                     if (!resolvedOnExt) {
-                        val searchQuery = if (artist.isNotBlank()) "$title $artist" else title
+                        val searchQuery = if (matchArtist.isNotBlank()) "$matchTitle $matchArtist" else matchTitle
                         val extFilterId = resolveExtensionFilterId(ext, "tracks")
                         val searchRaw = runCatching {
                             val searchFn = ScriptableObject.getProperty(extObj, "searchTracks") as? RhinoFunction
@@ -1752,7 +1785,8 @@ class MornyeExtensionRuntime(private val context: Context) {
                                 ?: emptyList<Any?>()
                             else -> emptyList<Any?>()
                         }
-                        val matchedMap = pickBestFallbackTrack(candidatesList, title, artist)
+                        val matchedMap = pickBestFallbackTrack(candidatesList, matchTitle, matchArtist)
+                            ?: pickBestFallbackTrack(candidatesList, title, artist)
                             ?: throw IllegalStateException("No matching track found on ${ext.displayName}")
                         val normalizedMatch = normalizeTrackMap(matchedMap, ext, "track")
                         val matchedId = normalizedMatch["id"]?.toString()?.trim() ?: ""
@@ -1761,6 +1795,7 @@ class MornyeExtensionRuntime(private val context: Context) {
                         }
                         resolvedTrackId = matchedId
                         effectiveTrackMap = normalizedMatch
+                        activeDownloadTrack.set(effectiveTrackMap)
                         val matchedHasPreview = !matchedMap["preview_url"]?.toString().isNullOrBlank()
                         preparedContext = if (ext.id == "jiosaavn" && matchedHasPreview) {
                             mapOf("track" to matchedMap, "host_track" to normalizedMatch)
@@ -4240,28 +4275,66 @@ class MornyeExtensionRuntime(private val context: Context) {
         query: String,
         limit: Int,
         canonicalFilter: String,
+        providerIdLabel: String = "ytmusic",
     ): List<Map<String, Any?>> {
         return when (canonicalFilter) {
-            "tracks" -> searchYtMusicSongsOnly(query, params = "EgWKAQIIAWoKEAkQBRAKEAMQBA==", limit = limit)
-            "albums" -> searchYtMusicFiltered(query, params = "EgWKAQIYAWoKEAkQBRAKEAMQBA==", itemType = "album", limit = limit)
-            "artists" -> searchYtMusicFiltered(query, params = "EgWKAQIgAWoKEAkQBRAKEAMQBA==", itemType = "artist", limit = limit)
+            "tracks" -> searchYtMusicSongsOnly(
+                query = query,
+                params = "EgWKAQIIAWoKEAkQBRAKEAMQBA==",
+                limit = limit,
+                providerIdLabel = providerIdLabel,
+            )
+            "albums" -> searchYtMusicFiltered(
+                query = query,
+                params = "EgWKAQIYAWoKEAkQBRAKEAMQBA==",
+                itemType = "album",
+                limit = limit,
+                providerIdLabel = providerIdLabel,
+            )
+            "artists" -> searchYtMusicFiltered(
+                query = query,
+                params = "EgWKAQIgAWoKEAkQBRAKEAMQBA==",
+                itemType = "artist",
+                limit = limit,
+                providerIdLabel = providerIdLabel,
+            )
             else -> {
                 val songsTask = searchPool.submit<List<Map<String, Any?>>> {
-                    runCatching { searchYtMusicSongsOnly(query, params = "EgWKAQIIAWoKEAkQBRAKEAMQBA==", limit = max(limit, 30)) }
-                        .getOrDefault(emptyList())
+                    runCatching {
+                        searchYtMusicSongsOnly(
+                            query = query,
+                            params = "EgWKAQIIAWoKEAkQBRAKEAMQBA==",
+                            limit = max(limit, 30),
+                            providerIdLabel = providerIdLabel,
+                        )
+                    }.getOrDefault(emptyList())
                 }
                 val albumsTask = searchPool.submit<List<Map<String, Any?>>> {
-                    runCatching { searchYtMusicFiltered(query, params = "EgWKAQIYAWoKEAkQBRAKEAMQBA==", itemType = "album", limit = 8) }
-                        .getOrDefault(emptyList())
+                    runCatching {
+                        searchYtMusicFiltered(
+                            query = query,
+                            params = "EgWKAQIYAWoKEAkQBRAKEAMQBA==",
+                            itemType = "album",
+                            limit = 8,
+                            providerIdLabel = providerIdLabel,
+                        )
+                    }.getOrDefault(emptyList())
                 }
                 val artistsTask = searchPool.submit<List<Map<String, Any?>>> {
-                    runCatching { searchYtMusicFiltered(query, params = "EgWKAQIgAWoKEAkQBRAKEAMQBA==", itemType = "artist", limit = 6) }
-                        .getOrDefault(emptyList())
+                    runCatching {
+                        searchYtMusicFiltered(
+                            query = query,
+                            params = "EgWKAQIgAWoKEAkQBRAKEAMQBA==",
+                            itemType = "artist",
+                            limit = 6,
+                            providerIdLabel = providerIdLabel,
+                        )
+                    }.getOrDefault(emptyList())
                 }
                 val out = mutableListOf<Map<String, Any?>>()
-                out.addAll(runCatching { artistsTask.get(4000L, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(emptyList()))
-                out.addAll(runCatching { albumsTask.get(4000L, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(emptyList()))
-                out.addAll(runCatching { songsTask.get(4000L, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(emptyList()))
+                out.addAll(runCatching { artistsTask.get(5000L, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(emptyList()))
+                out.addAll(runCatching { albumsTask.get(5000L, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(emptyList()))
+                out.addAll(runCatching { songsTask.get(5000L, java.util.concurrent.TimeUnit.MILLISECONDS) }.getOrDefault(emptyList()))
                 out
             }
         }
@@ -4313,82 +4386,68 @@ class MornyeExtensionRuntime(private val context: Context) {
         }.getOrNull()
     }
 
-    private fun searchYtMusicSongsOnly(
-        query: String,
-        params: String?,
-        limit: Int,
-    ): List<Map<String, Any?>> {
-        val root = postYtMusicWebRemix("search") {
-            put("query", query)
-            if (!params.isNullOrBlank()) put("params", params)
-        } ?: return emptyList()
+    private fun extractDirectWatchVideoId(renderer: JSONObject): String? {
+        val vidRegex = Regex("^[a-zA-Z0-9_-]{11}$")
+        fun validId(s: String?): String? = s?.trim()?.takeIf { vidRegex.matches(it) }
 
-        val renderers = mutableListOf<JSONObject>()
-        collectMusicResponsiveRenderers(root, renderers)
+        validId(renderer.optJSONObject("playlistItemData")?.optString("videoId"))?.let { return it }
+        validId(renderer.optJSONObject("navigationEndpoint")?.optJSONObject("watchEndpoint")?.optString("videoId"))?.let { return it }
+        val overlay = renderer.optJSONObject("overlay") ?: renderer.optJSONObject("thumbnailOverlay")
+        validId(
+            overlay?.optJSONObject("musicItemThumbnailOverlayRenderer")
+                ?.optJSONObject("content")
+                ?.optJSONObject("musicPlayButtonRenderer")
+                ?.optJSONObject("playNavigationEndpoint")
+                ?.optJSONObject("watchEndpoint")
+                ?.optString("videoId")
+        )?.let { return it }
+        validId(renderer.optJSONObject("onTap")?.optJSONObject("watchEndpoint")?.optString("videoId"))?.let { return it }
+        validId(
+            renderer.optJSONArray("flexColumns")
+                ?.optJSONObject(0)
+                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                ?.optJSONObject("text")
+                ?.optJSONArray("runs")
+                ?.optJSONObject(0)
+                ?.optJSONObject("navigationEndpoint")
+                ?.optJSONObject("watchEndpoint")
+                ?.optString("videoId")
+        )?.let { return it }
+        validId(renderer.optJSONObject("doubleTapCommand")?.optJSONObject("watchEndpoint")?.optString("videoId"))?.let { return it }
+        return validId(findStringByKey(renderer, "videoId"))
+    }
+
+    private fun isLikelyYtArtistDetail(text: String): Boolean {
+        val t = text.trim()
+        if (t.isEmpty() || t in setOf("•", "·", "&", ",", "|")) return false
+        val lower = t.lowercase(Locale.ROOT)
+        if (lower in setOf("song", "video", "album", "single", "ep", "playlist", "artist", "podcast", "episode", "explicit")) {
+            return false
+        }
+        if (t.matches(Regex("^(\\d+:)?\\d{1,2}:\\d{2}$"))) return false
+        if (lower.endsWith(" views") || lower.endsWith(" plays") || lower.endsWith(" subscribers") || lower.endsWith(" likes")) {
+            return false
+        }
+        return true
+    }
+
+    private fun parseYtMusicSongsFromRoot(
+        root: JSONObject,
+        limit: Int,
+        providerIdLabel: String,
+    ): List<Map<String, Any?>> {
         val results = mutableListOf<Map<String, Any?>>()
         val seenIds = mutableSetOf<String>()
 
-        for (item in renderers) {
-            val videoId = item.optJSONObject("playlistItemData")?.optString("videoId")?.takeIf { it.isNotBlank() }
-                ?: findStringByKey(item, "videoId")?.takeIf { it.length == 11 }
-                ?: continue
-            if (!seenIds.add(videoId)) continue
-
-            val flexCols = item.optJSONArray("flexColumns") ?: continue
-            val titleRuns = flexCols.optJSONObject(0)
-                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
-                ?.optJSONObject("text")
-                ?.optJSONArray("runs")
-            val title = titleRuns?.optJSONObject(0)?.optString("text")?.trim().orEmpty()
-            if (title.isEmpty()) continue
-
-            val subRuns = flexCols.optJSONObject(1)
-                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
-                ?.optJSONObject("text")
-                ?.optJSONArray("runs")
-
-            val artists = mutableListOf<String>()
-            var album = ""
-            var durationMs = 0L
-
-            if (subRuns != null) {
-                for (i in 0 until subRuns.length()) {
-                    val run = subRuns.optJSONObject(i) ?: continue
-                    val text = run.optString("text").trim()
-                    if (text.isEmpty() || text == "•" || text == "·" || text == "&" || text == ",") continue
-                    if (text.matches(Regex("^(\\d+:)?\\d{1,2}:\\d{2}$"))) {
-                        durationMs = parseColonDurationMs(text)
-                        continue
-                    }
-                    val pageType = findStringByKey(run, "pageType") ?: ""
-                    val browseId = findStringByKey(run, "browseId") ?: ""
-                    when {
-                        pageType.contains("ALBUM") || browseId.startsWith("MPREb_") -> album = text
-                        pageType.contains("ARTIST") || browseId.startsWith("UC") -> artists.add(text)
-                        artists.isEmpty() && !text.equals("Song", ignoreCase = true) && !text.equals("Video", ignoreCase = true) -> {
-                            artists.add(text)
-                        }
-                    }
-                }
-            }
-
-            if (durationMs == 0L) {
-                val fixedCols = item.optJSONArray("fixedColumns")
-                val fixedDurText = fixedCols?.optJSONObject(0)
-                    ?.optJSONObject("musicResponsiveListItemFixedColumnRenderer")
-                    ?.optJSONObject("text")
-                    ?.optJSONArray("runs")
-                    ?.optJSONObject(0)
-                    ?.optString("text")
-                    ?.trim()
-                    .orEmpty()
-                if (fixedDurText.matches(Regex("^(\\d+:)?\\d{1,2}:\\d{2}$"))) {
-                    durationMs = parseColonDurationMs(fixedDurText)
-                }
-            }
-
-            val artistStr = artists.joinToString(", ")
-            val coverUrl = extractBestThumbnail(item)
+        fun addSong(
+            videoId: String,
+            title: String,
+            artistStr: String,
+            album: String,
+            durationMs: Long,
+            coverUrl: String,
+        ) {
+            if (videoId.length != 11 || title.isBlank() || !seenIds.add(videoId)) return
             results.add(
                 mapOf(
                     "id" to videoId,
@@ -4404,12 +4463,248 @@ class MornyeExtensionRuntime(private val context: Context) {
                     "duration_ms" to durationMs,
                     "cover_url" to coverUrl,
                     "isrc" to "",
-                    "provider_id" to "ytmusic",
+                    "provider_id" to providerIdLabel,
                     "provider_name" to "YouTube Music",
                     "external_urls" to "https://music.youtube.com/watch?v=$videoId",
                 )
             )
-            if (results.size >= limit) break
+        }
+
+        // 1. Parse top-result musicCardShelfRenderer (LastWave-Native InnerTubeMusicApiParsers.parseCardShelfSong)
+        val cardRenderers = mutableListOf<JSONObject>()
+        collectObjectsByKey(root, "musicCardShelfRenderer", cardRenderers)
+        for (card in cardRenderers) {
+            val videoId = extractDirectWatchVideoId(card) ?: continue
+            val titleRuns = card.optJSONObject("title")?.optJSONArray("runs")
+            val title = buildString {
+                if (titleRuns != null) {
+                    for (i in 0 until titleRuns.length()) {
+                        append(titleRuns.optJSONObject(i)?.optString("text").orEmpty())
+                    }
+                }
+            }.trim().ifBlank { card.optJSONObject("title")?.optString("simpleText")?.trim().orEmpty() }
+            if (title.isEmpty()) continue
+            val subRuns = card.optJSONObject("subtitle")?.optJSONArray("runs")
+            val artists = mutableListOf<String>()
+            var album = ""
+            var durationMs = 0L
+            if (subRuns != null) {
+                for (i in 0 until subRuns.length()) {
+                    val run = subRuns.optJSONObject(i) ?: continue
+                    val text = run.optString("text").trim()
+                    if (text.isEmpty() || text == "•" || text == "·" || text == "&" || text == ",") continue
+                    if (text.matches(Regex("^(\\d+:)?\\d{1,2}:\\d{2}$"))) {
+                        durationMs = parseColonDurationMs(text)
+                        continue
+                    }
+                    val browseId = findStringByKey(run, "browseId") ?: ""
+                    val pageType = findStringByKey(run, "pageType") ?: ""
+                    when {
+                        browseId.startsWith("MPRE") || pageType.contains("ALBUM") -> album = text
+                        browseId.startsWith("UC") || pageType.contains("ARTIST") -> artists.add(text)
+                        artists.isEmpty() && isLikelyYtArtistDetail(text) -> artists.add(text)
+                    }
+                }
+            }
+            addSong(
+                videoId = videoId,
+                title = title,
+                artistStr = artists.joinToString(", ").ifBlank { "YouTube Music" },
+                album = album,
+                durationMs = durationMs,
+                coverUrl = extractBestThumbnail(card),
+            )
+        }
+
+        // 2. Parse musicResponsiveListItemRenderer rows (LastWave-Native InnerTubeMusicApiParsers.parseSong)
+        val renderers = mutableListOf<JSONObject>()
+        collectMusicResponsiveRenderers(root, renderers)
+        for (item in renderers) {
+            val videoId = extractDirectWatchVideoId(item) ?: continue
+            val flexCols = item.optJSONArray("flexColumns") ?: continue
+            val col0Text = flexCols.optJSONObject(0)
+                ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                ?.optJSONObject("text")
+            val titleRuns = col0Text?.optJSONArray("runs")
+            val title = buildString {
+                if (titleRuns != null) {
+                    for (i in 0 until titleRuns.length()) {
+                        append(titleRuns.optJSONObject(i)?.optString("text").orEmpty())
+                    }
+                }
+            }.trim().ifBlank { col0Text?.optString("simpleText")?.trim().orEmpty() }
+            if (title.isEmpty()) continue
+
+            val detailRuns = mutableListOf<JSONObject>()
+            for (colIdx in 1 until flexCols.length()) {
+                val runs = flexCols.optJSONObject(colIdx)
+                    ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
+                    ?.optJSONObject("text")
+                    ?.optJSONArray("runs")
+                if (runs != null) {
+                    for (rIdx in 0 until runs.length()) {
+                        runs.optJSONObject(rIdx)?.let { detailRuns.add(it) }
+                    }
+                }
+            }
+            val fixedCols = item.optJSONArray("fixedColumns")
+            if (fixedCols != null) {
+                for (colIdx in 0 until fixedCols.length()) {
+                    val runs = fixedCols.optJSONObject(colIdx)
+                        ?.optJSONObject("musicResponsiveListItemFixedColumnRenderer")
+                        ?.optJSONObject("text")
+                        ?.optJSONArray("runs")
+                    if (runs != null) {
+                        for (rIdx in 0 until runs.length()) {
+                            runs.optJSONObject(rIdx)?.let { detailRuns.add(it) }
+                        }
+                    }
+                }
+            }
+
+            val artists = mutableListOf<String>()
+            var fallbackArtist = ""
+            var album = ""
+            var durationMs = 0L
+
+            for (run in detailRuns) {
+                val text = run.optString("text").trim()
+                if (text.isEmpty() || text == "•" || text == "·" || text == "&" || text == ",") continue
+                if (text.matches(Regex("^(\\d+:)?\\d{1,2}:\\d{2}$"))) {
+                    if (durationMs == 0L) durationMs = parseColonDurationMs(text)
+                    continue
+                }
+                val pageType = findStringByKey(run, "pageType") ?: ""
+                val browseId = findStringByKey(run, "browseId") ?: ""
+                when {
+                    pageType.contains("ALBUM") || browseId.startsWith("MPRE") -> if (album.isEmpty()) album = text
+                    pageType.contains("ARTIST") || browseId.startsWith("UC") -> if (text !in artists) artists.add(text)
+                    fallbackArtist.isEmpty() && isLikelyYtArtistDetail(text) -> fallbackArtist = text
+                }
+            }
+
+            val artistStr = if (artists.isNotEmpty()) artists.joinToString(", ") else fallbackArtist
+            val coverUrl = extractBestThumbnail(item)
+            addSong(
+                videoId = videoId,
+                title = title,
+                artistStr = artistStr,
+                album = album,
+                durationMs = durationMs,
+                coverUrl = coverUrl,
+            )
+            if (results.size >= limit * 2) break
+        }
+
+        // 3. Parse standard YouTube videoRenderer / compactVideoRenderer if present
+        if (results.isEmpty()) {
+            val videoRenderers = mutableListOf<JSONObject>()
+            collectObjectsByKey(root, "videoRenderer", videoRenderers)
+            collectObjectsByKey(root, "compactVideoRenderer", videoRenderers)
+            for (vr in videoRenderers) {
+                val videoId = vr.optString("videoId").trim().takeIf { it.length == 11 } ?: continue
+                val titleRuns = vr.optJSONObject("title")?.optJSONArray("runs")
+                val title = buildString {
+                    if (titleRuns != null) {
+                        for (i in 0 until titleRuns.length()) {
+                            append(titleRuns.optJSONObject(i)?.optString("text").orEmpty())
+                        }
+                    }
+                }.trim().ifBlank { vr.optJSONObject("title")?.optString("simpleText")?.trim().orEmpty() }
+                if (title.isEmpty()) continue
+                val artist = vr.optJSONObject("ownerText")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")?.trim()
+                    ?: vr.optJSONObject("shortBylineText")?.optJSONArray("runs")?.optJSONObject(0)?.optString("text")?.trim()
+                    ?: ""
+                val lenText = vr.optJSONObject("lengthText")?.optString("simpleText")?.trim().orEmpty()
+                val durationMs = if (lenText.isNotEmpty()) parseColonDurationMs(lenText) else 0L
+                val coverUrl = extractBestThumbnail(vr)
+                addSong(
+                    videoId = videoId,
+                    title = title,
+                    artistStr = artist,
+                    album = "",
+                    durationMs = durationMs,
+                    coverUrl = coverUrl,
+                )
+                if (results.size >= limit) break
+            }
+        }
+
+        // Sort preferring official YouTube Music square album artwork (googleusercontent.com / ggpht.com)
+        // and items with album metadata, matching LastWave-Native InnerTubeMusicApi.searchSongs (lines 1384-1392).
+        return results
+            .sortedWith(
+                compareByDescending<Map<String, Any?>> { item ->
+                    val cover = item["cover_url"]?.toString().orEmpty()
+                    val isYtMusicThumb = (cover.contains("googleusercontent.com") || cover.contains("ggpht.com")) &&
+                        !cover.contains("ytimg.com")
+                    val hasAlbum = !item["album"]?.toString().isNullOrBlank()
+                    (if (isYtMusicThumb) 2 else 0) + (if (hasAlbum) 1 else 0)
+                }
+            )
+            .take(limit)
+    }
+
+    private fun searchYtMusicSongsOnly(
+        query: String,
+        params: String?,
+        limit: Int,
+        providerIdLabel: String = "ytmusic",
+    ): List<Map<String, Any?>> {
+        fun runWebRemixSearch(searchParams: String?): List<Map<String, Any?>> {
+            val root = postYtMusicWebRemix("search") {
+                put("query", query)
+                if (!searchParams.isNullOrBlank()) put("params", searchParams)
+            } ?: return emptyList()
+            return parseYtMusicSongsFromRoot(root, limit, providerIdLabel)
+        }
+
+        var results = runWebRemixSearch(params)
+        if (results.isEmpty() && !params.isNullOrBlank()) {
+            results = runWebRemixSearch(null)
+        }
+        if (results.isEmpty()) {
+            cachedVisitorData = null
+            getOrFetchVisitorData()
+            results = runWebRemixSearch(params)
+            if (results.isEmpty() && !params.isNullOrBlank()) {
+                results = runWebRemixSearch(null)
+            }
+        }
+        if (results.isEmpty()) {
+            // Fallback to standard YouTube WEB search endpoint (matching LastWave-Native InnerTubeMusicApi.kt:1360-1378)
+            results = runCatching {
+                val payload = JSONObject()
+                    .put(
+                        "context",
+                        JSONObject().put(
+                            "client",
+                            JSONObject()
+                                .put("clientName", "WEB")
+                                .put("clientVersion", "2.20261011.05.00")
+                                .put("hl", "en")
+                                .put("gl", "US"),
+                        ),
+                    )
+                    .put("query", query)
+                val resp = httpRequestBytes(
+                    url = "https://www.youtube.com/youtubei/v1/search?key=AIzaSyAO_FJ2SlqAz8GlBg1fA54p0wDE7Xk80mU&prettyPrint=false",
+                    method = "POST",
+                    body = payload.toString().toByteArray(StandardCharsets.UTF_8),
+                    headers = mapOf(
+                        "User-Agent" to ytMusicWebRemixClient.userAgent,
+                        "Content-Type" to "application/json",
+                        "Origin" to "https://www.youtube.com",
+                        "Referer" to "https://www.youtube.com/",
+                    ),
+                )
+                if (resp.status in 200..299) {
+                    val root = JSONObject(String(resp.body, StandardCharsets.UTF_8))
+                    parseYtMusicSongsFromRoot(root, limit, providerIdLabel)
+                } else {
+                    emptyList()
+                }
+            }.getOrDefault(emptyList())
         }
         return results
     }
@@ -4419,6 +4714,7 @@ class MornyeExtensionRuntime(private val context: Context) {
         params: String,
         itemType: String,
         limit: Int,
+        providerIdLabel: String = "ytmusic",
     ): List<Map<String, Any?>> {
         val root = postYtMusicWebRemix("search") {
             put("query", query)
@@ -4437,17 +4733,22 @@ class MornyeExtensionRuntime(private val context: Context) {
                 ?.takeIf { it.isNotBlank() }
                 ?: findStringByKey(item, "browseId")?.takeIf { it.isNotBlank() }
                 ?: continue
+            if (itemType == "artist" && !browseId.startsWith("UC")) continue
+            if (itemType == "album" && !browseId.startsWith("MPRE") && !browseId.startsWith("OLAK") && !browseId.startsWith("VL")) continue
             if (!seenIds.add(browseId)) continue
 
             val flexCols = item.optJSONArray("flexColumns") ?: continue
-            val title = flexCols.optJSONObject(0)
+            val titleRuns = flexCols.optJSONObject(0)
                 ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
                 ?.optJSONObject("text")
                 ?.optJSONArray("runs")
-                ?.optJSONObject(0)
-                ?.optString("text")
-                ?.trim()
-                .orEmpty()
+            val title = buildString {
+                if (titleRuns != null) {
+                    for (i in 0 until titleRuns.length()) {
+                        append(titleRuns.optJSONObject(i)?.optString("text").orEmpty())
+                    }
+                }
+            }.trim()
             if (title.isEmpty()) continue
 
             val subRuns = flexCols.optJSONObject(1)
@@ -4455,15 +4756,25 @@ class MornyeExtensionRuntime(private val context: Context) {
                 ?.optJSONObject("text")
                 ?.optJSONArray("runs")
             val subParts = mutableListOf<String>()
+            var explicitArtist = ""
             if (subRuns != null) {
                 for (i in 0 until subRuns.length()) {
-                    val t = subRuns.optJSONObject(i)?.optString("text")?.trim().orEmpty()
-                    if (t.isNotEmpty() && t != "•" && t != "·" && !t.equals("Album", ignoreCase = true) && !t.equals("Artist", ignoreCase = true)) {
+                    val run = subRuns.optJSONObject(i) ?: continue
+                    val t = run.optString("text").trim()
+                    val bId = findStringByKey(run, "browseId") ?: ""
+                    if (bId.startsWith("UC") && explicitArtist.isEmpty()) {
+                        explicitArtist = t
+                    }
+                    if (t.isNotEmpty() && t != "•" && t != "·" && !t.equals("Album", ignoreCase = true) && !t.equals("Artist", ignoreCase = true) && !t.equals("Single", ignoreCase = true) && !t.equals("EP", ignoreCase = true)) {
                         subParts.add(t)
                     }
                 }
             }
-            val artistStr = if (itemType == "album") subParts.firstOrNull().orEmpty() else title
+            val artistStr = if (itemType == "album") {
+                explicitArtist.ifBlank { subParts.firstOrNull().orEmpty() }
+            } else {
+                title
+            }
             val coverUrl = extractBestThumbnail(item)
 
             results.add(
@@ -4478,7 +4789,7 @@ class MornyeExtensionRuntime(private val context: Context) {
                     "album" to if (itemType == "album") title else "",
                     "duration_ms" to 0L,
                     "cover_url" to coverUrl,
-                    "provider_id" to "ytmusic",
+                    "provider_id" to providerIdLabel,
                     "provider_name" to "YouTube Music",
                 )
             )
@@ -4487,7 +4798,10 @@ class MornyeExtensionRuntime(private val context: Context) {
         return results
     }
 
-    private fun getYtMusicAlbumInnerTube(browseId: String): Map<String, Any?> {
+    private fun getYtMusicAlbumInnerTube(
+        browseId: String,
+        providerIdLabel: String = "ytmusic",
+    ): Map<String, Any?> {
         val root = postYtMusicWebRemix("browse") {
             put("browseId", browseId)
         } ?: return emptyMap()
@@ -4500,9 +4814,7 @@ class MornyeExtensionRuntime(private val context: Context) {
         var albumArtist = ""
         val tracks = mutableListOf<Map<String, Any?>>()
         for ((idx, item) in renderers.withIndex()) {
-            val videoId = item.optJSONObject("playlistItemData")?.optString("videoId")?.takeIf { it.isNotBlank() }
-                ?: findStringByKey(item, "videoId")?.takeIf { it.length == 11 }
-                ?: continue
+            val videoId = extractDirectWatchVideoId(item) ?: continue
             val flexCols = item.optJSONArray("flexColumns") ?: continue
             val title = flexCols.optJSONObject(0)
                 ?.optJSONObject("musicResponsiveListItemFlexColumnRenderer")
@@ -4549,7 +4861,7 @@ class MornyeExtensionRuntime(private val context: Context) {
                     "duration_ms" to durationMs,
                     "track_number" to (idx + 1),
                     "cover_url" to extractBestThumbnail(item).ifBlank { albumCover },
-                    "provider_id" to "ytmusic",
+                    "provider_id" to providerIdLabel,
                     "provider_name" to "YouTube Music",
                 )
             )
@@ -4560,25 +4872,39 @@ class MornyeExtensionRuntime(private val context: Context) {
             "artist" to albumArtist,
             "cover_url" to albumCover,
             "release_date" to "",
-            "provider_id" to "ytmusic",
+            "provider_id" to providerIdLabel,
             "provider_name" to "YouTube Music",
             "tracks" to tracks,
         )
     }
 
-    private fun getYtMusicArtistInnerTube(browseId: String): Map<String, Any?> {
+    private fun getYtMusicArtistInnerTube(
+        browseId: String,
+        providerIdLabel: String = "ytmusic",
+    ): Map<String, Any?> {
         val root = postYtMusicWebRemix("browse") {
             put("browseId", browseId)
         }
         val artistName = (root?.let { findHeaderTitle(it) }.orEmpty()).ifBlank { "Artist" }
         val coverUrl = root?.let { extractBestThumbnail(it) }.orEmpty()
         val topTracks = if (artistName.isNotBlank()) {
-            searchYtMusicSongsOnly(artistName, params = "EgWKAQIIAWoKEAkQBRAKEAMQBA==", limit = 50)
+            searchYtMusicSongsOnly(
+                query = artistName,
+                params = "EgWKAQIIAWoKEAkQBRAKEAMQBA==",
+                limit = 50,
+                providerIdLabel = providerIdLabel,
+            )
         } else {
             emptyList()
         }
         val albums = if (artistName.isNotBlank()) {
-            searchYtMusicFiltered(artistName, params = "EgWKAQIYAWoKEAkQBRAKEAMQBA==", itemType = "album", limit = 15)
+            searchYtMusicFiltered(
+                query = artistName,
+                params = "EgWKAQIYAWoKEAkQBRAKEAMQBA==",
+                itemType = "album",
+                limit = 15,
+                providerIdLabel = providerIdLabel,
+            )
         } else {
             emptyList()
         }
@@ -4586,7 +4912,7 @@ class MornyeExtensionRuntime(private val context: Context) {
             "id" to browseId,
             "name" to artistName,
             "cover_url" to coverUrl,
-            "provider_id" to "ytmusic",
+            "provider_id" to providerIdLabel,
             "provider_name" to "YouTube Music",
             "top_tracks" to topTracks,
             "albums" to albums,
@@ -5656,8 +5982,11 @@ class MornyeExtensionRuntime(private val context: Context) {
             ?: node.optJSONObject("thumbnail")?.optJSONArray("thumbnails")
             ?: return ""
         if (thumbs.length() == 0) return ""
-        val rawUrl = thumbs.optJSONObject(thumbs.length() - 1)?.optString("url")?.trim().orEmpty()
-        if (rawUrl.contains("googleusercontent.com") && rawUrl.contains("=w")) {
+        var rawUrl = thumbs.optJSONObject(thumbs.length() - 1)?.optString("url")?.trim().orEmpty()
+        if (rawUrl.startsWith("//")) {
+            rawUrl = "https:$rawUrl"
+        }
+        if ((rawUrl.contains("googleusercontent.com") || rawUrl.contains("ggpht.com")) && rawUrl.contains("=w")) {
             return rawUrl.replace(Regex("=w\\d+-h\\d+[^&]*"), "=w544-h544-l90-rj")
         }
         return rawUrl

@@ -177,27 +177,9 @@ class _DownloadFormatPickerSheetState
     final originExt = allExtensions.where((e) => e.id == rec).firstOrNull;
     final isOriginMetadataOnly =
         originExt != null && !originExt.hasDownloadProvider;
-    final isOriginDirectDownloader =
-        rec == 'ytmusic' ||
-        (originExt != null && originExt.enabled && originExt.hasDownloadProvider);
 
     final allAvailableDownloaders = _buildAvailableDownloaders(enabledDownloaders);
-    // When the search provider itself supports downloading, lock the download
-    // strictly to that provider so search and download always use the same
-    // provider without silently switching.
-    final downloaders = isOriginDirectDownloader
-        ? [
-            for (final ext in allAvailableDownloaders)
-              if (ext.id == rec ||
-                  (rec == 'ytmusic' &&
-                      (ext.id == 'ytmusic' || ext.id == 'ytmusic-spotiflac')))
-                ext,
-          ]
-        : allAvailableDownloaders;
-    final effectiveDownloaders = downloaders.isNotEmpty
-        ? downloaders
-        : allAvailableDownloaders;
-    final selectedExt = _resolveSelectedExtension(effectiveDownloaders);
+    final selectedExt = _resolveSelectedExtension(allAvailableDownloaders);
     final selectedId = selectedExt?.id ?? '';
     final qualities = _qualitiesFor(selectedExt);
     final subtitleParts = <String>[
@@ -312,8 +294,7 @@ class _DownloadFormatPickerSheetState
                   ),
                   const SizedBox(height: 14),
                 ],
-                if (!isOriginDirectDownloader &&
-                    effectiveDownloaders.isNotEmpty) ...[
+                if (allAvailableDownloaders.isNotEmpty) ...[
                   Text(
                     'Download extension',
                     style: text.titleSmall?.copyWith(
@@ -325,7 +306,7 @@ class _DownloadFormatPickerSheetState
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        for (final ext in effectiveDownloaders)
+                        for (final ext in allAvailableDownloaders)
                           Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: ChoiceChip(
@@ -335,7 +316,11 @@ class _DownloadFormatPickerSheetState
                                 iconPath: ext.iconPath,
                                 size: 20,
                               ),
-                              label: Text(ext.displayName),
+                              label: Text(
+                                ext.version.isNotEmpty
+                                    ? '${ext.displayName} · v${ext.version}'
+                                    : ext.displayName,
+                              ),
                               selected: ext.id == selectedId,
                               onSelected: (_) {
                                 setState(() => _selectedProviderId = ext.id);

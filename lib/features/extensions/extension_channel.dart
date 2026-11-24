@@ -138,8 +138,8 @@ class ExtensionChannel {
         for (final item in raw)
           if (item is Map<Object?, Object?>) ExtensionTrackResult.fromMap(item),
       ];
-    } on PlatformException {
-      return const [];
+    } on PlatformException catch (e) {
+      throw StateError(e.message ?? 'Search failed');
     } on MissingPluginException {
       return const [];
     }
