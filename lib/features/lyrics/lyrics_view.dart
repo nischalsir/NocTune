@@ -178,9 +178,8 @@ class _LyricsPanelState extends ConsumerState<LyricsPanel> {
                         icon: Icons.format_quote,
                         label: 'Close lyrics',
                         pressedScale: 0.82,
-                        color: Theme.of(
-                          context,
-                        ).colorScheme.primary.withValues(alpha: 0.28),
+                        color: Theme.of(context).colorScheme.primary
+                            .withValues(alpha: 0.28),
                         foreground: Theme.of(context).colorScheme.primary,
                         onTap: widget.onClose,
                       ),
@@ -700,7 +699,8 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
       size: 30 * widget.scale,
       lineHeight: 30 * widget.scale * 1.38,
       weight: 700,
-    );
+      // Google Sans Flex has no ♪, the mark of an instrumental break.
+    ).copyWith(fontFamilyFallback: const ['Inter']);
 
     return Padding(
       padding: const EdgeInsets.only(top: 8),

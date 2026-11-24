@@ -51,6 +51,12 @@ Future<void> main() async {
         androidNotificationChannelDescription:
             'Controls for the music that is playing',
         androidNotificationIcon: 'drawable/ic_stat_noctune',
+        // Stay a foreground service while paused: Android refuses to bring
+        // it back to the foreground when play is pressed from the lock
+        // screen or notification, and the system may then close the app
+        // mid-song. Stop, or swiping the app away while paused, still ends
+        // it.
+        androidStopForegroundOnPause: false,
       ),
     ),
   ).wait;

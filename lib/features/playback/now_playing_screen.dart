@@ -947,8 +947,8 @@ class _Details extends ConsumerWidget {
         'artists': item.artist ?? '',
         'album': item.album ?? '',
         'album_name': item.album ?? '',
-        'duration_ms': (item.duration ?? track?.duration ?? Duration.zero)
-            .inMilliseconds,
+        'duration_ms':
+            (item.duration ?? track?.duration ?? Duration.zero).inMilliseconds,
         'cover_url': coverUrl.startsWith('http') ? coverUrl : '',
         'provider_id': providerId,
       },
@@ -1127,6 +1127,10 @@ class _Transport extends ConsumerWidget {
   static const _side = 54.0;
   static const _gap = 18.0;
 
+  /// The row sits 4 px in, so its outer buttons line up with the title and
+  /// the seek bar; on a phone the pill fills the space between them.
+  static const _inset = 4.0;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playing = ref.watch(
@@ -1143,7 +1147,10 @@ class _Transport extends ConsumerWidget {
 
     return LayoutBuilder(
       builder: (context, box) {
-        final pill = (box.maxWidth - _side * 2 - _gap * 2).clamp(112.0, 180.0);
+        final pill = (box.maxWidth - _inset * 2 - _side * 2 - _gap * 2).clamp(
+          112.0,
+          240.0,
+        );
         return Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
@@ -1295,45 +1302,49 @@ class _ModeRow extends ConsumerWidget {
     );
     NocAudioHandler handler() => ref.read(audioHandlerProvider);
 
-    return Row(
-      children: [
-        Expanded(
-          flex: 10,
-          child: _ModeButton(
-            icon: Icons.shuffle,
-            label: shuffling ? 'Shuffle on' : 'Shuffle off',
-            active: shuffling,
-            onTap: () => handler().setShuffleMode(
-              shuffling
-                  ? AudioServiceShuffleMode.none
-                  : AudioServiceShuffleMode.all,
+    // 4 px in, level with the title and the seek bar.
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 10,
+            child: _ModeButton(
+              icon: Icons.shuffle,
+              label: shuffling ? 'Shuffle on' : 'Shuffle off',
+              active: shuffling,
+              onTap: () => handler().setShuffleMode(
+                shuffling
+                    ? AudioServiceShuffleMode.none
+                    : AudioServiceShuffleMode.all,
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(flex: 18, child: _QualityPill(track: track)),
-        const SizedBox(width: 10),
-        Expanded(
-          flex: 10,
-          child: _ModeButton(
-            icon: repeat == AudioServiceRepeatMode.one
-                ? Icons.repeat_one
-                : Icons.repeat,
-            label: switch (repeat) {
-              AudioServiceRepeatMode.one => 'Repeat one',
-              AudioServiceRepeatMode.none => 'Repeat off',
-              _ => 'Repeat all',
-            },
-            active: repeat != AudioServiceRepeatMode.none,
-            // Off, then the whole queue, then this track.
-            onTap: () => handler().setRepeatMode(switch (repeat) {
-              AudioServiceRepeatMode.none => AudioServiceRepeatMode.all,
-              AudioServiceRepeatMode.one => AudioServiceRepeatMode.none,
-              _ => AudioServiceRepeatMode.one,
-            }),
+          const SizedBox(width: 10),
+          Expanded(flex: 18, child: _QualityPill(track: track)),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 10,
+            child: _ModeButton(
+              icon: repeat == AudioServiceRepeatMode.one
+                  ? Icons.repeat_one
+                  : Icons.repeat,
+              label: switch (repeat) {
+                AudioServiceRepeatMode.one => 'Repeat one',
+                AudioServiceRepeatMode.none => 'Repeat off',
+                _ => 'Repeat all',
+              },
+              active: repeat != AudioServiceRepeatMode.none,
+              // Off, then the whole queue, then this track.
+              onTap: () => handler().setRepeatMode(switch (repeat) {
+                AudioServiceRepeatMode.none => AudioServiceRepeatMode.all,
+                AudioServiceRepeatMode.one => AudioServiceRepeatMode.none,
+                _ => AudioServiceRepeatMode.one,
+              }),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }

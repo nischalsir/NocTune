@@ -538,9 +538,16 @@ class _PlaylistList extends ConsumerWidget {
     return ListView(
       children: [
         ListTile(
-          leading: const SizedBox.square(
-            dimension: 48,
-            child: Icon(Icons.add_rounded),
+          // A tile the size and shape of the playlist covers below it.
+          leading: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: SizedBox.square(
+              dimension: 48,
+              child: ColoredBox(
+                color: context.noc.glassSolid,
+                child: const Icon(Icons.add_rounded),
+              ),
+            ),
           ),
           title: Text('New playlist', style: text.titleSmall),
           onTap: create,
