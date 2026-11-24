@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/theme/flex_type.dart';
+import '../../core/widgets/light_effects.dart';
 import 'player_colors.dart';
 
 /// The seek bar of the player and the lyrics view, for a dark backdrop.
@@ -86,7 +87,14 @@ class _PlayerSeekBarState extends ConsumerState<PlayerSeekBar>
     final fraction = _drag ?? live;
     final dragging = _drag != null;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    _syncDrift(widget.wave && playing && !dragging && !reduceMotion);
+    // With lighter effects the wave holds its shape rather than drifting.
+    _syncDrift(
+      widget.wave &&
+          playing &&
+          !dragging &&
+          !reduceMotion &&
+          !LightEffects.of(context),
+    );
 
     final shown = enabled ? total * fraction : position;
     // Assistive technology moves the position ten seconds at a time.

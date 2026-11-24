@@ -9,6 +9,7 @@ import '../../core/theme/flex_type.dart';
 import '../../core/theme/noc_palette.dart';
 import '../../core/widgets/artwork.dart';
 import '../../core/widgets/cover_hero.dart';
+import '../../core/widgets/light_effects.dart';
 import '../../core/widgets/wave_bars.dart';
 import '../../data/models/playlist.dart';
 import '../../data/models/track.dart';
@@ -791,7 +792,10 @@ class _NowPlayingPillState extends State<_NowPlayingPill>
   }
 
   void _sync() {
-    final animate = widget.playing && !MediaQuery.disableAnimationsOf(context);
+    final animate =
+        widget.playing &&
+        !MediaQuery.disableAnimationsOf(context) &&
+        !LightEffects.of(context);
     if (animate == _pulse.isAnimating) return;
     if (animate) {
       _pulse.repeat(reverse: true);

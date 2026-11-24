@@ -2,6 +2,7 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 
+import '../../core/widgets/light_effects.dart';
 import 'player_colors.dart';
 
 /// A round glass button for the player, with a thin rim. It dips
@@ -53,7 +54,7 @@ class _PlayerGlassButtonState extends State<PlayerGlassButton> {
     if (pressed != _pressed) setState(() => _pressed = pressed);
   }
 
-  Widget _frost(Widget glass) => widget.frosted
+  Widget _frost(Widget glass) => widget.frosted && !LightEffects.of(context)
       ? ClipOval(
           child: BackdropFilter.grouped(
             filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),

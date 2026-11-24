@@ -8,16 +8,18 @@ void main() {
     bool has64Bit = true,
   }) => tierFor(lowRam: lowRam, totalMb: totalMb, has64Bit: has64Bit);
 
-  test('little memory, a low-RAM flag or 32-bit only means the low tier', () {
+  test('4 GB or less, a low-RAM flag or 32-bit only means the low tier', () {
     expect(tier(totalMb: 2048), DeviceTier.low);
-    expect(tier(totalMb: 2500), DeviceTier.low);
+    // A 4 GB phone reports a little under 4096 MB.
+    expect(tier(totalMb: 3700), DeviceTier.low);
+    expect(tier(totalMb: 4200), DeviceTier.low);
     expect(tier(totalMb: 8000, lowRam: true), DeviceTier.low);
     expect(tier(totalMb: 8000, has64Bit: false), DeviceTier.low);
   });
 
   test('mid-range memory is the standard tier', () {
-    expect(tier(totalMb: 2501), DeviceTier.standard);
-    expect(tier(totalMb: 4096), DeviceTier.standard);
+    expect(tier(totalMb: 4201), DeviceTier.standard);
+    expect(tier(totalMb: 5600), DeviceTier.standard);
     expect(tier(totalMb: 5999), DeviceTier.standard);
   });
 

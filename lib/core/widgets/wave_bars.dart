@@ -2,6 +2,8 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import 'light_effects.dart';
+
 /// A few sound bars that rise and fall while [playing], like a small level
 /// meter. They are a sign that music is running, not a reading of the actual
 /// audio. Paused, or with reduced motion on, they rest at a fixed height.
@@ -30,8 +32,13 @@ class _WaveBarsState extends State<WaveBars>
     duration: const Duration(milliseconds: 1400),
   );
 
+  bool get _moving =>
+      widget.playing &&
+      !MediaQuery.disableAnimationsOf(context) &&
+      !LightEffects.of(context);
+
   void _sync() {
-    final animate = widget.playing && !MediaQuery.disableAnimationsOf(context);
+    final animate = _moving;
     if (animate && !_controller.isAnimating) {
       _controller.repeat();
     } else if (!animate && _controller.isAnimating) {
@@ -59,7 +66,7 @@ class _WaveBarsState extends State<WaveBars>
 
   @override
   Widget build(BuildContext context) {
-    final moving = widget.playing && !MediaQuery.disableAnimationsOf(context);
+    final moving = _moving;
     return ExcludeSemantics(
       // Repaints only this small area as the bars move.
       child: RepaintBoundary(

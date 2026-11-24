@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/theme/cover_accent.dart';
 import '../core/theme/noc_theme.dart';
 import '../features/settings/settings_controller.dart';
+import '../core/widgets/light_effects.dart';
 import 'app_shell.dart';
+import 'device_profile.dart';
 
 class NocTuneApp extends ConsumerWidget {
   const NocTuneApp({super.key});
@@ -32,6 +34,8 @@ class NocTuneApp extends ConsumerWidget {
       // Slow enough that the accent glides from one cover's colour to the next.
       themeAnimationDuration: const Duration(milliseconds: 450),
       themeAnimationCurve: Curves.easeInOut,
+      builder: (context, child) =>
+          LightEffects(on: ref.watch(lightEffectsProvider), child: child!),
       home: const AppShell(),
     );
   }

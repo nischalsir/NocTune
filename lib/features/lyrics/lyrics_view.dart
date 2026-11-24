@@ -672,8 +672,8 @@ class _SyncedLyricsState extends ConsumerState<_SyncedLyrics>
     final playing = ref.watch(
       playbackStateProvider.select((state) => state.value?.playing ?? false),
     );
-    // Out-of-focus lines are left out on devices short of memory.
-    final soften = ref.watch(deviceTierProvider) != DeviceTier.low;
+    // Out-of-focus lines are left out with lighter effects.
+    final soften = !ref.watch(lightEffectsProvider);
     ref
       ..listen(lyricsPositionProvider, (_, position) {
         _reported = position.value ?? _reported;

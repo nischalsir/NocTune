@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 
 import '../theme/noc_palette.dart';
+import 'light_effects.dart';
 
 /// The frosted-glass finish used on buttons: a fully rounded shape with a
 /// soft top-lit translucent fill and a hairline rim.
@@ -56,7 +57,9 @@ class Frosted extends StatelessWidget {
     }
 
     final surface = DecoratedBox(decoration: decoration, child: child);
-    if (!blurBackdrop || highContrast) return surface;
+    if (!blurBackdrop || highContrast || LightEffects.of(context)) {
+      return surface;
+    }
     return ClipPath(
       clipper: const ShapeBorderClipper(shape: StadiumBorder()),
       child: BackdropFilter(

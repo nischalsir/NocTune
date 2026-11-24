@@ -14,6 +14,7 @@ class AppSettings {
     this.foldNavigationOnScroll = true,
     this.waveSeekBar = true,
     this.navigationGlassClarity = defaultGlassClarity,
+    this.lightEffects,
   });
 
   final ThemeMode themeMode;
@@ -38,6 +39,9 @@ class AppSettings {
   /// behind it is a soft blur) to 1 (clear: it shows through).
   final double navigationGlassClarity;
 
+  /// Lighter effects as the user chose them; null follows the device.
+  final bool? lightEffects;
+
   /// Frosted enough that list text behind the bar doesn't compete with its
   /// labels, clear enough to still read as glass.
   static const defaultGlassClarity = 0.55;
@@ -51,6 +55,7 @@ class AppSettings {
     bool? foldNavigationOnScroll,
     bool? waveSeekBar,
     double? navigationGlassClarity,
+    bool? lightEffects,
   }) => AppSettings(
     themeMode: themeMode ?? this.themeMode,
     accent: accent ?? this.accent,
@@ -61,6 +66,7 @@ class AppSettings {
     waveSeekBar: waveSeekBar ?? this.waveSeekBar,
     navigationGlassClarity:
         navigationGlassClarity ?? this.navigationGlassClarity,
+    lightEffects: lightEffects ?? this.lightEffects,
   );
 }
 
@@ -73,6 +79,7 @@ class SettingsController extends Notifier<AppSettings> {
   static const _foldNavigationKey = 'fold_navigation_on_scroll';
   static const _waveSeekBarKey = 'wave_seek_bar';
   static const _glassClarityKey = 'navigation_glass_clarity';
+  static const _lightEffectsKey = 'light_effects';
 
   /// Smallest and largest lyrics text multipliers offered.
   static const minLyricsScale = 0.7;
@@ -99,7 +106,13 @@ class SettingsController extends Notifier<AppSettings> {
           (prefs.getDouble(_glassClarityKey) ?? AppSettings.defaultGlassClarity)
               .clamp(AppSettings.minGlassClarity, 1.0)
               .toDouble(),
+      lightEffects: prefs.getBool(_lightEffectsKey),
     );
+  }
+
+  void setLightEffects(bool enabled) {
+    ref.read(sharedPreferencesProvider).setBool(_lightEffectsKey, enabled);
+    state = state.copyWith(lightEffects: enabled);
   }
 
   void setThemeMode(ThemeMode mode) {

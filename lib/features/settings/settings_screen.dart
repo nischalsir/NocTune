@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../app/device_profile.dart';
 import '../../app/providers.dart';
 import '../../core/format.dart';
 import '../../core/theme/noc_palette.dart';
@@ -225,6 +226,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                           ),
                       ],
                     ),
+                  ),
+                  _SwitchTile(
+                    icon: Icons.speed_rounded,
+                    title: 'Lighter effects',
+                    subtitle:
+                        'Less blur and background motion, for smoother '
+                        'scrolling on older phones',
+                    value: ref.watch(lightEffectsProvider),
+                    onChanged: controller.setLightEffects,
                   ),
                 ],
               ),
